@@ -36,7 +36,7 @@ GENERATION = "a" * 64
 
 
 @pytest.mark.parametrize(
-    "historical,ephemeral", [(True, False), (False, False), (False, True)]
+    ("historical", "ephemeral"), [(True, False), (False, False), (False, True)]
 )
 def test_signed_source_renderer_preserves_its_complete_image_graph(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, historical: bool, ephemeral: bool
@@ -386,7 +386,8 @@ def test_carry_startup_failure_reports_and_allows_fresh_invocation(
 
 
 @pytest.mark.parametrize(
-    "channel,tag,wrong_tag", [("dev", "dev", "latest"), ("stable", "latest", "dev")]
+    ("channel", "tag", "wrong_tag"),
+    [("dev", "dev", "latest"), ("stable", "latest", "dev")],
 )
 def test_base_graph_uses_baseline_and_candidate_signed_images(
     tmp_path: Path,
@@ -588,7 +589,8 @@ def test_controller_health_failure_keeps_service_and_signer_logs_in_carry_report
             command[-4:] == ["--no-color", "--tail", "80", service] for command in calls
         )
     job_log = capsys.readouterr().err
-    assert "signer failure 0" in job_log and "private key decode failed" in job_log
+    assert "signer failure 0" in job_log
+    assert "private key decode failed" in job_log
     assert "diagnostic-test-secret" not in job_log + output.read_text()
 
 

@@ -26,7 +26,7 @@ def test_a_retired_word_is_not_a_state_the_cli_knows() -> None:
 
 
 def test_an_accepted_cancel_is_observing_or_ended() -> None:
-    assert cli_states.CANCEL_ACCEPTED_STATES == {"observing", "cancelled"}
+    assert {"observing", "cancelled"} == cli_states.CANCEL_ACCEPTED_STATES
 
 
 def test_a_job_prepared_or_running_is_named_by_its_stage_or_state() -> None:

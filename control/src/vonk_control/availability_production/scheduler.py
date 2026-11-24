@@ -7,14 +7,19 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 from sqlalchemy import select
-from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 
-from ..categorized_errors import InvalidValue
-from ..models.jobs import Job
-from ..recipe_image_availability.contracts import OPERATION_KIND, REMOVE_OPERATION_KIND
-from ..recipe_image_availability.service import RecipeImageAvailabilityService
-from ..recipe_update_batches.contract import UPDATE_KIND
-from ..worker.memory_contract import WorkerMemoryComponent
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.contracts import (
+    OPERATION_KIND,
+    REMOVE_OPERATION_KIND,
+)
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_update_batches.contract import UPDATE_KIND
+from vonk_control.worker.memory_contract import WorkerMemoryComponent
 
 
 class RecipeImageAvailabilityScheduler:

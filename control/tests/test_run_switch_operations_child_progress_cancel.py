@@ -6,6 +6,7 @@ import errno
 import hashlib
 import json
 import uuid
+from collections.abc import Collection, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,7 @@ from pathlib import Path
 import httpx2
 import pytest
 from sqlalchemy import select, update
+
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -23,7 +25,12 @@ from vonk_control.models.execution import (
 )
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
-from vonk_control.operation_api.contracts import OperationQuery
+from vonk_control.operation_api.contracts import OperationProvider, OperationQuery
+from vonk_control.operation_api.providers import (
+    get_operation_from_providers,
+    merge_operation_providers,
+)
+from vonk_control.operation_api.responses import operation_detail_response
 from vonk_control.operations.contract import (
     OperationFailureEvidence,
     OperationRecoveryAction,
@@ -67,6 +74,7 @@ from .run_switch_operations_support import (
     _service,
     _target_copy_evidence,
 )
+from .test_run_switch_build_fencing import _direct_parent
 
 
 def test_artifact_child_checkpoint_advances_to_verify(
@@ -319,11 +327,19 @@ class _CountingPreviewLifecycle(RecipeOperationService):
         installation_id: str,
         alias: str,
         *,
+        released_run_ids: Collection[str] = (),
+        kept_run_ids: Collection[str] = (),
         profile_application_id: str | None = None,
+        excluded_profile_application_ids: Sequence[str] = (),
     ):
         self.previews += 1
         return self._inner.preview_run(
-            installation_id, alias, profile_application_id=profile_application_id
+            installation_id,
+            alias,
+            released_run_ids=released_run_ids,
+            kept_run_ids=kept_run_ids,
+            profile_application_id=profile_application_id,
+            excluded_profile_application_ids=excluded_profile_application_ids,
         )
 
     def __getattr__(self, name: str):
@@ -349,7 +365,7 @@ def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
         sessions,
         memory_floor_bytes=0,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
         artifact_phase_executor=RecordingArtifactExecutor(),
     )
@@ -473,12 +489,6 @@ def test_activity_provider_preserves_group_and_canonical_nested_progress(
 def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.operation_api.contracts import OperationProvider
-    from vonk_control.operation_api.providers import (
-        get_operation_from_providers,
-        merge_operation_providers,
-    )
-    from vonk_control.operation_api.responses import operation_detail_response
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -543,9 +553,6 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
 def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.operation_api.contracts import OperationProvider
-    from vonk_control.operation_api.providers import merge_operation_providers
-    from vonk_control.operation_api.responses import operation_detail_response
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -566,7 +573,8 @@ def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     valid, unreadable = operations
     with sessions.begin() as session:
         job = session.get(Job, unreadable.operation_id)
-        assert job is not None and isinstance(job.payload, dict)
+        assert job is not None
+        assert isinstance(job.payload, dict)
         persisted_payload = dict(job.payload)
         persisted_plan = persisted_payload.get("plan")
         assert isinstance(persisted_plan, dict)
@@ -625,7 +633,6 @@ def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
 def test_measured_operation_keeps_unknown_totals_and_failure_readable(
     tmp_path: Path, failed: bool
 ) -> None:
-    from vonk_control.operation_api.responses import operation_detail_response
 
     switch = _cold_compile_switch(tmp_path)
     _host_changes_during_compile(switch)  # held for a refresh: totals unknown
@@ -1014,7 +1021,8 @@ def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_pat
         reason="Different intent",
     )
     assert repeated.state == "cancelled"
-    assert repeated.result is not None and repeated.result.cancellation is not None
+    assert repeated.result is not None
+    assert repeated.result.cancellation is not None
     assert repeated.result.cancellation.reason == "Keep the current profile"
     request_key = str(uuid.uuid4())
     active = service.apply(
@@ -1043,7 +1051,7 @@ def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_pat
 
     # Cancellation is committed only together with an accepted Stop: a Stop
     # that cannot be admitted leaves the operation active and cancellable.
-    service.apply_stop = unavailable_stop  # type: ignore[method-assign]
+    service.apply_stop = unavailable_stop
     with pytest.raises(Exception) as _ending:
         service.cancel(
             active.operation_id,
@@ -1052,7 +1060,7 @@ def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_pat
             reason="Stop running",
         )
     assert service.get(active.operation_id).state != "cancelled"
-    service.apply_stop = original_apply_stop  # type: ignore[method-assign]
+    service.apply_stop = original_apply_stop
     stopped = service.cancel(
         active.operation_id,
         actor="admin",
@@ -1068,14 +1076,14 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
     tmp_path: Path,
     postgres_engine,
 ) -> None:
-    from .test_run_switch_build_fencing import _direct_parent
 
     sessions, planner, parent, request, selected = _direct_parent(
         tmp_path, postgres_engine
     )
     lifecycle = planner._lifecycle
     executor = planner._phase_executor
-    assert lifecycle is not None and executor is not None
+    assert lifecycle is not None
+    assert executor is not None
     with sessions() as session:
         job = session.get(Job, parent.operation_id)
         assert job is not None

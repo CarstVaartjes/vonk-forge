@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy import select
 
-from .models.jobs import ControlProcessHeartbeat
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_control.db.connections import build_engine, session_factory
+from vonk_control.models.jobs import ControlProcessHeartbeat
+from vonk_control.settings import Settings
 
 #: How recent the worker's readiness heartbeat must be to count as live.
 WORKER_READINESS_WINDOW_SECONDS = 30
@@ -47,16 +53,29 @@ def verify_worker_ready(
 
 
 def main() -> None:
-    from .db.connections import build_engine, session_factory
-    from .settings import Settings
-    from .worker.liveness import current_worker_instance_id
-
     settings = Settings.from_env_and_secrets()
     verify_worker_ready(
         session_factory(build_engine(settings.database_url, component="healthcheck")),
         process_instance_id=current_worker_instance_id(),
         now=datetime.now(UTC),
     )
+
+
+def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
+    """Identify one Linux process lifetime without persistent mutable state."""
+    boot_id = (proc_root / "sys/kernel/random/boot_id").read_text().strip()
+    process_stat = (proc_root / str(pid) / "stat").read_text().strip()
+    closing_parenthesis = process_stat.rfind(")")
+    fields_after_name = process_stat[closing_parenthesis + 2 :].split()
+    if closing_parenthesis < 1 or len(fields_after_name) < 20:
+        raise UnknownOutcomeError(
+            "worker process identity is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
+    start_ticks = fields_after_name[19]
+    pid_namespace = (proc_root / str(pid) / "ns/pid").stat().st_ino
+    material = f"{boot_id}\n{pid}\n{pid_namespace}\n{start_ticks}\n".encode()
+    return hashlib.sha256(material).hexdigest()
 
 
 if __name__ == "__main__":

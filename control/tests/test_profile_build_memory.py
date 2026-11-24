@@ -7,10 +7,11 @@ from uuid import UUID, uuid4, uuid5
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.inventory.items import runtime_value
 from vonk_control.inventory.repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
@@ -74,7 +75,9 @@ def _accepted_build_profile(
         snapshot = session.scalar(select(NodeInventorySnapshot))
         node = session.get(AgentNode, nodes[0])
         build = session.scalar(select(RecipeBuild))
-        assert snapshot is not None and node is not None and build is not None
+        assert snapshot is not None
+        assert node is not None
+        assert build is not None
         revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
         session.execute(
@@ -186,7 +189,9 @@ def test_build_adoption_checks_input_identity_before_cached_or_active_result(
     with sessions.begin() as session:
         parent = session.get(Job, parent_id)
         build = session.get(RecipeBuild, selected.build_id)
-        assert parent is not None and parent.result is not None and build is not None
+        assert parent is not None
+        assert parent.result is not None
+        assert build is not None
         plan = RunSwitchPlan.model_validate_json(
             canonical_message(parent.payload["plan"]), strict=True
         )
@@ -271,7 +276,8 @@ def test_bound_build_preserves_the_profile_system_reserve(
                 ResourceReservation.kind == "unified-memory",
             )
         )
-        assert promise is not None and promise.state == "promised"
+        assert promise is not None
+        assert promise.state == "promised"
         builds = tuple(
             session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
         )
@@ -427,12 +433,10 @@ def test_bound_build_repairs_claims_and_preserves_current_intent(
                 ResourceReservation.kind == "unified-memory",
             )
         )
-        assert (
-            parent is not None
-            and node is not None
-            and snapshot is not None
-            and claim is not None
-        )
+        assert parent is not None
+        assert node is not None
+        assert snapshot is not None
+        assert claim is not None
         snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = 1_000
         if change == "amount":
             claim.amount_bytes += 1
@@ -469,13 +473,15 @@ def test_bound_build_repairs_claims_and_preserves_current_intent(
             )
             node = session.get(AgentNode, node_id)
             snapshot = session.scalar(select(NodeInventorySnapshot))
-            assert node is not None and snapshot is not None
+            assert node is not None
+            assert snapshot is not None
             node.workload_intent_ordinal -= 1 if change == "intent" else 0
             snapshot.memory_pool = "shared"
     child = build()
     with sessions() as session:
         jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.build.v1")))
-        assert len(jobs) == 1 and jobs[0].id == child.id
+        assert len(jobs) == 1
+        assert jobs[0].id == child.id
         if change not in ("cancelled", "phase"):
             claim = session.scalar(
                 select(ResourceReservation).where(
@@ -483,7 +489,8 @@ def test_bound_build_repairs_claims_and_preserves_current_intent(
                     ResourceReservation.kind == "unified-memory",
                 )
             )
-            assert claim is not None and claim.state == ReservationState.PROMISED
+            assert claim is not None
+            assert claim.state == ReservationState.PROMISED
             assert claim.amount_bytes == 225
 
 
@@ -504,10 +511,14 @@ def test_build_reconnects_after_child_commit_before_parent_checkpoint(
         return result
 
     monkeypatch.setattr(executor, "execute", crash_after_build)
-    with pytest.raises(SystemExit):
+
+    def expected_failure():
         for _ in range(12):
             profiles.tick()
             planner.tick()
+
+    with pytest.raises(SystemExit):
+        expected_failure()
     with sessions.begin() as session:
         child = session.scalar(select(Job).where(Job.kind == "recipe.build.v1"))
         assert child is not None
@@ -526,7 +537,8 @@ def test_build_reconnects_after_child_commit_before_parent_checkpoint(
             session.scalars(select(Job.id).where(Job.kind == "recipe.build.v1"))
         ) == (child_id,)
         parent = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
-        assert parent is not None and parent.result is not None
+        assert parent is not None
+        assert parent.result is not None
         assert parent.result["child_operation_id"] == child_id
 
 
@@ -550,10 +562,8 @@ def test_busy_build_claim_retries_without_releasing_the_parent_promise(
         claim_id = claim.id
         assert planner.tick()
         parent = planner.get(parent_id)
-        assert (
-            parent.result is not None
-            and parent.result.retry_reason == "build.capacity_busy"
-        )
+        assert parent.result is not None
+        assert parent.result.retry_reason == "build.capacity_busy"
         due = parent.next_attempt_at
         assert due is not None
         assert not planner.tick()
@@ -572,11 +582,9 @@ def test_busy_build_claim_retries_without_releasing_the_parent_promise(
             session.scalar(select(Job).where(Job.kind == "recipe.build.v1")) is not None
         )
         claim = session.get(ResourceReservation, claim_id)
-        assert (
-            claim is not None
-            and claim.owner_id == application_id
-            and claim.state == "promised"
-        )
+        assert claim is not None
+        assert claim.owner_id == application_id
+        assert claim.state == "promised"
 
 
 def test_profile_build_borrows_promise_and_preserves_it_for_runtime(
@@ -620,7 +628,8 @@ def test_profile_build_borrows_promise_and_preserves_it_for_runtime(
                 ResourceReservation.kind == "unified-memory",
             )
         )
-        assert promise is not None and promise.state == "promised"
+        assert promise is not None
+        assert promise.state == "promised"
         claim_id = promise.id
         totals = memory_reservations(session, node, memory_pool="shared")
         assert totals.committed_bytes_by_kind == {
@@ -642,7 +651,8 @@ def test_profile_build_borrows_promise_and_preserves_it_for_runtime(
     )
     with sessions() as session:
         promise = session.get(ResourceReservation, claim_id)
-        assert promise is not None and promise.owner_id == application_id
+        assert promise is not None
+        assert promise.owner_id == application_id
         assert promise.state == "promised"
         totals = memory_reservations(session, node, memory_pool="shared")
         assert totals.committed_bytes_by_kind == {

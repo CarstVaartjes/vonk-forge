@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.catalog import CatalogDocumentRevision
@@ -60,7 +61,8 @@ def _small(tmp_path: Path) -> Small:
     )
     with sessions.begin() as session:
         row = session.get(RecipeInstallation, installed.owner_id)
-        assert row is not None and row.model_content_sha256 is not None
+        assert row is not None
+        assert row.model_content_sha256 is not None
         revision = session.get(CatalogDocumentRevision, row.recipe_revision_id)
         assert revision is not None
         target, target_recipe = (
@@ -241,9 +243,13 @@ def test_a_profile_save_rewrites_its_recipes_in_the_same_flush(
             assert profiles_naming(session, profile_id=profile_id) == {
                 profile_id: frozenset({world.other_recipe[1:]})
             }
-        with pytest.raises((TypeError, ValueError)), world.sessions.begin() as session:
+
+        def expected_failure(session):
             profile = session.get(FleetProfile, profile_id)
             assert profile is not None
             profile.assignments = [{"recipe_selector": "Not A Selector"}]
+
+        with pytest.raises((TypeError, ValueError)), world.sessions.begin() as session:
+            expected_failure(session)
     finally:
         world.cache.close()

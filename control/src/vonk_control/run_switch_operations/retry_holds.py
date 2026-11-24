@@ -8,45 +8,45 @@ from typing import (
 )
 from typing import cast as typing_cast
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from vonk_control.run_switch_operations.results import _persisted_result
-
-from ..bounded_json import require_integer
-from ..jobs import states as job_states
-from ..lifecycle.run_switch import (
-    RunSwitchAdapter,
-)
-from ..lifecycle.types import (
-    State as _LifecycleState,
-)
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..run_switch_contract.operations import (
+from vonk_control.bounded_json import require_integer
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.run_switch_contract.operations import (
     RunSwitchAwaitedInventory,
     RunSwitchOperationResult,
 )
-from ..stored.json_values import read_row_column
-from .constants import (
+from vonk_control.run_switch_contract.progress_view import _observe_progress
+from vonk_control.run_switch_operations.constants import (
     _INSTALL_PREFLIGHT_REFRESH_REASON,
     _LOGGER,
     _OBSERVING,
     _TERMINAL_STATES,
 )
-from .errors import RunSwitchIssuedWorkloadPending
-from .ownership import _checkpoint_matches, _complete_cancellation
-from .planning_helpers import _aware, _now, _run_switch_payload, _start_parent
-from .provider import _ADAPTER
-from .result_helpers import _observe_progress, _read_progress
+from vonk_control.run_switch_operations.errors import RunSwitchIssuedWorkloadPending
+from vonk_control.run_switch_operations.ownership import (
+    _checkpoint_matches,
+    _complete_cancellation,
+)
+from vonk_control.run_switch_operations.planning_helpers import (
+    _aware,
+    _now,
+    _start_parent,
+)
+from vonk_control.run_switch_operations.provider import _ADAPTER
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class RetryHoldsMixin:
@@ -61,28 +61,6 @@ class RetryHoldsMixin:
         except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError):
             return False
         return assessment.allowed and assessment.disposition == "abandon"
-
-    @staticmethod
-    def _scope_intent_status(session: Session, job: Job) -> str:
-        """Distinguish malformed authority from a later authorized node head."""
-
-        parent = _run_switch_payload(job)
-        ordinal = parent.workload_intent_ordinal if parent is not None else None
-        if type(ordinal) is not int or ordinal < 1:
-            return "invalid"
-        nodes = session.scalars(
-            select(AgentNode).where(AgentNode.node_id.in_(job.targets))
-        )
-        current = list(nodes)
-        if any(node.revoked_at is not None for node in current):
-            return "invalid"
-        if len(current) != len(job.targets):
-            return "missing-target"
-        if any(node.state != NodeIdentityState.ACTIVE for node in current):
-            return "waiting"
-        if any(node.workload_intent_ordinal != ordinal for node in current):
-            return "superseded"
-        return "current"
 
     def _hold_start_observation(
         self,

@@ -5,11 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from pydantic import BaseModel
-from vonk_agent_protocol.package_source import AgentPackageSource
 
-from ..models.jobs import Job
-from ..strict_json import read_stored_model
-from .contract import AgentUpgradePackage, AgentUpgradeRolloutResult
+from vonk_agent_protocol.package_source import AgentPackageSource
+from vonk_control.agent_upgrades.contract import (
+    AgentUpgradePackage,
+    AgentUpgradeRolloutResult,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.strict_json import read_stored_model
 
 
 def _stored_field[T: BaseModel](
@@ -23,7 +26,7 @@ def _stored_field[T: BaseModel](
     """
 
     document = (
-        parent.payload.get(field) if isinstance(parent.payload, Mapping) else None
+        parent.payload.get(field) if isinstance(parent.payload, Mapping) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
     )
     if key is not None:
         document = document.get(key) if isinstance(document, Mapping) else None
@@ -46,7 +49,7 @@ def _stored_source(parent: Job, node_id: str) -> AgentPackageSource | None:
 def _stored_node_order(parent: Job) -> list[str] | None:
     order = (
         parent.payload.get("node_order")
-        if isinstance(parent.payload, Mapping)
+        if isinstance(parent.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         else None
     )
     if not isinstance(order, list) or not all(isinstance(node, str) for node in order):

@@ -15,15 +15,6 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from vonk_agent_protocol.reason_codes.catalog import LibraryProjectionCode
-from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
-from vonk_agent_protocol.state_machines import (
-    InstallationState,
-    PlacementInstallState,
-    PlacementLoadState,
-    RunState,
-    machine_adopter,
-)
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
@@ -34,29 +25,39 @@ from vonk_forge_contracts import (
 from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
-from ..catalog.revision_contract import (
+from vonk_agent_protocol.reason_codes.catalog import LibraryProjectionCode
+from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
+from vonk_agent_protocol.state_machines import (
+    InstallationState,
+    PlacementInstallState,
+    PlacementLoadState,
+    RunState,
+    machine_adopter,
+)
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
-from ..cursor_contract import MAX_CURSOR_LENGTH
-from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
-from ..machine_states import InstallationStateField, RouteStateField, RunStateField
-from ..model_cache import states as model_cache_states
-from ..model_cache.contract import (
+from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
+from vonk_control.identifiers import UuidId
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from vonk_control.machine_states import (
+    InstallationStateField,
+    RouteStateField,
+    RunStateField,
+)
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.contract import (
     CacheOperationKind,
     ModelCacheOperationState,
     ModelCacheUsage,
     ModelStorageObservation,
 )
-from ..operations.blockers import MAX_BLOCKERS, OperationBlocker
-from ..run_switch_contract.evidence import RunSwitchReason, SparkFit
-from ..run_switch_contract.requests import SparkGroup
-from ..strict_json import StrictModel
+from vonk_control.operations.blockers import MAX_BLOCKERS, OperationBlocker
+from vonk_control.run_switch_contract.evidence import RunSwitchReason, SparkFit
+from vonk_control.run_switch_contract.requests import SparkGroup
+from vonk_control.strict_json import StrictModel
 
-_UUID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 _IMAGE_DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
@@ -73,7 +74,6 @@ _MAX_NODE_ARTIFACTS_PER_NODE = 512
 _MAX_PROJECTED_CAPABILITIES = 64
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 
-UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 Digest = Annotated[str, StringConstraints(pattern=_DIGEST_PATTERN)]
 ImageDigest = Annotated[str, StringConstraints(pattern=_IMAGE_DIGEST_PATTERN)]

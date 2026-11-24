@@ -10,24 +10,25 @@ import json
 from enum import Enum
 from pathlib import Path
 
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
-
 from cluster_profiles.generated_control.models.reason_code_vocabulary import (
     ReasonCodeVocabulary as GeneratedVocabulary,
 )
+from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
+from vonk_agent_protocol.wire_model import canonical_message
 
 
 def test_reason_producer_store_generated_consumer_roundtrip(tmp_path: Path) -> None:
     defaults = {}
     for name, field in ReasonCodeVocabulary.model_fields.items():
         enum = field.annotation
-        assert isinstance(enum, type) and issubclass(enum, Enum)
+        assert isinstance(enum, type)
+        assert issubclass(enum, Enum)
         defaults[name] = next(iter(enum))
     record = tmp_path / "reasons.json"
     for name, field in ReasonCodeVocabulary.model_fields.items():
         enum = field.annotation
-        assert isinstance(enum, type) and issubclass(enum, Enum)
+        assert isinstance(enum, type)
+        assert issubclass(enum, Enum)
         for member in enum:
             producer = ReasonCodeVocabulary.model_validate({**defaults, name: member})
             record.write_bytes(canonical_message(producer))

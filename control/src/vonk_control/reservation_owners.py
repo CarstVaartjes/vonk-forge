@@ -15,10 +15,10 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.state_machines import ReservationState
 
-from .models.execution import ResourceReservation
-from .owner_liveness import OwnerKind, OwnerRef, owner
+from vonk_agent_protocol.state_machines import ReservationState
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 
 __all__ = [
     "ReservationOwner",

@@ -18,13 +18,12 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-
-from .adapter import KindAdapter
-from .core import transition
-from .types import (
+from vonk_control.lifecycle.adapter import KindAdapter
+from vonk_control.lifecycle.core import transition
+from vonk_control.lifecycle.types import (
     Command,
     Effect,
     Event,
@@ -83,7 +82,7 @@ class Settled:
 def settle(
     row: Lifecycle,
     event: Event,
-    adapter: KindAdapter,
+    adapter: KindAdapter[Any],
     now: datetime,
     *,
     save: Callable[[Lifecycle, Lifecycle], bool],
@@ -119,7 +118,7 @@ def settle(
 def _run(
     command: Command,
     row: Lifecycle,
-    adapter: KindAdapter,
+    adapter: KindAdapter[Any],
     residue: Callable[[Lifecycle, str], None],
 ) -> Observed | None:
     """Run one command; an executor failure is an unknown, never a raise."""
@@ -148,13 +147,13 @@ def _run(
     return None
 
 
-class Reconciler:
+class Reconciler[RowT]:
     """``reconcile(limit)``: one pass over the due rows."""
 
     def __init__(
         self,
         store: LifecycleStore,
-        adapters: Mapping[str, KindAdapter],
+        adapters: Mapping[str, KindAdapter[RowT]],
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         enabled: bool = False,

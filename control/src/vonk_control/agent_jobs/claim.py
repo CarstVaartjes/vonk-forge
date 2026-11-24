@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, select
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import (
     AgentClaim,
-    AgentOperation,
     AgentProgress,
+    AgentUpgradePayload,
     canonical_payload,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -23,56 +26,68 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitReason,
 )
-
-from .. import agent_operation_states
-from ..agent_operation_facts import (
-    RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.claim_authority import (
+    dispatch_wait,
+    recipe_build_disk_wait,
 )
-from ..agent_operation_facts import (
-    attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
-)
-from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
-from ..agent_operation_facts import aware as _aware
-from ..auth import AgentSource
-from ..categorized_errors import InvalidValue
-from ..inventory.items import inventory_items, runtime_value
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.evidence import Residue
-from ..lifecycle.types import CancelRequested, Outcome, Reported
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..operations.progress import stored_progress
-from ..own_cleanup import CLEANUP_KINDS
-from ..persisted_waits import schedule_wait
-from ..recovery_policy import WAIT_STEP
-from .claim_authority import dispatch_wait, recipe_build_disk_wait
-from .claim_reconcile import _first_claimable_id
-from .contracts import (
+from vonk_control.agent_jobs.claim_reconcile import _first_claimable_id
+from vonk_control.agent_jobs.contracts import (
     _MUTATING_OPERATIONS,
     CLAIM_LEASE_SECONDS,
-    fencing_intent,
     mutations_conflict,
 )
-from .endings import end_unobserved_order
-from .evidence import (
+from vonk_control.agent_jobs.endings import end_unobserved_order
+from vonk_control.agent_jobs.evidence import (
     _exact_service_stop_receipt_covers_start,
     _lease_expiry_reason,
     _profile_stop_covers_jobrun_mutations,
 )
-from .predicates import _anchor_start_budget, _claim_predicate, _claim_refusal_reason
-from .retry import (
+from vonk_control.agent_jobs.predicates import (
+    _anchor_start_budget,
+    _claim_predicate,
+    _claim_refusal_reason,
+)
+from vonk_control.agent_jobs.retry import (
     _parked_retry_evidence,
     _renew_distribution_grant,
     _retry_not_authorized_for_current_attempt,
     agent_upgrade_in_flight_on_spark,
 )
-from .stored import column_field, column_is_document, column_value
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_operation_facts import (
+    RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
+)
+from vonk_control.agent_operation_facts import (
+    attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
+)
+from vonk_control.agent_operation_facts import (
+    attempt_holds_order as _attempt_holds_order,
+)
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_operation_facts import fencing_intent
+from vonk_control.auth import AgentSource
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.inventory.items import inventory_items, runtime_value
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.types import CancelRequested, Outcome, Reported
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.operations.progress import stored_progress
+from vonk_control.own_cleanup import CLEANUP_KINDS
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recovery_policy import WAIT_STEP
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def _claim_once(
@@ -219,7 +234,6 @@ def _claim_once(
         self._reconcile_agent_upgrade(
             session,
             node_id,
-            certificate.serial,
             now,
             runtime_identity,
             operation_id=upgrade_id,
@@ -519,6 +533,7 @@ def _claim_once(
                 )
                 return None
         resumable_progress = None
+        previous: AgentOperationAttempt | None = None
         if operation.current_attempt:
             previous = session.scalar(
                 select(AgentOperationAttempt)
@@ -612,10 +627,6 @@ def _claim_once(
                     parent.status_reason = operation.status_reason
                 return None
         if operation.kind == AgentOperation.AGENT_UPGRADE.value:
-            import secrets
-
-            from vonk_agent_protocol.contracts import AgentUpgradePayload
-
             payload = column_value(operation, "payload")
             if not isinstance(payload, AgentUpgradePayload):
                 return None  # the damaged-payload ending above already owns this case

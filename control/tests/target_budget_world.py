@@ -17,7 +17,7 @@ import hashlib
 import itertools
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -29,6 +29,8 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.model_cache.contract import CacheManifest
 from vonk_control.model_cache.service import ModelCacheService
@@ -51,7 +53,6 @@ from vonk_control.recipe_operations.execution_contract import (
     parse_stored_installation_plan,
 )
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .recipe_image_availability_support import _availability_payload
 from .recipe_operations_support import NOW, installed_recipe, setup_services
@@ -75,7 +76,7 @@ SPARK_OBJECTS = 20
 
 
 @contextmanager
-def ordered_ids() -> Iterator[None]:
+def ordered_ids() -> Generator[None]:
     """``uuid.uuid4`` hands out decreasing ids while the worlds exist.
 
     SQLite takes one step more when an index scan stops at a following entry
@@ -354,7 +355,8 @@ def _unrelated_history(
             )
         real = session.get(RecipeInstallation, target_installation)
         real_build = session.get(RecipeBuild, real.recipe_build_id) if real else None
-        assert real is not None and real.model_content_sha256 is not None
+        assert real is not None
+        assert real.model_content_sha256 is not None
         assert real_build is not None
         build_columns = {
             column.name: getattr(real_build, column.name)
@@ -375,7 +377,8 @@ def _unrelated_history(
             )
         }
         target_revision = session.get(CatalogDocumentRevision, real.recipe_revision_id)
-        assert target_revision is not None and target_revision.content_digest
+        assert target_revision is not None
+        assert target_revision.content_digest
         # The target recipe's own measured peaks; every other content has one too.
         session.add_all(
             MeasuredRolePeak(
@@ -543,8 +546,10 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
     with sessions() as session:
         row = session.get(RecipeInstallation, installed.owner_id)
         build = session.get(RecipeBuild, build_id)
-        assert row is not None and row.model_content_sha256 is not None
-        assert build is not None and build.oci_layout_sha256 is not None
+        assert row is not None
+        assert row.model_content_sha256 is not None
+        assert build is not None
+        assert build.oci_layout_sha256 is not None
         target, archive = row.model_content_sha256, build.oci_layout_sha256
         revision = session.get(CatalogDocumentRevision, row.recipe_revision_id)
         assert revision is not None

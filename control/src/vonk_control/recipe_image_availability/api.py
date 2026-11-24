@@ -2,163 +2,62 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
-    field_validator,
-    model_validator,
 )
-from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
-    LifecycleState,
     WaitReason,
 )
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from vonk_control.lifecycle.evidence import Residue
+from vonk_control.auth import MUTATION_ROLES
+from vonk_control.bounded_json import require_integer, require_sequence
+from vonk_control.cache_removal_review import CacheRemovalReview
+from vonk_control.logging import redact_text
+from vonk_control.model_cache.contract import UUID_PATTERN
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.operator_acceptance import (
+    OperatorReceiptResolver,
+    operator_acceptance,
+)
 from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..auth import MUTATION_ROLES
-from ..bounded_json import require_integer, require_sequence
-from ..cache_removal_review import CacheRemovalReview
-from ..logging import redact_text
-from ..model_cache.contract import UUID_PATTERN, Digest
-from ..operation_api.contracts import bounded_error_responses
-from ..operations.blockers import OperationBlocker
-from ..operations.contract import (
-    AvailabilityOperationFailure,
-    AvailabilityRecoveryAction,
-)
-from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
-from ..recipe_operations.availability_intent import RecipeAvailabilityIntent
-from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_batches.contract import RecipeUpdateRequest, RecipeUpdateResponse
-from ..strict_json import StrictJSONModel, read_stored_model
-from .availability_contract import (
-    RecipeImageAvailabilityArtifact,
-    RecipeImageAvailabilityState,
-)
-from .contracts import (
+from vonk_control.recipe_image_availability.contracts import (
     SOURCE_POLICY_REFUSED_CODE,
     RecipeImageAvailabilityError,
 )
-from .removal_contract import RecipeRemovalUnavailableView
-from .service import RecipeImageAvailabilityService
-from .view_contract import (
+from vonk_control.recipe_image_availability.removal_contract import (
+    RecipeRemovalUnavailableView,
+)
+from vonk_control.recipe_image_availability.response_contract import (
+    RecipeImageAvailabilityAction,
+    RecipeImageAvailabilityChild,
+    RecipeImageAvailabilityChildKind,
+    RecipeImageAvailabilityResponse,
+    RecipeImageAvailabilityResult,
+    RecipeOperatorResponse,
+    RecipeOperatorState,
+)
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
-
-# One named type per closed set, shared by the contract field and every
-# helper that produces the value, so the vocabulary cannot drift apart.
-RecipeImageAvailabilityKind = Literal["recipe.image.availability.v2"]
-RecipeImageAvailabilityChildKind = Literal["model-cache", "runtime-image"]
-RecipeOperatorState = Literal[
-    "accepted",
-    LifecycleState.QUEUED,
-    LifecycleState.RUNNING,
-    LifecycleState.BACKOFF,
-    LifecycleState.SUCCEEDED,
-    LifecycleState.FAILED,
-    LifecycleState.CANCELLED,
-]
-RecipeOperatorAction = Literal["remove"]
-
-
-class RecipeImageAvailabilityChild(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    kind: RecipeImageAvailabilityChildKind
-    id: str
-    request_key: str | None = None
-    state: RecipeImageAvailabilityState
-    artifact_set_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    plan_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    model_content_digests: list[Digest]
-    artifacts: list[RecipeImageAvailabilityArtifact] = Field(default_factory=list)
-    progress: OperationProgress
-    failure: AvailabilityOperationFailure | None = None
-
-
-class RecipeImageAvailabilityAction(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    key: AvailabilityRecoveryAction
-
-    @field_validator("key", mode="before")
-    @classmethod
-    def parse_key(cls, value: object) -> object:
-        if isinstance(value, AvailabilityRecoveryAction):
-            return value
-        try:
-            return AvailabilityRecoveryAction(value)
-        except (TypeError, ValueError) as error:
-            raise ValueError("key contains an invalid action") from error
-
-
-class RecipeImageAvailabilityResult(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    schema_version: Literal[2] = 2
-    recipe_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    model_digest: str | None = None
-    model_child_id: str | None = None
-    artifact_set_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    model_content_digests: list[Digest]
-    build_input_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    image_digest: str = Field(min_length=1, max_length=256)
-    local_image_config_id: str | None = None
-    oci_archive_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    image_bytes: int = Field(ge=1)
-    build_id: str | None = None
-
-
-class RecipeImageAvailabilityResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    id: str = Field(min_length=1, max_length=128)
-    request_id: str = Field(min_length=1, max_length=128)
-    request: RecipeAvailabilityIntent | None
-    kind: RecipeImageAvailabilityKind
-    state: RecipeImageAvailabilityState
-    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
-    recipe_revision_id: str | None
-    recipe_content_sha256: str | None
-    progress: OperationProgress | None
-    children: list[RecipeImageAvailabilityChild] = Field(default_factory=list)
-    result: RecipeImageAvailabilityResult | None = None
-    failure: AvailabilityOperationFailure | None = None
-    cancellation: RecipeOperationCancellationResult | None = None
-    actions: list[RecipeImageAvailabilityAction] = Field(default_factory=list)
-    #: What a queued or blocked preparation is waiting for, as of its latest check.
-    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
-    next_attempt_at: str | None = None
-    created_at: str
-    updated_at: str
-    residue: Residue | None = None
-
-    @model_validator(mode="after")
-    def terminal_evidence_is_consistent(self) -> RecipeImageAvailabilityResponse:
-        if (
-            self.state == "succeeded"
-            and self.residue is None
-            and (self.result is None or self.failure is not None)
-        ):
-            raise ValueError(
-                "successful image availability requires a result and no failure"
-            )
-        if self.state == "failed" and self.failure is None and self.residue is None:
-            raise ValueError("failed image availability requires failure evidence")
-        if self.state != "succeeded" and self.result is not None:
-            raise ValueError("image availability result requires success")
-        return self
+from vonk_control.recipe_update_batches.contract import (
+    RecipeUpdateRequest,
+    RecipeUpdateResponse,
+)
+from vonk_control.strict_json import StrictJSONModel, read_stored_model
 
 
 class RecipeDownloadRequest(StrictJSONModel):
@@ -175,44 +74,6 @@ class RecipeOperatorRequest(RecipeDownloadRequest):
 
 class RecipeCancellationRequest(RecipeDownloadRequest):
     reason: str = Field(min_length=1, max_length=512)
-
-
-class RecipeOperatorResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    action: RecipeOperatorAction
-    selector: str = Field(min_length=1, max_length=256)
-    request_key: str = Field(min_length=1, max_length=128)
-    operation_id: str = Field(min_length=1, max_length=128)
-    recipe_revision_id: str = Field(min_length=1, max_length=128)
-    with_model: bool
-    state: RecipeOperatorState
-    progress: OperationProgress
-    reclaimed_bytes: int = Field(ge=0)
-    preserved: list[str] = Field(default_factory=list, max_length=32)
-    next_actions: list[str] = Field(default_factory=list, max_length=32)
-    cancelled_operations: list[str] = Field(default_factory=list, max_length=32)
-    cancelled_builds: list[str] = Field(default_factory=list, max_length=32)
-    model_removals: list[str] = Field(default_factory=list, max_length=32)
-    failure: AvailabilityOperationFailure | None = None
-
-    @model_validator(mode="after")
-    def terminal_removal_evidence_is_consistent(self) -> RecipeOperatorResponse:
-        if self.state == "succeeded":
-            if (
-                self.failure is not None
-                or self.progress.phase != ProgressPhase.COMPLETED
-            ):
-                raise ValueError(
-                    "successful recipe removal requires completed progress and no failure"
-                )
-        elif self.progress.phase == ProgressPhase.COMPLETED:
-            raise ValueError(
-                "unfinished recipe removal cannot report completed progress"
-            )
-        if self.state == "failed" and self.failure is None:
-            raise ValueError("failed recipe removal requires failure evidence")
-        return self
 
 
 RecipeOperationResponse = (
@@ -427,8 +288,6 @@ def install_recipe_operator_routes(
 ) -> None:
     """Install current singular Recipe download/remove/update mutations."""
 
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
-
     _ADMIN_OPERATION_IDS.update(RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS)
 
     def removal_document(result: RecipeCacheRemovalStatus) -> RecipeOperatorResponse:
@@ -597,7 +456,7 @@ def install_recipe_operator_routes(
     def download(
         body: RecipeDownloadRequest,
         _request: Request,
-        selector: str = Path(min_length=1, max_length=256),
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Any = actor_dependency,
     ) -> RecipeImageAvailabilityResponse:
         _mutating(actor, "/api/recipe/{selector:path}/download")
@@ -629,7 +488,7 @@ def install_recipe_operator_routes(
     def remove(
         body: RecipeOperatorRequest,
         _request: Request,
-        selector: str = Path(min_length=1, max_length=256),
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Any = actor_dependency,
     ) -> RecipeOperatorResponse:
         _mutating(actor, "/api/recipe/{selector:path}/remove")
@@ -658,8 +517,8 @@ def install_recipe_operator_routes(
     )
     def review_remove(
         _request: Request,
-        selector: str = Path(min_length=1, max_length=256),
-        with_model: bool = Query(...),
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
+        with_model: Annotated[bool, Query()],
         actor: Any = actor_dependency,
     ) -> CacheRemovalReview:
         _mutating(actor, "/api/recipe/{selector:path}/remove")
@@ -710,9 +569,7 @@ def install_recipe_operator_routes(
 __all__ = [
     "RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS",
     "RecipeDownloadRequest",
-    "RecipeImageAvailabilityResponse",
     "RecipeOperationResponse",
     "RecipeOperatorRequest",
-    "RecipeOperatorResponse",
     "install_recipe_operator_routes",
 ]

@@ -7,12 +7,12 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import case
 
-from ..fleet_profile_contract.applications import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationIntent,
 )
-from ..models.fleet import FleetProfileApplication
-from . import states as fleet_profile_states
-from .dependencies import _PROFILE_ACTIVITY_ACTIVE_STATES
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.dependencies import _PROFILE_ACTIVITY_ACTIVE_STATES
+from vonk_control.models.fleet import FleetProfileApplication
 
 
 def _profile_activity_pending(state, cancellation_state):

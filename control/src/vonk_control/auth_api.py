@@ -9,18 +9,20 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
-from vonk_agent_protocol.http_failure import TransientReason
 
-from .auth import ADMIN_ROLE, Actor, AdministratorRole, TokenCodec
-from .browser_auth import (
+from vonk_agent_protocol.http_failure import TransientReason
+from vonk_control.auth import ADMIN_ROLE, Actor, AdministratorRole, TokenCodec
+from vonk_control.browser_auth import (
     BrowserAuthenticationError,
     BrowserAuthenticationThrottledError,
     BrowserAuthService,
     BrowserIdentity,
 )
-from .http_errors import temporary_http_answer
-from .operator_acceptance import security_edge
-from .operator_receipt_contract import SecurityEdge
+from vonk_control.http_errors import temporary_http_answer
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operator_acceptance import security_edge
+from vonk_control.operator_receipt_contract import SecurityEdge
 
 _COOKIE_MAX_AGE = 43_200
 _CLI_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
@@ -75,8 +77,6 @@ def install_auth_routes(
     tokens: TokenCodec,
     now: Callable[[], int],
 ) -> None:
-    from .operation_api.constants import _ADMIN_OPERATION_IDS
-    from .operation_api.contracts import bounded_error_responses
 
     _ADMIN_OPERATION_IDS.update(
         {

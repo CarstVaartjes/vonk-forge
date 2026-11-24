@@ -14,15 +14,15 @@ from typing import Any, TypedDict, Unpack
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
+from sqlalchemy.orm import make_transient
 from starlette.types import Message
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     HostRuntimeRequest,
     InstallVonkDebOperation,
-    RecipeReconciliationIdentity,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
@@ -34,6 +34,10 @@ from vonk_agent_protocol.inventory import (
     NetworkInterface,
 )
 from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
+from vonk_agent_protocol.recipe_operations import RecipeReconciliationIdentity
+from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_api import observations
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -42,6 +46,13 @@ from vonk_control.models.execution import InstallationNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
+from vonk_control.run_switch_contract.operations import (
+    RunSwitchAwaitedInventory,
+    RunSwitchOperationResult,
+)
+from vonk_control.run_switch_operations.errors import (
+    RunSwitchPostStopEvidencePending,
+)
 from vonk_control.telemetry.samples import TelemetryRepository
 
 from .agent_api_support import (
@@ -54,6 +65,7 @@ from .agent_api_support import (
     telemetry_payload,
 )
 from .agent_fences import fenced_operation
+from .package_upgrade_fixtures import rollback_authority
 from .test_catalog_revision_collection import Catalog
 
 
@@ -62,7 +74,6 @@ def chunked_asgi_telemetry(
     *,
     extra_headers: tuple[tuple[bytes, bytes], ...],
 ) -> tuple[int, int]:
-    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
     async def request() -> tuple[int, int]:
         chunks = [
@@ -407,7 +418,8 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(
             select(NodeInventorySnapshot).where(NodeInventorySnapshot.node_id == NODE_B)
         )
         assert row is not None
-        assert row.fabric_address is None and row.fabric_bandwidth_mbps is None
+        assert row.fabric_address is None
+        assert row.fabric_bandwidth_mbps is None
         assert row.gpu_memory_total_bytes == 1000
 
     # The mandatory core stays strict.
@@ -459,7 +471,8 @@ def test_an_inventory_naming_installations_gets_the_controllers_verdict(
         },
     )
 
-    assert older.status_code == 204 and older.content == b""
+    assert older.status_code == 204
+    assert older.content == b""
     assert judged.status_code == 200
     verdict = InventoryVerdict.model_validate_json(judged.content)
     assert verdict.untracked_installations == [forgotten]
@@ -549,7 +562,8 @@ def test_agent_4xx_logs_one_line_with_request_id_and_field(agent_system, caplog)
         if "agent.request_rejected" in r.getMessage()
     ]
     assert len(lines) == 1
-    assert "gpu_count" in lines[0] and "request_id" in lines[0]
+    assert "gpu_count" in lines[0]
+    assert "request_id" in lines[0]
     assert clock.now.isoformat() not in lines[0]
 
 
@@ -655,8 +669,6 @@ def test_reconciliation_identity_survives_agent_api_and_signed_grant(
         assert attempts == [request.fence] * 4
         assert "grant" not in ended.json()
         if removed is not None:
-            from sqlalchemy.orm import make_transient
-
             make_transient(removed)
             with services.sessions.begin() as session:
                 session.add(removed)
@@ -776,7 +788,6 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
             self, **kwargs: Unpack[_HostUpgradeGrantKwargs]
         ) -> object:
             self.upgrade_calls.append(kwargs)
-            from .package_upgrade_fixtures import rollback_authority
 
             operation = InstallVonkDebOperation(
                 type="install-vonk-deb",
@@ -989,14 +1000,6 @@ def test_post_stop_inventory_makes_the_waiting_switch_due_on_arrival(
     The ingest makes the wait due as the inventory commits; a collection that
     is not newer than the 30 s post-stop floor wakes nothing, and a failing
     wake never costs the Spark its accepted report."""
-    from vonk_control.agent_api import observations
-    from vonk_control.run_switch_contract.operations import (
-        RunSwitchAwaitedInventory,
-        RunSwitchOperationResult,
-    )
-    from vonk_control.run_switch_operations.errors import (
-        RunSwitchPostStopEvidencePending,
-    )
 
     client, services, _, clock = agent_system
     floor = clock.now
@@ -1049,7 +1052,8 @@ def test_post_stop_inventory_makes_the_waiting_switch_due_on_arrival(
     def due() -> datetime:
         with services.sessions() as session:
             stored = session.get(Job, job.id)
-            assert stored is not None and stored.next_action_at is not None
+            assert stored is not None
+            assert stored.next_action_at is not None
             return stored.next_action_at.replace(tzinfo=UTC)
 
     # A collection at the floor cannot settle the wait.

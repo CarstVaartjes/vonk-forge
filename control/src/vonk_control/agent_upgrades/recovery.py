@@ -7,34 +7,33 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select, true
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-
-from .. import agent_operation_states
-from ..admission_locking import (
+from vonk_control import agent_operation_states
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     label_transaction,
     lock_admission_rows,
 )
-from ..agent_jobs.retry import schedule_agent_upgrade_retry
-from ..jobs import states as job_states
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.agent_upgrade import KIND, UNSUPPORTED_DISPATCH
-from ..lifecycle.types import CancelRequested, Outcome, Reported
-from ..models.fleet import AgentNode
-from ..models.jobs import Job, JobAttempt
-from ..models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.agent_upgrade import KIND, UNSUPPORTED_DISPATCH
+from vonk_control.lifecycle.types import CancelRequested, Outcome, Reported
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 if TYPE_CHECKING:
-    from .service import AgentUpgradeService
+    from vonk_control.agent_upgrades.service import AgentUpgradeService
 
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from .constants import _ACTIVE_ROLLOUT_STATES
-from .helpers import _aware, _failure_detail
-from .stored import _stored_package, _stored_result
+from vonk_control.agent_upgrades.constants import _ACTIVE_ROLLOUT_STATES
+from vonk_control.agent_upgrades.helpers import _aware, _failure_detail
+from vonk_control.agent_upgrades.stored import _stored_package, _stored_result
 
 
 class RecoveryMixin:
@@ -169,9 +168,8 @@ class RecoveryMixin:
                         if parent.status_reason != UNSUPPORTED_DISPATCH:
                             continue
                         service._rollouts.reopen(parent, now, reason=None)
-                    elif (
-                        parent.state not in _ACTIVE_ROLLOUT_STATES
-                        or parent.state == LifecycleState.RUNNING
+                    elif parent.state not in _ACTIVE_ROLLOUT_STATES or (
+                        parent.state == LifecycleState.RUNNING
                         and service._dispatch_is_live(session, parent, now)
                     ):
                         continue
@@ -226,7 +224,7 @@ class RecoveryMixin:
                         Job.state.in_(_ACTIVE_ROLLOUT_STATES),
                     )
                 )
-                if isinstance(targets, list) and node_id in targets
+                if isinstance(targets, list) and node_id in targets  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             ]
             for job_id in job_ids:
                 parent = session.scalar(

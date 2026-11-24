@@ -26,7 +26,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple, Protocol, Self
@@ -34,6 +34,12 @@ from urllib.parse import urlsplit
 
 import yaml
 from pydantic import ValidationError
+
+from cluster_profiles.serving_execution import (
+    HttpObservation,
+    ServingExecutionError,
+    evaluate_http_response,
+)
 from vonk_agent_protocol.agent_state import (
     NativeRenewalAction,
     NativeRenewalEvidence,
@@ -41,23 +47,32 @@ from vonk_agent_protocol.agent_state import (
     NativeRenewalRequest,
     RenewalHelperManifest,
 )
-from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.route_activation import (
     ROUTE_SHUTDOWN_SECONDS,
     ROUTE_STARTUP_SECONDS,
 )
-
-from cluster_profiles.serving_execution import (
-    HttpObservation,
-    ServingExecutionError,
-    evaluate_http_response,
-)
+from vonk_agent_protocol.wire_model import canonical_message
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+)
+
+from cluster_profiles.control_transport import HTTPSResponse, open_https
+from cluster_profiles.generated_control.models.enrollment_grant_response import (
+    EnrollmentGrantResponse,
+)
+from cluster_profiles.generated_control.models.fleet_enroll_request import (
+    FleetEnrollRequest,
+)
+from cluster_profiles.generated_control.models.recipe_download_request import (
+    RecipeDownloadRequest,
+)
 from scripts.canary_package import canary_package_path
 from scripts.development_slice_client import (
     MAXIMUM_RESPONSE_BYTES,
@@ -101,6 +116,25 @@ from tests.acceptance.test_fresh_nas_install import (
     nas_responses,
     tailscale_service_hostname,
 )
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity, ProfileReportedPhase
+from vonk_agent_protocol.state_machines import RouteState
+from vonk_control.fleet_profile_contract.review import (
+    FleetProfileApplicationView,
+    FleetProfileLoadRequest,
+    FleetProfilePreviewResponse,
+)
+from vonk_control.fleet_profile_contract.switch_state import (
+    FleetProfileSwitchChildResult,
+)
+from vonk_control.fleet_projection.common import FleetSnapshot, RunPresence
+from vonk_control.library.contract import LibraryRecipeIdentity
+from vonk_control.run_switch_contract.phase_results import (
+    RunSwitchCleanupVerifyResult,
+    RunSwitchFinalVerifyResult,
+    RunSwitchStopResult,
+    RunSwitchUninstallResult,
+)
+from vonk_control.source_bundles import generate_source_bundle
 
 PLATFORMS = ("linux-arm64",)
 
@@ -388,7 +422,7 @@ class CanonicalCanaryFixture(NamedTuple):
 
 
 @contextmanager
-def _library_contracts(library_root: Path | None) -> Iterator[Any]:
+def _library_contracts(library_root: Path | None) -> Generator[Any]:
     """Import ``vonk_forge_contracts`` as the given library ships it, for one block.
 
     The carry lane drives two releases whose libraries carry different
@@ -398,7 +432,7 @@ def _library_contracts(library_root: Path | None) -> Iterator[Any]:
     ``None`` leaves the process's contracts in place.
     """
     if library_root is None:
-        import vonk_forge_contracts
+        import vonk_forge_contracts  # noqa: PLC0415 -- the lane swaps contract modules or extends sys.path at run time
 
         yield vonk_forge_contracts
         return
@@ -418,7 +452,7 @@ def _library_contracts(library_root: Path | None) -> Iterator[Any]:
     sys.path.insert(0, os.fspath(source))
     try:
         try:
-            import vonk_forge_contracts
+            import vonk_forge_contracts  # noqa: PLC0415 -- the lane swaps contract modules or extends sys.path at run time
         except ImportError as error:
             raise LifecycleError(
                 "canonical Recipe/Model contract package is unavailable"
@@ -471,11 +505,6 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
 
 
 def _read_canary_fixture(root: Path) -> CanonicalCanaryFixture:
-    from vonk_forge_contracts import (
-        ModelDefinition,
-        RecipeDefinition,
-        document_sha256,
-    )
 
     index_path = _canary_index_path(root)
     try:
@@ -658,7 +687,6 @@ def _rebuild_recipe_entry(
     edit: Callable[[dict[str, object]], None],
     files: Mapping[str, Callable[[bytes], bytes]] | None,
 ) -> tuple[dict[str, object], bytes]:
-    from vonk_control.source_bundles import generate_source_bundle
 
     document_sha256, read_recipe = contracts.document_sha256, contracts.read_recipe
     entry = copy.deepcopy(json.loads(fixture.index_bytes)["recipes"][0])
@@ -698,8 +726,8 @@ def _rebuild_recipe_entry(
         gzip.GzipFile(fileobj=archive, mode="wb", mtime=0) as compressed,
         tarfile.open(fileobj=compressed, mode="w") as target,
     ):
-        for member, payload in members:
-            payload = changed.get(member.name, payload)
+        for member, original in members:
+            payload = changed.get(member.name, original)
             if member.name == "manifest.json":
                 manifest = json.loads(payload)
                 manifest["recipe_content_sha256"] = digest
@@ -765,14 +793,16 @@ def _derived_fixture(
     index = json.loads(fixture.index_bytes)
     index["recipes"] = [entry]
     digest = str(entry["content_sha256"])
-    index["source_commit"] = hashlib.sha1(digest.encode()).hexdigest()
+    index["source_commit"] = hashlib.sha1(
+        digest.encode(), usedforsecurity=False
+    ).hexdigest()
     return fixture._replace(
         index_bytes=json.dumps(index, sort_keys=True).encode(),
         package_bytes=package_bytes,
         source_commit=index["source_commit"],
         slug=str(entry["document"]["identity"]["slug"]),  # type: ignore[index]
         recipe_content_sha256=digest,
-        recipe=entry["document"],  # type: ignore[arg-type]
+        recipe=entry["document"],
     )
 
 
@@ -800,7 +830,8 @@ def _sibling_recipes(
     index = json.loads(fixture.index_bytes)
     index["recipes"] = [entry for entry, _ in built]
     commit = hashlib.sha1(
-        "".join(str(entry["content_sha256"]) for entry, _ in built).encode()
+        "".join(str(entry["content_sha256"]) for entry, _ in built).encode(),
+        usedforsecurity=False,
     ).hexdigest()
     index["source_commit"] = commit
     index_bytes = json.dumps(index, sort_keys=True).encode()
@@ -811,7 +842,7 @@ def _sibling_recipes(
             source_commit=commit,
             slug=str(entry["document"]["identity"]["slug"]),  # type: ignore[index]
             recipe_content_sha256=str(entry["content_sha256"]),
-            recipe=entry["document"],  # type: ignore[arg-type]
+            recipe=entry["document"],
         )
         for entry, package_bytes in built
     )
@@ -958,7 +989,7 @@ def _configure_acceptance_renewal(
         ),
         encoding="utf-8",
     )
-    os.chmod(caddy_path, 0o644)
+    caddy_path.chmod(0o644)
     caddy_volumes.append("./acceptance-Caddyfile:/etc/caddy/Caddyfile:ro")
     caddy_service["entrypoint"] = _acceptance_caddy_entrypoint(
         caddy_service.get("entrypoint")
@@ -986,7 +1017,7 @@ def _configure_acceptance_renewal(
         yaml.safe_dump(compose, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
     )
-    os.chmod(compose_path, 0o644)
+    compose_path.chmod(0o644)
 
 
 def _synthetic_device_fixture(platform_name: str) -> tuple[bytes, str]:
@@ -1048,8 +1079,6 @@ def _validate_canary_cleanup_preview(
 ) -> None:
     """Require the exact admitted delegated-cleanup intent."""
 
-    from vonk_control.fleet_profile_contract.review import FleetProfilePreviewResponse
-
     try:
         typed = FleetProfilePreviewResponse.model_validate_json(_canonical(preview))
     except ValueError as error:
@@ -1073,11 +1102,6 @@ def _installations_removed(
     A canary that was replaced, or two Recipes that ran in turn, leave several
     installations; each one needs its own receipts.
     """
-
-    from vonk_control.run_switch_contract.phase_results import (
-        RunSwitchCleanupVerifyResult,
-        RunSwitchUninstallResult,
-    )
 
     return all(
         any(
@@ -1105,12 +1129,6 @@ def _validate_canary_cleanup_application(
     run_id: str,
 ) -> None:
     """Require terminal cleanup receipts from the profile application."""
-
-    from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
-    from vonk_control.fleet_profile_contract.switch_state import (
-        FleetProfileSwitchChildResult,
-    )
-    from vonk_control.run_switch_contract.phase_results import RunSwitchStopResult
 
     try:
         typed = FleetProfileApplicationView.model_validate_json(_canonical(application))
@@ -1179,7 +1197,7 @@ class LocalBrowserController:
         if (
             not hostname
             or any(character in hostname for character in "\0\r\n /:")
-            or not isinstance(port, int)
+            or not isinstance(port, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             or isinstance(port, bool)
             or not 1 <= port <= 65535
         ):
@@ -1218,7 +1236,6 @@ class LocalBrowserController:
             for name, value in request_headers.items()
         ):
             raise LifecycleError("local browser observation request is invalid")
-        from cluster_profiles.control_transport import HTTPSResponse, open_https
 
         # This acceptance boundary deliberately targets the local Caddy HTTP
         # listener with its original virtual Host and administrator credentials.
@@ -1269,12 +1286,12 @@ class LocalBrowserController:
             or method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}
             or not path.startswith("/")
             or any(character in path for character in "\0\r\n")
-            or (body is not None and not isinstance(body, bytes))
+            or (body is not None and not isinstance(body, bytes))  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             or (body is not None and len(body) > MAXIMUM_RESPONSE_BYTES)
             or (method == "GET" and body is not None)
             or any(
-                not isinstance(name, str)
-                or not isinstance(value, str)
+                not isinstance(name, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
+                or not isinstance(value, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
                 or not name
                 or name.lower() in {"connection", "content-length", "host"}
                 or any(character in name for character in "\0\r\n:")
@@ -1692,11 +1709,12 @@ class SparkLifecycle:
             allowance = (remaining - heading_cost) // len(unrendered)
             if allowance <= 0:
                 break
+            shown = body
             if title == "installer error" and len(body) > allowance:
                 # Keep outer type and the innermost cause/phase when logs fill the budget.
                 prefix = min(256, allowance // 2)
-                body = body[:prefix] + " ... " + body[-(allowance - prefix - 5) :]
-            entry = f"{title}: " + self._redact_diagnostics(body, limit=allowance)
+                shown = body[:prefix] + " ... " + body[-(allowance - prefix - 5) :]
+            entry = f"{title}: " + self._redact_diagnostics(shown, limit=allowance)
             rendered.append(entry)
             remaining -= len(entry) + (1 if index < len(sections) - 1 else 0)
         return "\n".join(rendered)
@@ -1949,10 +1967,10 @@ class SparkLifecycle:
             cwd=self.bundle,
             timeout=30,
         )
-        os.chmod(root, 0o770)
+        root.chmod(0o770)
         relay = self.bundle.parent / "acceptance-receipt-fault.py"
         shutil.copyfile(Path(__file__).with_name("receipt_fault.py"), relay)
-        os.chmod(relay, 0o644)
+        relay.chmod(0o644)
         path = self.bundle / "docker-compose.yaml"
         compose = yaml.safe_load(path.read_text(encoding="utf-8"))
         service = compose["services"]["control-api"]
@@ -1977,7 +1995,7 @@ class SparkLifecycle:
             json.dumps({"id": str(uuid.uuid4())}),
             encoding="utf-8",
         )
-        os.chmod(root / "armed.json", 0o644)
+        (root / "armed.json").chmod(0o644)
 
     def _container_for_replay(self, run_id: str) -> str:
         assert self.temporary_root is not None
@@ -2203,7 +2221,7 @@ class SparkLifecycle:
         if observe_attempts:
             try:
                 document["controller_attempts"] = self._psql(
-                    "SELECT a.attempt,a.fence,a.state,o.state,"
+                    "SELECT a.attempt,a.fence,a.state,o.state,"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                     "CASE WHEN a.lease_deadline<=clock_timestamp() THEN 'expired' ELSE 'live' END "
                     "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
                     f"WHERE o.id='{operation_id}' ORDER BY a.attempt DESC LIMIT 8"
@@ -2237,7 +2255,7 @@ class SparkLifecycle:
         ):
             raise LifecycleError("lost Start receipt identity is invalid")
         rows = self._psql(
-            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state,COALESCE(o.payload->>'phase','single'),"
+            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state,COALESCE(o.payload->>'phase','single'),"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             "o.payload#>>'{compiled_execution_plan,runtime,placement,endpoint_address}',"
             "o.payload#>>'{compiled_execution_plan,runtime,placement,port}' "
             "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
@@ -2315,7 +2333,7 @@ class SparkLifecycle:
         expiry_deadline = time.monotonic() + 120
         while True:
             leases = self._psql(
-                "SELECT count(*) FROM agent_operation_attempts "
+                "SELECT count(*) FROM agent_operation_attempts "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                 f"WHERE operation_id='{operation_id}' AND lease_deadline>clock_timestamp()"
             )
             if leases == [["0"]]:
@@ -2333,7 +2351,7 @@ class SparkLifecycle:
         )
         recovered = bundle.parent / "acceptance-receipts/recovered.json"
         recovered.write_text(json.dumps({"fence": fence}), encoding="utf-8")
-        os.chmod(recovered, 0o644)
+        recovered.chmod(0o644)
         self._record_start_recovery_checkpoint(
             "restart_released", operation_id, run_id, fence
         )
@@ -2377,7 +2395,7 @@ class SparkLifecycle:
                 "Start replay did not report the same serving effect under a fresh fence"
             )
         rows = self._psql(
-            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,a.state "
+            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,a.state "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
             f"WHERE a.fence='{fence}'"
         )
@@ -2671,9 +2689,9 @@ class SparkLifecycle:
             "printf '%s\\n' 'nvidia.com/gpu=all'\n",
             encoding="ascii",
         )
-        os.chmod(cdi, 0o600)
-        os.chmod(smi, 0o700)
-        os.chmod(ctk, 0o700)
+        cdi.chmod(0o600)
+        smi.chmod(0o700)
+        ctk.chmod(0o700)
         docker = Path("/usr/bin/docker")
         if not docker.is_file() or not os.access(docker, os.X_OK):
             raise LifecycleError("native synthetic CDI prerequisite is unavailable")
@@ -2701,7 +2719,8 @@ class SparkLifecycle:
         return digest
 
     def _verify_synthetic_docker_device(self) -> None:
-        assert self.bundle is not None and self.temporary_root is not None
+        assert self.bundle is not None
+        assert self.temporary_root is not None
         caddy_container = self._run_command(
             self._compose("ps", "--quiet", "caddy"), cwd=self.bundle
         ).stdout.strip()
@@ -2911,7 +2930,8 @@ class SparkLifecycle:
         )
 
     def _prepare_synthetic_firewall_environment(self) -> None:
-        assert self.bundle is not None and self.temporary_root is not None
+        assert self.bundle is not None
+        assert self.temporary_root is not None
         suffix = self.synthetic_fabric_octet
         management_interface = f"vmgt{os.getpid() % 100000}"
         management_peer = f"vnas{os.getpid() % 100000}"
@@ -3187,12 +3207,6 @@ class SparkLifecycle:
         )
 
     def _create_grant(self) -> tuple[str, str, str, str]:
-        from cluster_profiles.generated_control.models.enrollment_grant_response import (
-            EnrollmentGrantResponse,
-        )
-        from cluster_profiles.generated_control.models.fleet_enroll_request import (
-            FleetEnrollRequest,
-        )
 
         assert self.control is not None
         try:
@@ -3275,7 +3289,7 @@ class SparkLifecycle:
         if re.fullmatch(r"[0-9a-f-]{36}", grant_id) is None:
             raise LifecycleError("enrollment grant identity is invalid")
         rows = self._psql(
-            "SELECT (consumed_at IS NOT NULL)::int, "
+            "SELECT (consumed_at IS NOT NULL)::int, "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             "(SELECT count(*) FROM agent_enrollments e WHERE e.grant_id=g.id) "
             f"FROM agent_enrollment_grants g WHERE id='{grant_id}'"
         )
@@ -3436,11 +3450,9 @@ class SparkLifecycle:
         response_digest: str | None = None
         phase = "preconditions"
         try:
-            assert (
-                self.control is not None
-                and self.browser is not None
-                and isinstance(self.synthetic_canary_fixture, CanonicalCanaryFixture)
-            )
+            assert self.control is not None
+            assert self.browser is not None
+            assert isinstance(self.synthetic_canary_fixture, CanonicalCanaryFixture)
             if NODE_ID.fullmatch(node_id) is None:
                 raise LifecycleError("synthetic canary node identity is invalid")
             fixture = self.synthetic_canary_fixture
@@ -3485,7 +3497,6 @@ class SparkLifecycle:
                 assert self.control is not None
                 del completed[1:]
                 phase = "recipe-resolution"
-                from vonk_control.library.contract import LibraryRecipeIdentity
 
                 # A known identity resolves directly against committed catalog state.
                 # The periodically refreshed discovery index may still be older.
@@ -3866,7 +3877,7 @@ class SparkLifecycle:
             completed.append("uninstalled")
             if (
                 completed != list(SYNTHETIC_CANARY_STATES)
-                or not isinstance(response_digest, str)
+                or not isinstance(response_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # the digest is re-checked before it is reported
                 or SHA256.fullmatch(response_digest) is None
             ):
                 raise LifecycleError("synthetic canary evidence is incomplete")
@@ -4069,7 +4080,8 @@ class SparkLifecycle:
         The running container and retained exact runtime files remain intact;
         recovery must reconnect, adopt them and complete subsequent cleanup.
         """
-        assert self.agent_installed and self.temporary_root is not None
+        assert self.agent_installed
+        assert self.temporary_root is not None
         temporary_root = self.temporary_root
         if UUID.fullmatch(run_id) is None or NODE_ID.fullmatch(node_id) is None:
             raise LifecycleError("journal recovery canary identity is invalid")
@@ -4202,7 +4214,6 @@ class SparkLifecycle:
     def _load_canary_profile(
         self, preview: dict[str, object], *, request_key: str
     ) -> object:
-        from vonk_control.fleet_profile_contract.review import FleetProfileLoadRequest
 
         assert self.control is not None
         request = FleetProfileLoadRequest.model_validate_json(
@@ -4235,7 +4246,7 @@ class SparkLifecycle:
         # Project only diagnostic fields from the current checkpoint. Never
         # serialize complete operation results, signed grants, or credentials.
         query = (
-            "SELECT json_build_object('node_id',r.key,"
+            "SELECT json_build_object('node_id',r.key,"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             "'receipt_fingerprint',r.value->'result'->>'fingerprint',"
             "'received_at',r.value->'received_at',"
             "'payload_sha256',a.payload_digest,"
@@ -4255,7 +4266,7 @@ class SparkLifecycle:
             f"WHERE j.id='{operation_id}' ORDER BY r.key LIMIT 2"
         )
         pending_query = (
-            "SELECT json_build_object('node_id',p.key,"
+            "SELECT json_build_object('node_id',p.key,"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             "'pending_job_id',child.id,'child_state',child.state,"
             "'attempt_state',t.state,'lease_deadline',t.lease_deadline,"
             "'progress_phase',t.progress::jsonb->>'phase') FROM jobs j "
@@ -4275,9 +4286,6 @@ class SparkLifecycle:
     def _request_recipe_download(
         self, selector: str, *, request_key: str
     ) -> dict[str, object]:
-        from cluster_profiles.generated_control.models.recipe_download_request import (
-            RecipeDownloadRequest,
-        )
 
         assert self.control is not None
         _, payload = self.control.request(
@@ -4300,7 +4308,7 @@ class SparkLifecycle:
         control_src = REPOSITORY_ROOT / "control/src"
         if os.fspath(control_src) not in sys.path:
             sys.path.insert(0, os.fspath(control_src))
-        from vonk_control.recipe_image_availability.api import (
+        from vonk_control.recipe_image_availability.response_contract import (  # noqa: PLC0415 -- the lane swaps contract modules or extends sys.path at run time
             RecipeImageAvailabilityResponse,
         )
 
@@ -4383,7 +4391,7 @@ class SparkLifecycle:
         control_src = REPOSITORY_ROOT / "control/src"
         if os.fspath(control_src) not in sys.path:
             sys.path.insert(0, os.fspath(control_src))
-        from vonk_control.fleet_profile_contract.review import (
+        from vonk_control.fleet_profile_contract.review import (  # noqa: PLC0415 -- the lane swaps contract modules or extends sys.path at run time
             FleetProfileApplicationView,
         )
 
@@ -4436,7 +4444,7 @@ class SparkLifecycle:
                 # discards the status tells us nothing, and one failing call
                 # must not hide the answer from the other.
                 job_detail = "unavailable"
-                if self.control is not None:
+                if self.control is not None:  # pyright: ignore[reportUnnecessaryComparison]  # diagnostics stay safe without a login
                     parts: list[str] = []
                     try:
                         _, node_operations = self.control.request(
@@ -4637,7 +4645,9 @@ class SparkLifecycle:
         control_src = REPOSITORY_ROOT / "control/src"
         if os.fspath(control_src) not in sys.path:
             sys.path.insert(0, os.fspath(control_src))
-        from vonk_control.fleet_projection.common import FleetSnapshot
+        from vonk_control.fleet_projection.common import (  # noqa: PLC0415 -- the lane swaps contract modules or extends sys.path at run time
+            FleetSnapshot,
+        )
 
         _, payload = self.control.request("GET", "/api/fleet")
         try:
@@ -4672,12 +4682,6 @@ class SparkLifecycle:
         The successor's final verification and the Fleet's run/installation
         relationship own this identity, rather than receipt count or revision.
         """
-        from vonk_agent_protocol.agent_words import ProfileReportedPhase
-        from vonk_agent_protocol.state_machines import RouteState
-        from vonk_control.fleet_projection.common import FleetSnapshot, RunPresence
-        from vonk_control.run_switch_contract.phase_results import (
-            RunSwitchFinalVerifyResult,
-        )
 
         deadline = time.monotonic() + _CANARY_ROUTE_SECONDS
         while time.monotonic() < deadline:
@@ -4884,7 +4888,7 @@ class SparkLifecycle:
         ):
             raise LifecycleError("certificate probe identity is invalid")
         rows = self._psql(
-            "SELECT generation FROM agent_certificates "
+            "SELECT generation FROM agent_certificates "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             f"WHERE serial='{serial_after}' AND state='active'"
         )
         if len(rows) != 1 or len(rows[0]) != 1 or not rows[0][0].isdigit():
@@ -4965,9 +4969,9 @@ class SparkLifecycle:
             key_v1.write_bytes(
                 _openssl_compatible_ed25519_private_key(key_v2.read_bytes())
             )
-            os.chmod(bundle, 0o600)
-            os.chmod(key_v1, 0o600)
-            result = self._run_command(
+            bundle.chmod(0o600)
+            key_v1.chmod(0o600)
+            return self._run_command(
                 [
                     "/usr/bin/curl",
                     "--config",
@@ -4993,7 +4997,6 @@ class SparkLifecycle:
                 report_failure_output=True,
                 allowed_returncodes=(0, 56) if retired else (0,),
             )
-            return result
         finally:
             shutil.rmtree(probe)
 
@@ -5186,7 +5189,7 @@ class SparkLifecycle:
         while time.monotonic() < deadline:
             rows = self._renewal_read(
                 lambda: self._psql(
-                    "SELECT a.serial,c.state,(c.revoked_at IS NOT NULL)::int "
+                    "SELECT a.serial,c.state,(c.revoked_at IS NOT NULL)::int "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                     "FROM agent_certificates a JOIN agent_certificates c "
                     f"ON c.serial='{serial_before}' WHERE a.node_id='{node_id}' "
                     "AND a.state='active' AND a.revoked_at IS NULL"
@@ -5414,7 +5417,7 @@ class SparkLifecycle:
                 # moved tables in between; the Fleet API names no serial). The
                 # Fleet snapshot above proves that certificate is accepted.
                 rows = self._psql(
-                    "SELECT serial FROM agent_certificates "
+                    "SELECT serial FROM agent_certificates "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                     f"WHERE node_id='{node_id}' AND state='active' "
                     "AND revoked_at IS NULL"
                 )
@@ -5508,7 +5511,7 @@ def _atomic_write(path: Path, value: object) -> None:
             stream.write(_canonical(value))
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        temporary.replace(path)
         directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)

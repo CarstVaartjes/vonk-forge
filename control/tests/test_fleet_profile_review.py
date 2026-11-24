@@ -9,6 +9,9 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import inspect, select
+
+from cluster_profiles.cli_render.dispatch import render_payload
+from vonk_agent_protocol.agent_words import ProfileOperationKind
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
@@ -43,15 +46,18 @@ from vonk_control.models.execution import (
 from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
+    FleetProfile,
     FleetProfileApplication,
     User,
 )
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.preparation_contract import RolloutPreparation
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
 from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
-
-from cluster_profiles.cli_render.dispatch import render_payload
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .fleet_profiles_support import (
     NOW,
@@ -65,20 +71,18 @@ from .fleet_profiles_support import (
     _SwitchAdapter,
 )
 from .non_blocking import assert_ended_without_blocking
-from .recipe_operations_support import started_recipe
+from .recipe_operations_support import setup_services, started_recipe
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+)
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+from .test_profile_build_memory import _accepted_build_profile
 
 
 def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
     tmp_path, capsys
 ):
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     planner = RunSwitchOperationService(
@@ -134,9 +138,8 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
     assert "Physical memory pool: shared" in rendered
     assert "Memory reserve: 0 B" in rendered
     assert "Ports required" in rendered
-    assert fit.ports_required and all(
-        str(port) in rendered for port in fit.ports_required
-    )
+    assert fit.ports_required
+    assert all(str(port) in rendered for port in fit.ports_required)
 
     with sessions.begin() as session:
         inventory = session.scalar(select(NodeInventorySnapshot))
@@ -384,10 +387,12 @@ def test_retry_cannot_expand_destructive_effects_outside_original_consent(
         assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
         if new_effect == "stop":
             replacement = session.get(RecipeRun, replacement_id)
-            assert replacement is not None and replacement.state == "running"
+            assert replacement is not None
+            assert replacement.state == "running"
         else:
             installation = session.get(RecipeInstallation, replacement_id)
-            assert installation is not None and installation.state == "installed"
+            assert installation is not None
+            assert installation.state == "installed"
 
 
 def test_review_binds_idle_roster_and_definition_but_not_observation_time():
@@ -704,13 +709,6 @@ def test_review_binds_effects_but_not_readiness_counters_or_blockers():
 
 def _recheck_world(tmp_path, postgres_engine):
     """A real planner and profile service over PostgreSQL, with a movable clock."""
-    from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-    from .recipe_operations_support import setup_services
-    from .run_switch_operations_support import (
-        CompleteArtifactInspector,
-        RecordingArtifactExecutor,
-    )
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, engine=postgres_engine
@@ -933,13 +931,6 @@ def test_deferred_target_builder_review_refreshes_inventory_before_admission(
     tmp_path, postgres_engine
 ) -> None:
     """Catch t0 builder freshness overriding t1 residual evidence on resume."""
-    from vonk_agent_protocol.agent_words import ProfileOperationKind
-    from vonk_control.models.fleet import FleetProfile
-    from vonk_control.recipe_operations.execution_contract import (
-        parse_stored_installation_plan,
-    )
-
-    from .test_profile_build_memory import _accepted_build_profile
 
     sessions, profiles, planner, node_id, _application, build = _accepted_build_profile(
         tmp_path,
@@ -954,7 +945,9 @@ def test_deferred_target_builder_review_refreshes_inventory_before_admission(
         profile = session.scalar(select(FleetProfile))
         installation = session.scalar(select(RecipeInstallation))
         sample = session.scalar(select(NodeInventorySnapshot))
-        assert profile is not None and installation is not None and sample is not None
+        assert profile is not None
+        assert installation is not None
+        assert sample is not None
         profile_id, installation_id = profile.id, installation.id
         installed = parse_stored_installation_plan(installation.plan)
         image = next(iter(installed.compiled_execution_plans.values())).runtime_image

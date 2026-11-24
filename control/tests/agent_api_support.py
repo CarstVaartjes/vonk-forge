@@ -20,11 +20,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.types import Message
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as AgentCompiledExecutionPlan,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.common import (
     AgentApiServices,
 )
@@ -43,6 +44,7 @@ from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.source_bundles import SourceBundleStore
 
 from .ca_test_authority import FixtureCertificateAuthority
+from .package_upgrade_fixtures import source_transport
 
 NODE_A = "spk_" + "a" * 32
 
@@ -95,7 +97,6 @@ STOP_PAYLOAD = RecipeStopPayload(
 
 
 def upgrade_payload(digest: str, package_bytes: int) -> dict[str, object]:
-    from .package_upgrade_fixtures import source_transport
 
     return {
         "schema_version": 1,
@@ -188,13 +189,13 @@ class Authority(FixtureCertificateAuthority):
     def issue_node(
         self,
         node_id: str,
-        public_key_pem: bytes,
+        csr_pem: bytes,
         now: datetime,
         *,
         request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         self._begin(request)
-        csr_request = x509.load_pem_x509_csr(public_key_pem)
+        csr_request = x509.load_pem_x509_csr(csr_pem)
         key = ed25519.Ed25519PrivateKey.generate()
         leaf = (
             x509.CertificateBuilder()
@@ -224,12 +225,12 @@ class Authority(FixtureCertificateAuthority):
     def renew_node(
         self,
         node_id: str,
-        public_key_pem: bytes,
+        csr_pem: bytes,
         now: datetime,
         *,
         request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
-        return self.issue_node(node_id, public_key_pem, now, request=request)
+        return self.issue_node(node_id, csr_pem, now, request=request)
 
     def revocation_bundle(self, now: datetime) -> bytes:
         return b""
@@ -477,7 +478,7 @@ def asgi_post(
             message for message in sent if message["type"] == "http.response.start"
         )
         content = b"".join(
-            message.get("body", b"")  # type: ignore[arg-type]
+            message.get("body", b"")
             for message in sent
             if message["type"] == "http.response.body"
         )

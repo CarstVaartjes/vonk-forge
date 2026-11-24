@@ -14,11 +14,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, event, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.db.connections import session_factory
 from vonk_control.fleet_event_contract import (
     AgentOperationPayload,
@@ -37,7 +39,7 @@ from vonk_control.fleet_events import (
     FleetEventRepository,
     FleetReplayBatch,
 )
-from vonk_control.fleet_projection.common import FleetSnapshot
+from vonk_control.fleet_projection.common import FleetSnapshot, TelemetryPoint
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream import FleetStream, _event_frame, parse_last_event_id
 from vonk_control.fleet_stream_contract import (
@@ -84,9 +86,7 @@ class Projection(FleetProjection):
         )
 
 
-def _events(
-    stream: FleetStream, last_event_id: int | None
-) -> AsyncGenerator[str, None]:
+def _events(stream: FleetStream, last_event_id: int | None) -> AsyncGenerator[str]:
     """``FleetStream.events`` is an async generator, so the caller owns ``aclose``."""
 
     generator = stream.events(last_event_id)
@@ -136,9 +136,9 @@ class Events(FleetEventRepository):
 class Telemetry(TelemetryRepository):
     def __init__(self, values: dict[str, TelemetrySampleView] | None = None) -> None:
         self.values = values or {}
-        self.calls: list[tuple[str, ...]] = []
+        self.calls: list[Sequence[str]] = []
 
-    def by_ids(self, sample_ids: tuple[str, ...]) -> dict[str, TelemetrySampleView]:
+    def by_ids(self, sample_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:
         self.calls.append(sample_ids)
         return {
             sample_id: self.values[sample_id]
@@ -386,7 +386,6 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         "id": "6",
         "event": "node-telemetry",
     }
-    from vonk_control.fleet_projection.common import TelemetryPoint
 
     assert isinstance(telemetry_data, dict)
     assert telemetry_data["event_cursor"] == 6
@@ -811,7 +810,7 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
             )
             for sequence, sample_id in enumerate(sample_ids)
         )
-        for sequence, sample_id in enumerate(sample_ids, start=1):
+        for _sequence, sample_id in enumerate(sample_ids, start=1):
             repository.append_in_session(
                 session,
                 FleetEventDraft(
@@ -1220,7 +1219,6 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
     None
 ):
     """A malformed stored payload is repairable within normal SQL constraints."""
-    from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
     engine, sessions, repository = _production_stream_store()
     try:
@@ -1281,7 +1279,6 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
 
 
 def test_oversized_canonical_frame_becomes_bounded_truthful_notice() -> None:
-    from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
     fields = JobPayload(
         entity_kind="job",
@@ -1391,8 +1388,7 @@ def test_open_streams_with_slow_repository_do_not_block_the_event_loop() -> None
         generator = _events(stream_for(events), 0)
         frames: list[str] = []
         try:
-            async for frame in generator:
-                frames.append(frame)
+            frames.extend([frame async for frame in generator])
         finally:
             await generator.aclose()
         return frames

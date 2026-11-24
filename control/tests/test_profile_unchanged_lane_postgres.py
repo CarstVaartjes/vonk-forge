@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import ReservationState, RunState
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
@@ -142,7 +143,8 @@ def test_sibling_load_keeps_ready_run_installation_and_running_job(
             assert sim.settle(application_id) == LifecycleState.SUCCEEDED
             with world.sessions() as session:
                 run = session.get(RecipeRun, run_id)
-                assert run is not None and run.state == RunState.RUNNING
+                assert run is not None
+                assert run.state == RunState.RUNNING
                 assert run.installation_id == installation_id
                 assert (
                     set(

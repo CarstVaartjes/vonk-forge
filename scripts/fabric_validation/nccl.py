@@ -42,7 +42,7 @@ test -x "$HOME/nccl-tests/build/all_reduce_perf"
 """
 
 
-def nccl_launch_command(head: Host, worker: Host) -> str:
+def nccl_launch_command(head: Host) -> str:
     """Launch a two-rank all-reduce only through the restricted fabric alias."""
     fabric = head.fabric
     exports = {
@@ -73,12 +73,12 @@ mpirun -np 2 -H localhost:1,{FABRIC_WORKER_ALIAS}:1 \\
 """
 
 
-def run_nccl(runner: Runner, head: Host, worker: Host) -> NCCLResult:
+def run_nccl(runner: Runner, head: Host) -> NCCLResult:
     # The worker prerequisite is deliberately first. No source staging, sudo,
     # agent forwarding, management-plane host list, or shared key is involved.
     runner.worker_via_fabric(nccl_prerequisite_command())
     runner.remote(head.ssh_alias, nccl_prerequisite_command())
-    result = runner.remote(head.ssh_alias, nccl_launch_command(head, worker))
+    result = runner.remote(head.ssh_alias, nccl_launch_command(head))
     output = result.stdout + "\n" + result.stderr
     parsed = parse_nccl(output)
     if not parsed.passed:

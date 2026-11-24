@@ -4,6 +4,7 @@ from importlib.resources import files
 from typing import Any, Literal
 
 from fastapi.testclient import TestClient
+
 from vonk_agent_protocol.reason_codes.evidence import NodeOfflineReason
 from vonk_agent_protocol.state_machines import CertificateState
 from vonk_control.api.application import create_app
@@ -119,7 +120,7 @@ def _fleet_snapshot(
 
 def test_metrics_use_typed_fleet_evidence_without_health_or_probe_fields() -> None:
     metrics = MetricsRegistry()
-    metrics.set_fleet_source(lambda: _fleet_snapshot())
+    metrics.set_fleet_source(_fleet_snapshot)
     text = metrics.render()
     assert f'vonk_node_connection_state{{node_id="{NODE}",state="online"}} 1' in text
     assert f'vonk_node_certificate_state{{node_id="{NODE}",state="valid"}} 1' in text
@@ -133,7 +134,8 @@ def test_metrics_use_typed_fleet_evidence_without_health_or_probe_fields() -> No
     )
     assert "vonk_node_ready" not in text
     assert "probe" not in text.lower()
-    assert "192.168." not in text and "node.local" not in text
+    assert "192.168." not in text
+    assert "node.local" not in text
 
 
 def test_metrics_keep_missing_and_stale_evidence_distinct() -> None:
@@ -232,8 +234,8 @@ def test_backup_metrics_report_never_succeeded_and_restore_verification_age() ->
     assert "vonk_control_backup_restore_verified 0" in text
     assert "vonk_control_backup_age_seconds" not in text
 
-    metrics.set_backup_successful(True)
-    metrics.set_backup_restore_verified(True)
+    metrics.set_backup_successful(successful=True)
+    metrics.set_backup_restore_verified(verified=True)
     metrics.set_backup_age(120)
     metrics.set_backup_restore_verification_age(240)
     text = metrics.render()
@@ -248,7 +250,8 @@ def test_metric_labels_are_allowlisted_and_unknown_values_collapse() -> None:
     metrics.set_job_count("user-supplied-unique-kind", "surprise", 3)
     text = metrics.render()
     assert 'kind="other",state="other"' in text
-    assert "user-supplied" not in text and "surprise" not in text
+    assert "user-supplied" not in text
+    assert "surprise" not in text
 
 
 def test_job_count_snapshot_replaces_previous_states() -> None:
@@ -424,7 +427,7 @@ def test_metrics_export_host_and_engine_readings_and_omit_what_is_not_reported()
 
     # An older agent reports none of them; no engine source reports no engines.
     older = MetricsRegistry()
-    older.set_fleet_source(lambda: _fleet_snapshot())
+    older.set_fleet_source(_fleet_snapshot)
     older_text = older.render()
     assert "vonk_node_fan_rpm" not in older_text
     assert "vonk_engine_" not in older_text

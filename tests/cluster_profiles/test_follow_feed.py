@@ -75,7 +75,8 @@ def test_view_carries_the_servers_numbers_and_a_known_reason():
     )
     bars = live_lines(application)
     assert len(bars) == 3
-    assert "512.0 MiB/s" in bars[1] and "/s" not in bars[2]
+    assert "512.0 MiB/s" in bars[1]
+    assert "/s" not in bars[2]
 
 
 def test_plain_cadence_is_phase_change_or_thirty_seconds():

@@ -3,21 +3,59 @@
 from __future__ import annotations
 
 import json
+import uuid
+from datetime import UTC, datetime
 from importlib.resources import files
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import ValidationError
-from vonk_agent_protocol.contracts import canonical_message
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from cluster_profiles.cli_render.dispatch import render_payload
 from vonk_agent_protocol.gpu_clock import (
     GPU_CLOCK_POLICY,
     GpuClockApplyState,
     GpuClockIntent,
+    GpuClockObservation,
     GpuClockRange,
     GpuClockSupport,
     default_gpu_clock,
 )
 from vonk_agent_protocol.host_helper import ApplyGpuClockOperation, parse_host_operation
+from vonk_agent_protocol.inventory import (
+    HostSettings,
+    InventoryRequest,
+    InventoryVerdict,
+)
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.definitions import FleetProfileDefinition
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.gpu.clock import gpu_clock_start_intent
+from vonk_control.gpu.clock_validation import assess_gpu_clock
+from vonk_control.host_helper_authority import (
+    HostHelperGrantIssuer,
+    HostRuntimeAuthorityService,
+)
+from vonk_control.inventory.repository import (
+    InventoryRepository,
+    NodeInventoryReport,
+)
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
+from vonk_control.telemetry.samples import TelemetryRepository
+
+from .agent_api_support import (
+    NODE_A,
+    agent_headers,
+    make_agent_system,
+    telemetry_payload,
+)
+from .agent_api_support import agent_system as _agent_system
 
 NODE = "spk_" + "a" * 32
 
@@ -85,19 +123,6 @@ def test_profile_assignments_roundtrip_and_refuse_conflicting_ranges() -> None:
 
 def test_run_switch_warns_above_default_without_requiring_supported_levels() -> None:
     """Catches refusing GB10 policy-valid intent solely for missing clock levels."""
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol.inventory import HostSettings
-    from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-    from vonk_control.gpu.clock_validation import assess_gpu_clock
-    from vonk_control.inventory.repository import (
-        InventoryRepository,
-        NodeInventoryReport,
-    )
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.fleet import AgentNode
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -139,19 +164,15 @@ def test_run_switch_warns_above_default_without_requiring_supported_levels() -> 
     repository.record(observation)
     with sessions() as session:
         blockers, warnings = assess_gpu_clock(
-            session, [NODE], GpuClockRange(min_mhz=300, max_mhz=2250)
+            [NODE], GpuClockRange(min_mhz=300, max_mhz=2250)
         )
         assert not blockers
         assert [warning.code for warning in warnings] == [
             RunSwitchCode.GPU_CLOCK_ABOVE_DEFAULT
         ]
-        blockers, _ = assess_gpu_clock(
-            session, [NODE], GpuClockRange(min_mhz=200, max_mhz=1800)
-        )
+        blockers, _ = assess_gpu_clock([NODE], GpuClockRange(min_mhz=200, max_mhz=1800))
         assert not blockers
-        blockers, _ = assess_gpu_clock(
-            session, ["spk_" + "b" * 32], default_gpu_clock()
-        )
+        blockers, _ = assess_gpu_clock(["spk_" + "b" * 32], default_gpu_clock())
         assert not blockers
 
 
@@ -170,18 +191,6 @@ def test_uncapped_attention_requires_receipt_and_current_evidence(
     state, receipt, graphics, sm, throttle, warns
 ) -> None:
     """Catches false alarms on hardware maxima and idle clocks masking missing receipts."""
-    import uuid
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol.gpu_clock import GpuClockObservation
-    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-    from vonk_agent_protocol.telemetry import TelemetrySample
-    from vonk_control.fleet_projection.service import FleetProjection
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.telemetry.samples import TelemetryRepository
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -232,7 +241,8 @@ def test_uncapped_attention_requires_receipt_and_current_evidence(
     ]
     assert bool(warnings) == warns
     if state == GpuClockApplyState.WAITING:
-        assert node.telemetry is not None and node.telemetry.sample is not None
+        assert node.telemetry is not None
+        assert node.telemetry.sample is not None
         assert node.telemetry.sample.gpu_clock is not None
         assert node.telemetry.sample.gpu_clock.detail == cause
         assert "1060" in warnings[0].detail
@@ -243,10 +253,6 @@ def test_start_always_binds_the_selected_clock_without_supported_levels(
     monkeypatch, maximum
 ) -> None:
     """Catches dropping clock intent on GB10 and relying on another boot writer."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session
-    from vonk_control.gpu.clock import gpu_clock_start_intent
-    from vonk_control.model_primitives import Base
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -260,14 +266,6 @@ def test_start_always_binds_the_selected_clock_without_supported_levels(
         assert gpu_clock_start_intent(session, NODE) == desired
 
 
-from .agent_api_support import (
-    NODE_A,
-    agent_headers,
-    make_agent_system,
-    telemetry_payload,
-)
-from .agent_api_support import agent_system as _agent_system
-
 agent_system = _agent_system
 
 
@@ -275,11 +273,6 @@ def test_shared_agent_observation_crosses_controller_storage_projection_and_cli(
     tmp_path, postgres_engine, capsys
 ) -> None:
     """Catches any producer/store/projection/client dropping real clock evidence."""
-    from vonk_agent_protocol.gpu_clock import GpuClockObservation
-    from vonk_agent_protocol.telemetry import TelemetryRequest
-    from vonk_control.fleet_projection.service import FleetProjection
-
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
     vectors = json.loads(
@@ -307,7 +300,8 @@ def test_shared_agent_observation_crosses_controller_storage_projection_and_cli(
         .nodes
         if node.id == NODE_A
     )
-    assert node.telemetry is not None and node.telemetry.sample is not None
+    assert node.telemetry is not None
+    assert node.telemetry.sample is not None
     assert node.telemetry.sample.gpu_clock == report.samples[0].gpu_clock
     render_payload(node.model_dump(mode="json"), "fleet", action="detail")
     output = capsys.readouterr().out
@@ -321,18 +315,8 @@ def test_inventory_without_supported_levels_still_gets_a_clock_reconciliation_gr
     agent_system,
 ) -> None:
     """Catches the silent grant gate when GB10 supported-clock inventory is absent."""
-    from vonk_agent_protocol.inventory import (
-        HostSettings,
-        InventoryRequest,
-        InventoryVerdict,
-    )
 
     client, services, _, clock = agent_system
-    from cryptography.hazmat.primitives.asymmetric import ed25519
-    from vonk_control.host_helper_authority import (
-        HostHelperGrantIssuer,
-        HostRuntimeAuthorityService,
-    )
 
     signer = HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=clock)
     object.__setattr__(

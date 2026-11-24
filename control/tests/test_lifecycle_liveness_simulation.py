@@ -24,14 +24,16 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
 from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profiles import control_effects
+from vonk_control.fleet_profiles.continuing_effects import _continuing_effects
 from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
-from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import ACTIVE_RUN_STATES, RecipeRun
 from vonk_control.models.fleet import FleetProfileApplication
@@ -142,7 +144,8 @@ def test_a_single_spark_load_replaces_a_run_across_both_sparks(
         pair = _loaded(sim, "pair", [world.assignment(PAIR, world.nodes)])
         assert sim.settle(pair) == "succeeded"
         [pair_runs, also_pair] = _serving(sim)
-        assert len(pair_runs) == 1 and also_pair == pair_runs
+        assert len(pair_runs) == 1
+        assert also_pair == pair_runs
         solo = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
         intended = world.controller.profiles.application(solo).progress
         assert intended.intended_profile is not None
@@ -151,12 +154,14 @@ def test_a_single_spark_load_replaces_a_run_across_both_sparks(
 
         assert sim.settle(solo) == "succeeded"
         [solo_runs, idle] = _serving(sim)
-        assert len(solo_runs) == 1 and solo_runs != pair_runs
+        assert len(solo_runs) == 1
+        assert solo_runs != pair_runs
         assert idle == set()
         with world.sessions() as session:
             [pair_run] = pair_runs
             stopped = session.get(RecipeRun, pair_run)
-            assert stopped is not None and stopped.state == RunState.STOPPED
+            assert stopped is not None
+            assert stopped.state == RunState.STOPPED
         again = _loaded(sim, "pair again", [world.assignment(PAIR, world.nodes)])
         assert sim.settle(again) == "succeeded"
     finally:
@@ -174,12 +179,14 @@ def test_a_load_across_both_sparks_replaces_a_single_spark_run(
         solo = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
         assert sim.settle(solo) == "succeeded"
         [solo_runs, idle] = _serving(sim)
-        assert len(solo_runs) == 1 and idle == set()
+        assert len(solo_runs) == 1
+        assert idle == set()
 
         pair = _loaded(sim, "pair", [world.assignment(PAIR, world.nodes)])
         assert sim.settle(pair) == "succeeded"
         [pair_runs, also_pair] = _serving(sim)
-        assert len(pair_runs) == 1 and also_pair == pair_runs != solo_runs
+        assert len(pair_runs) == 1
+        assert also_pair == pair_runs != solo_runs
     finally:
         world.close()
 
@@ -491,18 +498,15 @@ def _reviewed_before_the_fix(monkeypatch: pytest.MonkeyPatch, kept: set[str]) ->
     did not look at this decision's other placements there (an upgrade keeps
     such a stored plan in flight)."""
 
-    review = FleetProfileService._continuing_effects
+    review = _continuing_effects
 
     def unseen(item: FleetProfileAssignment) -> FleetProfileAssignment:
         return item if item.id in kept else item.model_copy(update={"nodes": []})
 
-    def before_the_fix(cls, session, assignments, *args, **kwargs):
-        del cls
+    def before_the_fix(session, assignments, *args, **kwargs):
         return review(session, tuple(map(unseen, assignments)), *args, **kwargs)
 
-    monkeypatch.setattr(
-        FleetProfileService, "_continuing_effects", classmethod(before_the_fix)
-    )
+    monkeypatch.setattr(control_effects, "_continuing_effects", before_the_fix)
 
 
 # Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
@@ -547,7 +551,8 @@ def test_a_stored_plan_leaving_a_placement_unstarted_records_it_and_plans_again(
         )
         # The load ends with that evidence; its retry plans again and starts it.
         ended = profiles.application(stacked)
-        assert ended.state == "superseded" and ended.superseded_by is not None
+        assert ended.state == "superseded"
+        assert ended.superseded_by is not None
         assert sim.settle(ended.superseded_by) == "succeeded"
         assert len(spark.serving) == 2
     finally:
@@ -651,10 +656,12 @@ def test_a_stop_order_its_spark_answered_failed_waits_and_the_stop_completes(
 
         assert sim.settle(solo) == "succeeded"
         [[solo_run], idle] = _serving(sim)
-        assert solo_run != pair_run and idle == set()
+        assert solo_run != pair_run
+        assert idle == set()
         with world.sessions() as session:
             stopped = session.get(RecipeRun, pair_run)
-            assert stopped is not None and stopped.state == RunState.STOPPED
+            assert stopped is not None
+            assert stopped.state == RunState.STOPPED
             # The fault fired on the stop order: a retryable failure opened
             # its recovery window.
             [answered_failed] = session.scalars(
@@ -700,7 +707,8 @@ def test_a_load_of_one_of_two_stacked_recipes_stops_the_other(
         assert sim.settle(newer) == "succeeded"
         assert world.controller.profiles.application(older).state == "superseded"
         first, second = _serving(sim)
-        assert first == second and len(first) == 1
+        assert first == second
+        assert len(first) == 1
     finally:
         world.close()
 
@@ -795,7 +803,8 @@ def test_a_load_whose_revision_turns_unreadable_follows_the_newest_revision(
         intended = profiles.application(follower.id).progress.intended_profile
         assert intended is not None
         revisions = {item.recipe_revision_id for item in intended.assignments}
-        assert revisions and not revisions & unreadable
+        assert revisions
+        assert not revisions & unreadable
         assert any(item in (ended.status_reason or "") for item in revisions)
     finally:
         world.close()

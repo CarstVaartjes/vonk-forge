@@ -5,8 +5,12 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
-from .test_recipe_update_batches import update_env
+from vonk_control.models.fleet import User
+from vonk_control.models.jobs import Job
+
+from .test_recipe_update_batches import _start, update_env
 
 __all__ = ["update_env"]
 
@@ -54,10 +58,15 @@ def test_maintenance_cannot_add_an_original_author_permission_gate(
         if function.name in request_boundaries:
             continue
         for node in ast.walk(function):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in {"_authorize", "_user_has_profile_authority"}
+            if isinstance(node, ast.Call) and (
+                (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"_authorize", "_user_has_profile_authority"}
+                )
+                or (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == "_user_has_profile_authority"
+                )
             ):
                 violations.append((source.name, function.name, node.lineno))
             if (
@@ -79,16 +88,13 @@ def test_maintenance_cannot_add_an_original_author_permission_gate(
 
 @pytest.mark.parametrize("maintenance", ["batch-child", "profile-preparation-cancel"])
 def test_accepted_preparation_survives_author_removal(update_env, maintenance):
-    from sqlalchemy import select
-    from vonk_control.models.fleet import User
-    from vonk_control.models.jobs import Job
-
-    from .test_recipe_update_batches import _start
 
     # Use the real preparation producer/store/worker seam. The wrong
     # implementation reauthorizes an accepted child or its profile cleanup.
     sessions, recipes, _now, fresh = update_env
     service = fresh()
+    revision_id = None
+    parent = None
     if maintenance == "batch-child":
         parent = _start(service, list(recipes))
         service.run_update_claim(service.claim_update(owner="worker"))
@@ -106,11 +112,13 @@ def test_accepted_preparation_survives_author_removal(update_env, maintenance):
         session.delete(author)
     if maintenance == "batch-child":
         service.run_update_claim(service.claim_update(owner="worker"))
+        assert parent is not None
         observed = service.get_operator_operation(parent.id)
         assert observed.children[0].operation_id == issued
         assert observed.children[1].operation_id is not None
         assert observed.children[1].failure is None
     else:
+        assert revision_id is not None
         cancelled = service.cancel_profile_preparation(
             revision_id, actor="operator", reason="Accepted profile was cancelled"
         )

@@ -12,7 +12,9 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import AssetAvailability
@@ -22,15 +24,44 @@ from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.model_cache import removal_execution
 from vonk_control.model_cache import states as model_cache_states
 from vonk_control.model_cache.contract import CacheManifest
-from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
 from vonk_control.models.execution import ArtifactJobBlob
 from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability import (
+    removal_execution as image_execution,
+)
+from vonk_control.recipe_image_availability import removal_review as image_review
+from vonk_control.recipe_image_availability.view_contract import (
+    RecipeCacheRemovalStatus,
+    RecipeImageAvailabilityView,
+)
+from vonk_control.runtime_image_preparation.storage import (
+    FilesystemRuntimeImageStorage,
+)
 
 from .artifact_jobs_support import running_artifact_service
 from .model_cache_support import _download, cache  # noqa: F401
 from .non_blocking import assert_ended_without_blocking
+from .recipe_image_availability_support import (
+    ARCHIVE,
+    ARCHIVE_SHA,
+    _add_head,
+    _add_revision,
+    _recipe,
+    _reference_receipt,
+    _runtime,
+    _service,
+)
+from .recipe_removal_review_support import remove_after_review
 from .removal_settle import advance_until_ended, release_ended_gates
-from .test_model_cache_lifecycle import _clock_at, _queue
+from .runtime_image_fixtures import place_test_image
+from .test_model_cache_lifecycle import MODEL, _clock_at, _queue
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -90,10 +121,8 @@ def test_new_download_repairs_different_stored_content_and_membership(
                 == accepted.artifact_set_sha256
             )
         )
-        assert (
-            member is not None
-            and member.artifact_sha256 == hashlib.sha256(b"x").hexdigest()
-        )
+        assert member is not None
+        assert member.artifact_sha256 == hashlib.sha256(b"x").hexdigest()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -114,9 +143,8 @@ def test_unreadable_manifest_projects_unknown_assets_and_keeps_bytes(
         assert row is not None
         row.manifest = {}
     assets = service.removal_asset_status(scope)
-    assert assets and all(
-        asset.availability == AssetAvailability.UNKNOWN for asset in assets
-    )
+    assert assets
+    assert all(asset.availability == AssetAvailability.UNKNOWN for asset in assets)
     assert all(asset.available_bytes is None for asset in assets)
     assert service._object_path(hashlib.sha256(b"x").hexdigest()).read_bytes() == b"x"
     fresh, _ = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -142,7 +170,8 @@ def test_verified_blob_ingress_repairs_stale_sql_metadata(tmp_path: Path):
         ArtifactJobService._put_blob_in_session(session, stored, now)
     with sessions() as session:
         row = session.get(ArtifactJobBlob, digest)
-        assert row is not None and row.size_bytes == len(data)
+        assert row is not None
+        assert row.size_bytes == len(data)
         assert row.storage_key == stored.storage_key
     assert stored.path.read_bytes() == data
 
@@ -196,33 +225,6 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, restored: bool
 ):
     """Catches refusing removal before durable intent or unlinking on an unknown scan."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from vonk_control.model_primitives import Base
-    from vonk_control.recipe_image_availability import (
-        removal_execution as image_execution,
-    )
-    from vonk_control.recipe_image_availability import removal_review as image_review
-    from vonk_control.recipe_image_availability.view_contract import (
-        RecipeCacheRemovalStatus,
-        RecipeImageAvailabilityView,
-    )
-    from vonk_control.runtime_image_preparation.storage import (
-        FilesystemRuntimeImageStorage,
-    )
-
-    from .recipe_image_availability_support import (
-        ARCHIVE,
-        ARCHIVE_SHA,
-        _add_head,
-        _add_revision,
-        _recipe,
-        _reference_receipt,
-        _runtime,
-        _service,
-    )
-    from .recipe_removal_review_support import remove_after_review
-    from .runtime_image_fixtures import place_test_image
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -278,7 +280,8 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
                 assert waiting.state == LifecycleState.BACKOFF
                 with sessions() as session:
                     pending = session.get(Job, waiting.operation_id)
-                    assert pending is not None and pending.next_action_at is not None
+                    assert pending is not None
+                    assert pending.next_action_at is not None
                 assert receipt_path.exists()
                 assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
     now[0] += timedelta(minutes=1)
@@ -306,7 +309,6 @@ def test_logical_removal_discovers_missing_index_only_after_admission(
     cache, tmp_path: Path
 ):
     """Catches an absent set index producing a successful empty removal."""
-    from .test_model_cache_lifecycle import MODEL
 
     service, sessions = cache
     cached, artifact = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -344,7 +346,6 @@ def test_newer_preparation_wins_before_pending_scope_acquires_gates(
     cache, tmp_path: Path
 ):
     """Catches pending discovery deleting bytes a newer request already reused."""
-    from .test_model_cache_lifecycle import MODEL
 
     service, sessions = cache
     now = _clock_at(service)
@@ -387,7 +388,6 @@ def test_newer_preparation_wins_before_pending_scope_acquires_gates(
 
 def test_explicit_empty_scope_cannot_expand_to_logical_content(cache, tmp_path: Path):
     """Catches scope reconstruction broadening an explicitly empty effect."""
-    from .test_model_cache_lifecycle import MODEL
 
     service, sessions = cache
     cached, artifact = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -478,7 +478,6 @@ def test_scope_observation_recovers_same_removal_without_inventing_objects(
     cache, tmp_path: Path
 ):
     """Catches damaged scope deleting guessed objects or poisoning a new request."""
-    from vonk_control.models.cache import ModelCacheOperation
 
     service, sessions = cache
     accepted, _ = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -488,7 +487,8 @@ def test_scope_observation_recovers_same_removal_without_inventing_objects(
     with sessions.begin() as session:
         row = session.get(ModelCacheSet, digest)
         producer = session.get(ModelCacheOperation, accepted.id)
-        assert row is not None and producer is not None
+        assert row is not None
+        assert producer is not None
         original_manifest, original_payload = row.manifest, producer.payload
         row.manifest = {}
         producer.payload = {}
@@ -511,7 +511,8 @@ def test_scope_observation_recovers_same_removal_without_inventing_objects(
     with sessions.begin() as session:
         row = session.get(ModelCacheSet, digest)
         producer = session.get(ModelCacheOperation, accepted.id)
-        assert row is not None and producer is not None
+        assert row is not None
+        assert producer is not None
         row.manifest, producer.payload = original_manifest, original_payload
     advance_until_ended(service, removal.id)
     assert service.get_operation(removal.id).state == LifecycleState.SUCCEEDED
@@ -524,7 +525,8 @@ def test_scope_observation_recovers_same_removal_without_inventing_objects(
             selector="exact-content",
             selected_sets=(digest,),
         )
-    assert fresh.state in model_cache_states.LIVE and fresh.id != removal.id
+    assert fresh.state in model_cache_states.LIVE
+    assert fresh.id != removal.id
 
 
 @pytest.mark.parametrize("damage", ["missing", "unreadable", "size"])
@@ -533,25 +535,6 @@ def test_recipe_receipt_observation_is_request_owned(
     tmp_path: Path, damage: str, repair: bool
 ):
     """Catches receipt admission veto, unverified deletion and permanently owned bytes."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.cache import ArtifactLifecycleGate
-    from vonk_control.runtime_image_preparation.storage import (
-        FilesystemRuntimeImageStorage,
-    )
-
-    from .recipe_image_availability_support import (
-        ARCHIVE,
-        ARCHIVE_SHA,
-        _add_head,
-        _add_revision,
-        _recipe,
-        _reference_receipt,
-        _runtime,
-        _service,
-    )
-    from .runtime_image_fixtures import place_test_image
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -595,15 +578,13 @@ def test_recipe_receipt_observation_is_request_owned(
         service.advance_removals(limit=1)
     if not repair:
         waiting = service.get_operator_request(request_key, actor="operator")
-        from vonk_control.recipe_image_availability.view_contract import (
-            RecipeCacheRemovalStatus,
-        )
 
         assert isinstance(waiting, RecipeCacheRemovalStatus)
         assert waiting.state == LifecycleState.BACKOFF
         with sessions() as session:
             pending = session.get(Job, waiting.operation_id)
-            assert pending is not None and pending.next_action_at is not None
+            assert pending is not None
+            assert pending.next_action_at is not None
         assert (storage.layout.root / "blobs" / "sha256" / ARCHIVE_SHA).exists()
         # The cause clears after the former ceiling; no new request is needed.
         receipt_path.write_text(valid)
@@ -637,7 +618,6 @@ def test_exact_scope_owner_repair_is_independent_of_inventory_cursor(
     cache, tmp_path: Path, owner_damage: str
 ):
     """Catches repairing only the first global batch and retaining the exact old fence."""
-    from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 
     service, sessions = cache
     accepted, _ = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -705,7 +685,8 @@ def test_exact_scope_owner_repair_is_independent_of_inventory_cursor(
         assert exact is None or exact.removal_owner_id is None
         if owner_damage in {"payload", "coverage"}:
             damaged = session.get(ModelCacheOperation, old.id)
-            assert damaged is not None and damaged.state not in model_cache_states.LIVE
+            assert damaged is not None
+            assert damaged.state not in model_cache_states.LIVE
     next_request, _ = _queue(service, tmp_path, str(uuid.uuid4()))
     service.run_pending()
     assert service.get_operation(next_request.id).state == LifecycleState.SUCCEEDED

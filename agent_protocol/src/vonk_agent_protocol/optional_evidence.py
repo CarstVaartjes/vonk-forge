@@ -33,8 +33,8 @@ from typing import Any, ClassVar, NamedTuple
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError, model_validator
 from pydantic_core.core_schema import ValidatorFunctionWrapHandler
 
-from .reason_codes.evidence import AgentEvidenceCode
-from .wire_model import WireModel
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
+from vonk_agent_protocol.wire_model import WireModel
 
 
 class EvidenceGroup(NamedTuple):
@@ -303,7 +303,7 @@ def fail_open_on_optional_evidence() -> Any:
     checks, whose failures it must see.
     """
 
-    return model_validator(mode="wrap")(classmethod(_drop_invalid_optional_evidence))
+    return model_validator(mode="wrap")(_drop_invalid_optional_evidence)
 
 
 __all__ = [

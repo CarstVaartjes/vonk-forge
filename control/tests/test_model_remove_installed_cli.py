@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog.entities import CatalogEntityService
@@ -314,6 +315,7 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
                     CatalogDocumentRevision.content_digest == active.content_digest
                 )
             )
-            assert active_head is not None and active_head.state == "active"
+            assert active_head is not None
+            assert active_head.state == "active"
     finally:
         cache.close()

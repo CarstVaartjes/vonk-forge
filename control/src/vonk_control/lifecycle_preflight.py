@@ -5,101 +5,46 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
 
-from pydantic import (
-    AwareDatetime,
-    ConfigDict,
-    Field,
-    StringConstraints,
-)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
-    ProgressAlarmCode,
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
-from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
-
-from .failure_classification import is_security_failure
-from .inventory.items import inventory_items
-from .inventory.items_contract import PreflightInventoryItem
-from .lifecycle.job import JobAdapter
-from .models.fleet import AgentNode
-from .models.jobs import Job
-from .models.operations import AgentOperation, AgentOperationAttempt
-from .operations.blockers import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
+from vonk_control.failure_classification import is_security_failure
+from vonk_control.inventory.items import inventory_items
+from vonk_control.lifecycle.job import JobAdapter
+from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.blockers import (
     MAX_BLOCKERS,
     BlockingOperation,
-    OperationBlocker,
     make_blocker,
 )
-from .persisted_waits import read_wait, typed_wait_reason
-from .recovery_policy import RECOVERY
-from .runtime.preflight import (
+from vonk_control.persisted_waits import read_wait
+from vonk_control.recovery_policy import RECOVERY
+from vonk_control.runtime.preflight import (
     admission_blockers,
     latest_result,
     recipe_requirements,
     request_digest,
 )
-from .strict_json import StrictJSONModel
+from vonk_control.wait_contract import typed_wait_reason
 
-NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 # The agent bounds probe execution. After its normal delivery/reporting window,
 # observe less frequently while that same fenced operation owns recovery.
 PENDING_PROBE_NORMAL_WINDOW = timedelta(seconds=180)
 PROBE_OBSERVATION_INTERVAL = timedelta(seconds=5)
 DELAYED_PROBE_OBSERVATION_INTERVAL = timedelta(seconds=60)
-UuidId = Annotated[
-    str,
-    StringConstraints(
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-    ),
-]
-
-
-class LifecyclePreflightCheckpoint(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-    phase_index: int = Field(ge=0, le=31)
-    pending_jobs: dict[NodeId, UuidId] = Field(default_factory=dict)
-    retry_at: dict[NodeId, AwareDatetime] = Field(default_factory=dict)
-    next_check_at: AwareDatetime | None = None
-    last_failure_code: OperationReason | None = None
-    last_failure_detail: str | None = None
-    attempts: dict[NodeId, Annotated[int, Field(ge=1)]] = Field(default_factory=dict)
-    receipts: dict[NodeId, PreflightInventoryItem] = Field(default_factory=dict)
-    #: What the pending probes wait for now: each queued child's own persisted
-    #: queue wait (its typed reason, blocking operation and Spark), replaced on
-    #: every check. The reason that started the round is not the current wait.
-    child_waits: list[OperationBlocker] = Field(
-        default_factory=list, max_length=MAX_BLOCKERS
-    )
-
-    @property
-    def current_reason(self) -> OperationReason | ProgressAlarmCode | None:
-        """The reason this round waits now: a queued probe's own wait first."""
-        return self.child_waits[0].code if self.child_waits else self.last_failure_code
-
-    def current_blockers(self, node_ids: list[str]) -> list[OperationBlocker]:
-        """Every dependency of this round: each queued probe's own wait, then the
-        checkpoint's reason for the Sparks backing off that no probe wait names."""
-        reason = typed_wait_reason(
-            self.last_failure_code, RuntimePreflightCode.REQUIRED
-        )
-        detail = self.last_failure_detail or reason.value
-        if not self.child_waits:
-            return [make_blocker(reason, detail, node_ids=node_ids)]
-        named = {node for blocker in self.child_waits for node in blocker.node_ids}
-        backing_off = sorted(set(self.retry_at) - named)
-        own = (
-            [make_blocker(reason, detail, node_ids=backing_off)] if backing_off else []
-        )
-        return [*self.child_waits, *own][:MAX_BLOCKERS]
 
 
 def end_unclaimed_probes(
@@ -111,7 +56,6 @@ def end_unclaimed_probes(
     hold the Spark's claim lane for nobody. A claimed probe reports its own end.
     """
     # agent_jobs builds on the lifecycle core; import its writer at use.
-    from .agent_jobs.retry import abandon_idempotent_job_in_session
 
     for child_id in checkpoint.pending_jobs.values():
         abandon_idempotent_job_in_session(
@@ -208,6 +152,7 @@ class LifecyclePreflight:
                     checkpoint.attempts[node_id] = attempt
                 receipt = latest_result(session, node_id, requirements_sha256=digest)
                 child_id = checkpoint.pending_jobs.get(node_id)
+                failure = None
                 if child_id is not None:
                     child = session.get(Job, child_id)
                     operation = session.scalar(
@@ -216,7 +161,6 @@ class LifecyclePreflight:
                             AgentOperation.node_id == node_id,
                         )
                     )
-                    failure = None
                     error_code = None
                     if child is None:
                         failure = RuntimePreflightCode.CHILD_MISSING

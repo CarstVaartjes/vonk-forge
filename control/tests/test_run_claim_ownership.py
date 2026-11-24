@@ -13,10 +13,12 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
@@ -108,7 +110,8 @@ def _old_contract_run_does_not_block_a_new_load(
     assert bool(_claims(sessions, run_id)) is (state != "failed")
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == state
+        assert run is not None
+        assert run.state == state
     review = profiles.preview(profile.id)
     assert not _codes(review) & _CLAIM_BLOCKERS
     assert review.allowed, _codes(review)
@@ -174,7 +177,6 @@ def _load_over(tmp_path: Path, *, state: str, plan_readable: bool, engine=None):
 
 
 def _selector(sessions) -> str:
-    from vonk_control.models.catalog import CatalogDocumentRevision
 
     with sessions() as session:
         revision = session.scalar(
@@ -260,7 +262,8 @@ def _lost_run_absence_releases_claims(tmp_path: Path, *, engine=None) -> None:
     assert _claims(sessions, run_id) == set()
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
     review = profiles.preview(profile.id)
     assert not _codes(review) & _CLAIM_BLOCKERS
     assert review.allowed, _codes(review)
@@ -330,7 +333,8 @@ def test_exact_running_claim_is_replaced_by_stop_and_fresh_inventory_on_postgres
                 requirement.memory_required_bytes,
                 requirement.memory_floor_bytes,
             )
-            assert demand is not None and floor is not None
+            assert demand is not None
+            assert floor is not None
             capacity = demand + floor + 1
             snapshot.host_memory_total_bytes = capacity
             snapshot.host_memory_free_bytes = capacity

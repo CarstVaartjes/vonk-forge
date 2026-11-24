@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
+from typing import Any
 
 import pytest
 from cryptography import x509
@@ -18,17 +19,21 @@ from cryptography.hazmat.primitives import serialization
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
+
+from cluster_profiles.generated_control.api.default import get_job
+from cluster_profiles.generated_control.client import AuthenticatedClient
+from cluster_profiles.generated_control.models.job_detail_response import (
+    JobDetailResponse as GeneratedJobDetailResponse,
+)
+from vonk_agent_protocol.agent_operations import AgentFailureResult, AgentOperation
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentDirective,
-    AgentFailureResult,
-    AgentOperation,
     AgentProgress,
     AgentResult,
-    canonical_message,
 )
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_jobs.stored import column_message
 from vonk_control.failure_evidence import safe_text
 from vonk_control.models.operations import AgentOperationAttempt
@@ -39,12 +44,6 @@ from vonk_control.operation_api.contracts import (
     OperationPage,
 )
 from vonk_control.operations.item_contract import OperationItem, OperationResultFacts
-
-from cluster_profiles.generated_control.api.default import get_job
-from cluster_profiles.generated_control.client import AuthenticatedClient
-from cluster_profiles.generated_control.models.job_detail_response import (
-    JobDetailResponse as GeneratedJobDetailResponse,
-)
 
 from .agent_api_support import NODE_A, agent_headers, make_agent_system, parent
 from .cross_language_consumer_corpus import (
@@ -128,10 +127,12 @@ def test_lossy_numeric_mutation_is_detected() -> None:
 
 
 def job_diagnostics(job: JobDetailResponse) -> FailureDiagnostics:
-    assert job.state == "failed" and job.kind == "recipe.stop"
+    assert job.state == "failed"
+    assert job.kind == "recipe.stop"
     assert job.targets == [NODE]
     assert job.projection_issue is None
-    assert job.operations is not None and len(job.operations) == 1
+    assert job.operations is not None
+    assert len(job.operations) == 1
     assert job.operations[0].id == OPERATION
     assert job.operations[0].node_id == NODE
     assert job.operations[0].state == "failed"
@@ -141,7 +142,7 @@ def job_diagnostics(job: JobDetailResponse) -> FailureDiagnostics:
     return failure.diagnostics
 
 
-def api_with_diagnostic(leaf: dict):
+def api_with_diagnostic(leaf: dict[str, Any]):
     # Only the observation source is injected; production create_app, projection,
     # authentication, response serialization, generated HTTP and CLI all execute.
     jobs = Jobs()
@@ -310,7 +311,7 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, *_args):
+        def log_message(self, format: str, *_args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -355,7 +356,8 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
         if status == 200:
             directive = AgentDirective.model_validate_json(result.stdout)
             assert directive == AgentDirective.model_validate_json(body)
-            assert len(received) == 1 and received[0][0] == "/agent/heartbeat"
+            assert len(received) == 1
+            assert received[0][0] == "/agent/heartbeat"
             assert AgentProgress.model_validate_json(
                 received[0][1]
             ) == AgentProgress.model_validate_json(selected["text"])

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import sys
 import termios
+from pathlib import Path
 from typing import TextIO
 
 from vonk_agent_protocol.installer_setup import (
@@ -14,8 +15,7 @@ from vonk_agent_protocol.installer_setup import (
     single_line,
     valid_required_value,
 )
-
-from .filesystem import MAX_MEMBER_BYTES, SetupError
+from vonk_nas_setup.filesystem import MAX_MEMBER_BYTES, SetupError
 
 
 class InputEnded(SetupError):
@@ -44,11 +44,11 @@ class PromptIo:
 
     def line(self, label: str, *, secret: bool = False) -> str:
         if self.remaining_input_bytes <= 0:
-            raise InputEnded()
+            raise InputEnded
         if self.reader is None:
             # Echo control is mandatory. A terminal/provider failure cannot
             # fall back to echoing stdin on headless hosts.
-            with open("/dev/tty", "r+", encoding="utf-8") as terminal:
+            with Path("/dev/tty").open("r+", encoding="utf-8") as terminal:
                 if secret:
                     original = termios.tcgetattr(terminal.fileno())
                     hidden = original.copy()
@@ -76,7 +76,7 @@ class PromptIo:
         if self.remaining_input_bytes < 0:
             raise SetupError("setup input exceeds its private-file byte limit")
         if value == "":
-            raise InputEnded()
+            raise InputEnded
         return value.rstrip("\r\n")
 
     def required(self, prompt: NasRequiredValuePrompt) -> str:
@@ -94,7 +94,7 @@ class PromptIo:
                 self.answers[key] = value
                 return value
             self.note("The value is invalid.")
-        raise InputEnded()
+        raise InputEnded
 
     def secret(self, prompt: NasSecretPrompt) -> str:
         key = prompt.file
@@ -109,7 +109,7 @@ class PromptIo:
                 self.answers[key] = value
                 return value
             self.note("The value is invalid.")
-        raise InputEnded()
+        raise InputEnded
 
     def install_mode(self, modes: NasInstallModes) -> bool:
         other = (
@@ -125,7 +125,7 @@ class PromptIo:
             if answer in (modes.lab_value, modes.secure_remote_value):
                 return answer == modes.lab_value
             self.note(f"Choose {modes.lab_value} or {modes.secure_remote_value}.")
-        raise InputEnded()
+        raise InputEnded
 
     def confirm(self, label: str) -> bool:
         while self.remaining_input_bytes > 0:
@@ -133,4 +133,4 @@ class PromptIo:
             if value in ("y", "yes", "", "n", "no"):
                 return value in ("y", "yes")
             self.note("Please answer yes or no.")
-        raise InputEnded()
+        raise InputEnded

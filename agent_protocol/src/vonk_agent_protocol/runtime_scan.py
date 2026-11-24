@@ -13,7 +13,7 @@ from typing import Annotated
 
 from pydantic import Field, field_validator
 
-from .wire_model import WireModel
+from vonk_agent_protocol.wire_model import WireModel
 
 # These are the actual native off_t/stat integer domains, not workload or
 # retained-history limits. Bounds stay on the integer inside nullable fields.

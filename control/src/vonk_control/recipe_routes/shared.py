@@ -7,7 +7,7 @@ import logging
 import re
 import threading
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -16,6 +16,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.enrollment import NodeId
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -25,14 +26,13 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.route_activation import ActivationMarker
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
-from ..failure_classification import disposition
-from ..gateway.litellm import LiteLlmGeneration, LiteLlmPolicy, RouteState
-from ..gateway.route_bundle_contract import RouteEndpointDocument
-from ..models.jobs import Job
-from ..models.routes import RoutePublication, RoutePublicationOwner
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
+from vonk_control.failure_classification import disposition
+from vonk_control.gateway.litellm import LiteLlmGeneration, LiteLlmPolicy, RouteState
+from vonk_control.gateway.route_bundle_contract import RouteEndpointDocument
+from vonk_control.models.jobs import Job
+from vonk_control.models.routes import RoutePublication, RoutePublicationOwner
 
 _NODE_ID = TypeAdapter(NodeId)
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
@@ -282,7 +282,7 @@ def lock_route_publication_owner_in_session(
 def route_publication_transaction(
     sessions: sessionmaker[Session],
     pauses: Sequence[float] = REQUEST_PAUSES,
-) -> Iterator[Session]:
+) -> Generator[Session]:
     """Reobserve acquisition in fresh transactions; never retry the caller's body.
 
     ``pauses=()`` tries once, for a caller that paces a held owner itself.
@@ -290,8 +290,8 @@ def route_publication_transaction(
     last: RecipeRouteNotReady | None = None
     for _attempt in bounded_attempts(pauses):
         stack = ExitStack()
+        session = stack.enter_context(sessions())
         try:
-            session = stack.enter_context(sessions())
             if session.get_bind().dialect.name == "sqlite":
                 if not _SQLITE_ROUTE_PUBLICATION_LOCK.acquire(blocking=False):
                     raise RecipeRouteOwnerBusy("route publication owner is busy")

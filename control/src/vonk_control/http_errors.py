@@ -5,6 +5,7 @@ from typing import Literal, NoReturn
 from fastapi import HTTPException
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 
 DEFAULT_RETRY_AFTER = 5

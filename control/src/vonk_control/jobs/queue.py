@@ -14,20 +14,20 @@ from datetime import UTC, datetime, timedelta
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import ColumnElement, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
     WaitReason,
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..categorized_errors import InvalidType, InvalidValue, MissingRecord
-from ..compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
-from ..lifecycle.job import JobAdapter
-from ..models.jobs import Job, JobAttempt
-from ..models.operations import AgentOperation
-from ..optimistic import Stale, transition
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.categorized_errors import InvalidType, InvalidValue, MissingRecord
+from vonk_control.compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
+from vonk_control.lifecycle.job import JobAdapter
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.models.operations import AgentOperation
+from vonk_control.optimistic import Stale, transition
 
 _SENSITIVE = re.compile(r"(?i)(password|secret|token|private.?key|authorization)")
 _MAX_PAYLOAD = 65_536
@@ -129,7 +129,7 @@ def _canonical_payload(
                         "job payload keys must be strings",
                         reason=InvalidRequestReason.MALFORMED,
                     )
-                child_path = path + (key,)
+                child_path = (*path, key)
                 if _SENSITIVE.search(key) and child_path not in safe_quota_fields:
                     raise InvalidValue(
                         "job payload contains a sensitive field",

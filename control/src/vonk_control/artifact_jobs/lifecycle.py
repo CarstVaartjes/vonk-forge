@@ -19,6 +19,7 @@ from sqlalchemy import BigInteger, String, and_, any_, bindparam, func, or_, sel
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -27,12 +28,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
-
-from ..categorized_errors import InvalidValue
-from ..jobs import states as job_states
-from ..model_cache import states as model_cache_states
-from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
-from ..models.jobs import Job
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
+from vonk_control.jobs import states as job_states
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
+from vonk_control.models.jobs import Job
 
 ArtifactKind = Literal["model-set", "model-object", "runtime-image"]
 RemovalOwnerKind = Literal["model-cache-operation", "recipe-image-job"]
@@ -51,7 +52,7 @@ class ArtifactIdentity:
                 "artifact lifecycle kind is invalid",
                 reason=InvalidRequestReason.UNSUPPORTED,
             )
-        if not isinstance(self.sha256, str) or _DIGEST.fullmatch(self.sha256) is None:
+        if not isinstance(self.sha256, str) or _DIGEST.fullmatch(self.sha256) is None:  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             raise InvalidValue(
                 "artifact lifecycle digest is invalid",
                 reason=InvalidRequestReason.MALFORMED,
@@ -733,8 +734,6 @@ def release_dead_removal_nowait(
     # operation JSON. NAS-only gates have no outstanding remote authority.
     expires_at = row.removal_authority_expires_at
     if expires_at is not None:
-        from ..fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
-
         expires_at = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
         if isinstance(owner, ModelCacheOperation):
             ended_at = owner.completed_at or owner.updated_at

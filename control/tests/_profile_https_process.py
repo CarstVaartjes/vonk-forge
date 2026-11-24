@@ -10,24 +10,27 @@ import socket
 from pathlib import Path
 
 import uvicorn
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from tests.fleet_profiles_support import _SwitchAdapter
+from tests.test_fleet_profiles_canonical import NOW
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.jobs.queue import JobService
 
-from tests.fleet_profiles_support import _SwitchAdapter
-from tests.test_fleet_profiles_canonical import NOW
-
 
 def _app(trace_path: Path):
     database_url = os.environ["VONK_TEST_DATABASE_URL"]
-    from sqlalchemy import create_engine
 
     engine = create_engine(database_url, pool_pre_ping=True)
     sessions = sessionmaker(engine, expire_on_commit=False)
     codec = TokenCodec(b"p" * 32)
-    clock = lambda: NOW
+
+    def clock():
+        return NOW
+
     app = create_app(
         jobs=JobService(sessions, clock=clock),
         tokens=codec,
@@ -67,7 +70,7 @@ async def _serve(args: argparse.Namespace) -> None:
         )
     )
     serving = asyncio.create_task(server.serve(sockets=[listener]))
-    while not server.started and not serving.done():
+    while not server.started and not serving.done():  # noqa: ASYNC110 -- uvicorn's started flag has no event to await
         await asyncio.sleep(0.01)
     if server.started:
         # Publish the pid atomically: the parent polls for the file to exist

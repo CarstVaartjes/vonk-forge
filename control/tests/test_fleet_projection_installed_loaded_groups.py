@@ -8,9 +8,13 @@ from typing import cast
 import pytest
 from sqlalchemy import Table, create_engine, literal, select, text, update
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from cluster_profiles.cli_render.dispatch import render_payload
+from tests.observation_transfer_peer import observation_document
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_projection.common import (
     FleetSnapshot,
 )
@@ -35,8 +39,6 @@ from vonk_control.models.telemetry import (
     NodeTelemetryLatest,
 )
 
-from tests.observation_transfer_peer import observation_document
-
 from .fleet_projection_support import (
     NODE_A,
     NODE_B,
@@ -51,6 +53,7 @@ from .runtime_identity_support import (
     inventory_items_fixture,
     set_inventory_hostname,
 )
+from .test_operation_api import _client
 
 NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -378,7 +381,6 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
         )
 
     snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     render_payload(snapshot.model_dump(mode="json"), "fleet")
     rendered = capsys.readouterr()
@@ -386,12 +388,15 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
     assert rendered.out.count("Recipe: Pair Recipe") == 3
     attention = rendered.out[rendered.out.index("Needs attention") :]
     assert "pair-healthy" not in attention
-    assert "pair-stale" in attention and "rank-stale" in attention
-    assert "pair-route-failed" in attention and "route-not-published" in attention
+    assert "pair-stale" in attention
+    assert "rank-stale" in attention
+    assert "pair-route-failed" in attention
+    assert "route-not-published" in attention
     assert "incomplete" in attention
     render_payload(snapshot.model_dump(mode="json"), "fleet", wide=True)
     rendered = capsys.readouterr()
-    assert NODE_A in rendered.out and NODE_B in rendered.out
+    assert NODE_A in rendered.out
+    assert NODE_B in rendered.out
     assert str(partial_installation_id) in rendered.out
     selected = snapshot.model_copy(update={"nodes": snapshot.nodes[:1]})
     render_payload(selected.model_dump(mode="json"), "fleet")
@@ -528,7 +533,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize(
     "damage",
-    (
+    [
         "document",
         "candidate",
         "mapping",
@@ -536,7 +541,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
         "rank",
         "state",
         "labels",
-    ),
+    ],
 )
 def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     damage: str,
@@ -548,7 +553,6 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     inconsistent". An ineligible revision is different: it is simply not this
     node's business, so it disappears without an error.
     """
-    from sqlalchemy.pool import StaticPool
 
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
@@ -830,7 +834,6 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
         snapshot = projection.read()
         assert (snapshot.nodes[0].installed, snapshot.nodes[0].loaded) == ([], [])
         return
-    from .test_operation_api import _client
 
     client, operator, *_ = _client(fleet_projection=projection)
     snapshot = projection.read()
@@ -846,7 +849,8 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     if damage == "labels":
         assert observed_snapshot.nodes[0].labels is None
         issues = observed_snapshot.nodes[0].projection_issues
-        assert issues is not None and "unknown" in issues[0]
+        assert issues is not None
+        assert "unknown" in issues[0]
         assert all(value.complete is True for value in snapshot.nodes[0].installed)
         with sessions.begin() as session:
             session.execute(
@@ -884,8 +888,10 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     assert snapshot.nodes[0].loaded[0].healthy is None
     installation_issue = snapshot.nodes[0].installed[0].projection_issue
     run_issue = snapshot.nodes[0].loaded[0].projection_issue
-    assert installation_issue is not None and "unknown" in installation_issue
-    assert run_issue is not None and "unknown" in run_issue
+    assert installation_issue is not None
+    assert "unknown" in installation_issue
+    assert run_issue is not None
+    assert "unknown" in run_issue
     with sessions.begin() as session:
         session.execute(
             update(ClusterMapping)

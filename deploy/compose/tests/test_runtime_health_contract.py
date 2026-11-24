@@ -7,6 +7,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from vonk_control.db.constants import _DATABASE_STARTUP_TIMEOUT_SECONDS
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
+
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
@@ -109,8 +112,6 @@ def test_worker_health_grace_covers_its_startup_waits() -> None:
     probe may overrun it by a lock wait. `compose up --wait` must not see that
     wait as a failure.
     """
-    from vonk_control.db.constants import _DATABASE_STARTUP_TIMEOUT_SECONDS
-    from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
     healthcheck = _rendered()["services"]["control-worker"]["healthcheck"]
     waits = (
@@ -156,10 +157,10 @@ def test_dependencies_only_order_startup_and_are_acyclic() -> None:
         graph[name] = set(dependencies)
 
     def visit(name: str, path: tuple[str, ...]) -> None:
-        assert name not in path, " -> ".join(path + (name,))
+        assert name not in path, " -> ".join((*path, name))
         for dependency in graph[name]:
             if dependency in graph:
-                visit(dependency, path + (name,))
+                visit(dependency, (*path, name))
 
     for service_name in graph:
         visit(service_name, ())
@@ -181,13 +182,16 @@ def test_joins_on_restartable_services_are_explicitly_allowed() -> None:
     for selection in (True, False):
         services = _rendered(secure_remote=selection)["services"]
         for name, service in services.items():
-            joins: list[str] = []
             mode = str(service.get("network_mode", ""))
-            for prefix in ("service:", "container:"):
-                if mode.startswith(prefix):
-                    joins.append(mode.removeprefix(prefix))
-            for entry in service.get("volumes_from", []):
-                joins.append(str(entry).split(":")[0].removeprefix("container:"))
+            joins: list[str] = [
+                mode.removeprefix(prefix)
+                for prefix in ("service:", "container:")
+                if mode.startswith(prefix)
+            ]
+            joins.extend(
+                str(entry).split(":")[0].removeprefix("container:")
+                for entry in service.get("volumes_from", [])
+            )
             for target in joins:
                 restartable = (
                     target not in services
@@ -205,7 +209,8 @@ def test_tailscale_browser_forwarding_crosses_only_an_internal_edge() -> None:
     model = _rendered()
     services = model["services"]
     networks = model["networks"]
-    assert isinstance(services, dict) and isinstance(networks, dict)
+    assert isinstance(services, dict)
+    assert isinstance(networks, dict)
 
     assert networks["tailnet-web-edge"]["internal"] is True
     assert set(services["caddy"]["networks"]) & set(

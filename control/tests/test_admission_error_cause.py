@@ -10,14 +10,15 @@ import errno
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import read_recipe
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_control import run_admission
 from vonk_control.failure_classification import disposition
 from vonk_control.models.execution import RecipeInstallation, RecipeRun
 from vonk_control.models.jobs import Job
-from vonk_forge_contracts import read_recipe
 
 from .recipe_operations_support import installed_recipe, setup_services
 
@@ -65,7 +66,7 @@ def test_start_with_a_damaged_stored_recipe_ends_with_the_cause(tmp_path, monkey
 
 
 @pytest.mark.parametrize(
-    "code,waits", [(errno.EIO, True), (errno.ENOENT, False)], ids=["eio", "enoent"]
+    ("code", "waits"), [(errno.EIO, True), (errno.ENOENT, False)], ids=["eio", "enoent"]
 )
 def test_start_storage_fault_waits_only_when_it_can_clear(
     tmp_path, monkeypatch, code, waits
@@ -85,7 +86,7 @@ def test_start_storage_fault_waits_only_when_it_can_clear(
 
 
 @pytest.mark.parametrize(
-    "fault,waits",
+    ("fault", "waits"),
     [
         (OSError(errno.EIO, "managed storage read failed"), True),
         (TypeError("compiled plan field is not a mapping"), False),

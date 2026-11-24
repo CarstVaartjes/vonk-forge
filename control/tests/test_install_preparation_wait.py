@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import read_recipe
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.install_admission.contracts import InstallAdmissionBusy
@@ -22,13 +24,14 @@ from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import read_recipe
 
 from .recipe_operations_support import _CanonicalImageTransport
 from .run_switch_operations_support import _cold_compile_switch
 
 
-def _install_waits(switch, monkeypatch: pytest.MonkeyPatch, *, times: int) -> list:
+def _install_waits(
+    switch, monkeypatch: pytest.MonkeyPatch, *, times: int
+) -> list[InstallAdmissionBusy]:
     """The install's managed-bytes recheck finds capacity busy ``times`` times."""
 
     recheck = switch.admission.refresh_install_receipts
@@ -61,7 +64,8 @@ def test_waiting_install_with_conflicting_image_preparation_replans_and_loads(
         revision = session.get(
             CatalogDocumentRevision, switch.admitted.recipe_revision_id
         )
-        assert build is not None and revision is not None
+        assert build is not None
+        assert revision is not None
         assert build.image_digest is not None
         assert build.oci_layout_sha256 is not None
         assert build.image_bytes is not None
@@ -108,6 +112,7 @@ def test_waiting_install_with_conflicting_image_preparation_replans_and_loads(
 
     generations: set[int] = set()
     waits: set[str | None] = set()
+    view = None
     for _ in range(30):
         switch.drive()
         view = switch.service.get(switch.operation.operation_id)
@@ -119,6 +124,7 @@ def test_waiting_install_with_conflicting_image_preparation_replans_and_loads(
             break
     assert conflicts == [RecipeImageCode.IDENTITY_CONFLICT]
     assert not busy, "the install never waited"
+    assert view is not None
     assert view.progress.subphase == "runtime-install", view.status_reason
     assert max(generations) >= 1, "the conflict did not re-plan the load"
     # The wait keeps the refusal it came from as its evidence.
@@ -149,10 +155,12 @@ def test_waiting_install_with_a_deterministic_preparation_refusal_ends_the_load(
 
     switch.lifecycle.bind_install_preparation(prepare)
     _install_waits(switch, monkeypatch, times=1)
+    view = None
     for _ in range(30):
         switch.drive()
         view = switch.service.get(switch.operation.operation_id)
         if view.state != "running":
             break
+    assert view is not None
     assert view.state == "failed"
     assert view.status_reason

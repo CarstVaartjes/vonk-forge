@@ -6,45 +6,19 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Literal
 
-from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.reason_codes.evidence import OperationFailureCode
-from vonk_agent_protocol.wire_model import OperationProgress
-
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
+from vonk_control import agent_operation_states
+from vonk_control.auth import CursorCodec, CursorError
+from vonk_control.bounded_json import BoundedJSONError, require_sequence
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from .. import agent_operation_states
-from ..auth import CursorCodec, CursorError
-from ..bounded_json import BoundedJSONError, require_sequence
-from ..fleet_profile_contract.applications import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationView,
 )
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.contract import (
-    OperationFailure,
-    OperationFailureEvidence,
-    OperationRecoveryAction,
-    recovery_for_operation,
-)
-from ..operations.item_contract import (
-    AGENT_OPERATION_KINDS,
-    OperationItem,
-    OperationResultFacts,
-    OperationRow,
-    agent_receipt_for,
-    operation_item,
-)
-from ..operations.progress import project_progress_for_state
-from ..operations.summary import operation_summary
-from ..persisted_waits import read_wait
-from ..strict_json import (
-    StrictModel,
-    read_stored_model,
-    serialize_json_value,
-    warn_unreadable_once,
-)
-from ..summary_cut import summary_cut
-from .constants import NodeIdentifier
-from .contracts import (
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.constants import NodeIdentifier
+from vonk_control.operation_api.contracts import (
     JobDetailResponse,
     JobOperationProgress,
     JobOperationResponse,
@@ -54,8 +28,32 @@ from .contracts import (
     OperationProjectionIssue,
     OperationsResponse,
 )
-from .diagnostics import _aware
-from .providers import _operation_boundary
+from vonk_control.operation_api.diagnostics import _aware
+from vonk_control.operation_api.providers import _operation_boundary
+from vonk_control.operations.contract import (
+    OperationFailure,
+    OperationFailureEvidence,
+    OperationRecoveryAction,
+    recovery_for_operation,
+)
+from vonk_control.operations.item_contract import (
+    AGENT_OPERATION_KINDS,
+    OperationItem,
+    OperationResultFacts,
+    OperationRow,
+    agent_receipt_for,
+    operation_item,
+)
+from vonk_control.operations.progress import project_progress_for_state
+from vonk_control.operations.summary import operation_summary
+from vonk_control.persisted_waits import read_wait
+from vonk_control.strict_json import (
+    StrictModel,
+    read_stored_model,
+    serialize_json_value,
+    warn_unreadable_once,
+)
+from vonk_control.summary_cut import summary_cut
 
 
 def _required_text(value: object, detail: str) -> str:
@@ -328,7 +326,7 @@ def _operation_item(
         result_unreadable=unreadable,
         supported_actions=(
             _advertised_actions(operation.payload.get("supported_actions"))
-            if isinstance(operation.payload, Mapping)
+            if isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             else None
         ),
         state=operation.state,

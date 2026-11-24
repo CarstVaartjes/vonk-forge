@@ -55,7 +55,7 @@ def test_pending_download_carries_the_typed_wait() -> None:
         artifact_set_sha256="a" * 64,
         plan_digest=None,
         review_digest=None,
-        progress=progress,  # type: ignore[arg-type]
+        progress=progress,
         result=None,
         last_error="free text that must not be the reason",
         created_at=NOW.isoformat(),

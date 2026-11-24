@@ -7,6 +7,8 @@ from typing import cast
 
 import httpx2
 import pytest
+
+import vonk_control.model_cache.download as verification
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheFailureCode
 from vonk_control.model_cache.artifacts import ArtifactSpec
@@ -228,7 +230,6 @@ def test_ranged_download_scans_the_bytes_once(cache, tmp_path, monkeypatch) -> N
         )
 
     service, client = _http_cache_service(tmp_path, sessions, handler)
-    import vonk_control.model_cache.download as verification
 
     calls = []
     real = verification.hashlib.sha256

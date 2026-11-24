@@ -4,15 +4,17 @@ from uuid import UUID, uuid5
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import ReservationState
-
-from ..fleet_profile_contract.assessment import FleetProfileResourceRequirement
-from ..models.execution import ResourceReservation
-from ..models.fleet import FleetProfileApplication
-from ..resource_planning.memory_kinds import memory_reservation_kind
-from ..strict_json import read_stored_model
+from vonk_control.fleet_profile_contract.assessment import (
+    FleetProfileResourceRequirement,
+)
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.resource_planning.memory_kinds import memory_reservation_kind
+from vonk_control.strict_json import read_stored_model
 
 
 def memory_claim_id(application_id: str, assignment_id: str, node_id: str) -> str:

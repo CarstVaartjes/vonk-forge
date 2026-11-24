@@ -6,17 +6,20 @@ import errno
 import fcntl
 import os
 import stat
-from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from collections.abc import Generator, Iterable
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-
-from ..content_identity import ImageContent, differing_image_fields, same_image
-from ..fleet_profiles.read_observation import observe_storage
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..oci_image_store import (
+from vonk_control.content_identity import (
+    ImageContent,
+    differing_image_fields,
+    same_image,
+)
+from vonk_control.fleet_profiles.read_observation import observe_storage
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.oci_image_store import (
     DAMAGED_MANIFEST_CODES,
     IMAGE_CACHE_DIRECTORY,
     OciImageStore,
@@ -24,8 +27,8 @@ from ..oci_image_store import (
     StoredImage,
     StoreUnknown,
 )
-from ..operations.contract import AvailabilityRecoveryAction
-from .contracts import (
+from vonk_control.operations.contract import AvailabilityRecoveryAction
+from vonk_control.runtime_image_preparation.contracts import (
     _IMAGE_DIGEST,
     _LOGGER,
     _MAX_RECEIPT_REJECTION_DETAIL,
@@ -99,10 +102,8 @@ class FilesystemRuntimeImageStorage:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
             if descriptor is not None:
-                try:
+                with suppress(OSError):
                     os.close(descriptor)
-                except OSError:
-                    pass
             contended = error.errno in (errno.EAGAIN, errno.EWOULDBLOCK)
             raise RuntimeImagePreparationUnknown(
                 RuntimeImageCode.PUBLICATION_CONTENDED
@@ -117,21 +118,17 @@ class FilesystemRuntimeImageStorage:
             ) from error
         except RuntimeImagePreparationUnknown:
             if descriptor is not None:
-                try:
+                with suppress(OSError):
                     os.close(descriptor)
-                except OSError:
-                    pass
             raise
         finally:
             if directory_fd is not None:
-                try:
+                with suppress(OSError):
                     os.close(directory_fd)
-                except OSError:
-                    pass
         return descriptor
 
     @contextmanager
-    def publication_lock(self, archive_sha256: str) -> Iterator[None]:
+    def publication_lock(self, archive_sha256: str) -> Generator[None]:
         """Observe lock availability three times; never replay a yielded effect."""
         last_error = None
         descriptor = None
@@ -148,14 +145,10 @@ class FilesystemRuntimeImageStorage:
         try:
             yield
         finally:
-            try:
+            with suppress(OSError):
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
-            except OSError:
-                pass
-            try:
+            with suppress(OSError):
                 os.close(descriptor)
-            except OSError:
-                pass
 
     def commit(
         self, staged: Path, *, receipt: RuntimeImageReceipt

@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
@@ -114,7 +115,8 @@ def test_a_load_admitted_without_an_image_decision_recovers_by_itself(
     accepted = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, accepted.id)
-        assert row is not None and row.current_operation_id is None
+        assert row is not None
+        assert row.current_operation_id is None
         assert row.plan["preparation_decisions"]
         undecided = FleetProfilePreview.model_validate_json(
             json.dumps({**row.plan, "preparation_decisions": []})
@@ -155,7 +157,8 @@ def test_a_load_admitted_without_an_image_decision_recovers_by_itself(
     assert [effect.state for effect in successor.progress.effects] == ["pending"]
     assert successor.wait is not None
     assert successor.wait.reason is WaitReason.RECEIPT_MISSING
-    assert successor.blockers and all(
+    assert successor.blockers
+    assert all(
         item.code is WaitReason.RECEIPT_MISSING
         and item.operation is not None
         and item.operation.id != successor.id
@@ -210,6 +213,5 @@ def test_repeated_stale_plan_reconciles_after_the_fault_clears(
     # Planning now progressed into a real Run/Switch child, whose fake executor
     # is deliberately unfinished in this fixture.
     last = service.application(_live_applications(sessions)[-1].id)
-    assert last.progress.effects and all(
-        effect.operation_id is not None for effect in last.progress.effects
-    )
+    assert last.progress.effects
+    assert all(effect.operation_id is not None for effect in last.progress.effects)

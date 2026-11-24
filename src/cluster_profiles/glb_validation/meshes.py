@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import math
 
-from .common import Accessor, _array, _finite, _finite_numbers, _index, _object
+from cluster_profiles.glb_validation.common import (
+    Accessor,
+    _array,
+    _finite,
+    _finite_numbers,
+    _index,
+    _object,
+)
 
 
 def _reachable_meshes(

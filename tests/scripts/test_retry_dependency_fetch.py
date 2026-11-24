@@ -15,7 +15,8 @@ def _module():
     spec = importlib.util.spec_from_file_location(
         "retry_dependency_fetch", ROOT / "scripts/retry_dependency_fetch.py"
     )
-    assert spec and spec.loader
+    assert spec
+    assert spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -107,7 +108,8 @@ def test_transient_fetch_retries_without_publishing_partial_stdout(
     monkeypatch.setattr(module, "sleep", delays.append)
     assert module.main(command) == 0
     assert json.loads(state.read_text()) == []
-    assert delays and all(0 < delay <= 4 for delay in delays)
+    assert delays
+    assert all(0 < delay <= 4 for delay in delays)
     captured = capsys.readouterr()
     assert captured.out == "verified output\n"
     assert "partial untrusted output" not in captured.out
@@ -252,7 +254,8 @@ def test_locked_temporary_pip_acquisition_retries_real_child_without_partial_out
     monkeypatch.setattr(module, "sleep", delays.append)
     assert module.main(command) == 0
     assert json.loads(state.read_text()) == []
-    assert len(delays) == 1 and 1 <= delays[0] <= 2
+    assert len(delays) == 1
+    assert 1 <= delays[0] <= 2
     assert capsys.readouterr().out == "verified output\n"
 
 

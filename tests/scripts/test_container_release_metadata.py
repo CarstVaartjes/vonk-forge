@@ -40,7 +40,7 @@ def test_stable_tag_emits_exact_public_package_metadata() -> None:
 
 @pytest.mark.parametrize(
     ("ref_type", "ref_name", "commit"),
-    (
+    [
         ("branch", "v1.2.3", SHA),
         ("tag", "1.2.3", SHA),
         ("tag", "v01.2.3", SHA),
@@ -50,7 +50,7 @@ def test_stable_tag_emits_exact_public_package_metadata() -> None:
         ("tag", "v1.2.3", SHA),
         ("tag", "v1.2.3", SHA.upper()),
         ("tag", "v1.2.3", SHA[:-1]),
-    ),
+    ],
 )
 def test_non_release_input_fails_closed(
     ref_type: str, ref_name: str, commit: str

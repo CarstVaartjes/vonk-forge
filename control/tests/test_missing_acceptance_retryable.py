@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
@@ -21,7 +22,7 @@ from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, AgentIdentity, TokenCodec
 from vonk_control.categorized_errors import MissingRecord
-from vonk_control.gateway.keys import GatewayKeyRevoked
+from vonk_control.gateway.keys_contract import GatewayKeyRevoked
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base
 from vonk_control.operator_acceptance import (
@@ -196,7 +197,8 @@ def test_key_receipt_404_after_success_is_retryable() -> None:
 
     refused = _resolve_key(absent)
     assert refused.status_code == 503
-    assert refused.headers and refused.headers["retry-after"]
+    assert refused.headers
+    assert refused.headers["retry-after"]
 
 
 def test_unknown_outcome_owner_is_retryable_not_500() -> None:
@@ -209,4 +211,5 @@ def test_unknown_outcome_owner_is_retryable_not_500() -> None:
 
     refused = _resolve_key(unsure)
     assert refused.status_code == 503
-    assert refused.headers and refused.headers["retry-after"]
+    assert refused.headers
+    assert refused.headers["retry-after"]

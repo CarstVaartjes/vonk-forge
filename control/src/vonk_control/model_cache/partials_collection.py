@@ -36,18 +36,21 @@ from sqlalchemy import case, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..catalog.revision_collection import GRACE, INTERVAL
-from ..categorized_errors import InvalidValue
-from ..logging import log_event
-from ..models.cache import ModelCacheOperation
-from ..terminal_history_collection import BACKLOG_PAUSE, PASS_BUDGET_SECONDS
-from .contract import CacheOperationKind
-from .errors import ModelCacheStorageRefused, _ArtifactWriterBusy
-from .split_transfer import REPAIR_PARTIALS_PREFIX
-from .states import LIVE
+from vonk_control.catalog.revision_collection import GRACE, INTERVAL
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.logging import log_event
+from vonk_control.model_cache.contract import CacheOperationKind
+from vonk_control.model_cache.errors import (
+    ModelCacheStorageRefused,
+    _ArtifactWriterBusy,
+)
+from vonk_control.model_cache.split_transfer import REPAIR_PARTIALS_PREFIX
+from vonk_control.model_cache.states import LIVE
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.terminal_history_collection import BACKLOG_PAUSE, PASS_BUDGET_SECONDS
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 _LOGGER = logging.getLogger(__name__)
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -200,7 +203,7 @@ class ModelPartialsCollector:
         for root, _directories, files in os.walk(self._partials / name):
             for file in files:
                 try:
-                    total += os.lstat(os.path.join(root, file)).st_size
+                    total += Path(root, file).lstat().st_size
                 except OSError:
                     continue
         return total
@@ -243,8 +246,9 @@ class ModelPartialsCollector:
             return _Ownership(live=False, last_update=None)
         with self._sessions() as session:
             count, last = session.execute(query).one()
-        if last is not None and last.tzinfo is None:
+        if last is not None and last.tzinfo is None:  # pyright: ignore[reportUnnecessaryComparison]  # an aggregate over no rows is NULL
             last = last.replace(tzinfo=UTC)
         return _Ownership(
-            live=bool(count), last_update=None if last is None else last.timestamp()
+            live=bool(count),
+            last_update=None if last is None else last.timestamp(),  # pyright: ignore[reportUnnecessaryComparison]  # an aggregate over no rows is NULL
         )

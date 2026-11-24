@@ -13,8 +13,8 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -22,51 +22,65 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
-
-from ..admission_locking import is_admission_contention
-from ..agent_jobs.service import AgentJobService
-from ..fleet_profiles.stop_authority import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.admission_locking import is_admission_contention
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profiles.stop_authority import (
+    validate_jobrun_stop_source,
+    validate_profile_jobrun_stop_target,
+    validate_profile_stop_owner,
+)
+from vonk_control.fleet_profiles.stop_contract import (
     JobRunStopScope,
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
     ProfileStopAuthorityError,
     jobrun_stop_key,
-    validate_jobrun_stop_source,
-    validate_profile_jobrun_stop_target,
-    validate_profile_stop_owner,
 )
-from ..jobs.documents import RecipeStopParent, controller_recipe_document
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.evidence import Residue
-from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..run_admission import RunAdmissionBusy
-from ..stored.json_values import read_row_column
-from ..strict_json import read_stored_model, serialize_json_value
-from ..workload_intent import allocate_workload_intent
-from .errors import (
+from vonk_control.jobs.documents import RecipeStopParent, controller_recipe_document
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
+from vonk_control.models.execution import (
+    ArtifactJob,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
     RecipeRetryLater,
 )
-from .intent import _bound_workload_intent
-from .interfaces import RecipeOperationView, new_recipe_job
-from .observation_helpers import _active_recipe_revision
-from .profile_job_run_stop import _exact_jobrun_sources, _jobrun_effect_may_remain
-from .progress import (
+from vonk_control.recipe_operations.intent import _bound_workload_intent
+from vonk_control.recipe_operations.interfaces import (
+    RecipeOperationView,
+    new_recipe_job,
+)
+from vonk_control.recipe_operations.observation_helpers import (
+    _active_recipe_revision,
+    _run_is_one_shot,
+)
+from vonk_control.recipe_operations.profile_job_run_stop import (
+    _exact_jobrun_sources,
+    _jobrun_effect_may_remain,
+)
+from vonk_control.recipe_operations.progress import (
     _parent_execution_mode,
     _parent_identity,
 )
-from .rank_authority import _profile_jobrun_parent, _run_is_one_shot
-from .results import _validated_result
-from .stop_payloads import (
-    stop_payload_from_job_run,
-)
+from vonk_control.recipe_operations.rank_authority import _profile_jobrun_parent
+from vonk_control.recipe_operations.results import _validated_result
+from vonk_control.recipe_operations.stop_payloads import stop_payload_from_job_run
+from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model, serialize_json_value
+from vonk_control.workload_intent import allocate_workload_intent
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class JobRunStopMixin:
@@ -552,7 +566,7 @@ class JobRunStopMixin:
         )
         run.state = RunState.STOPPING
         run.updated_at = now
-        parent = service._queue_in_session(
+        return service._queue_in_session(
             session,
             kind=WireAgentOperation.RECIPE_STOP.value,
             owner_kind="run",
@@ -573,7 +587,6 @@ class JobRunStopMixin:
             },
             adopt_stop_parent=pending_job,
         )
-        return parent
 
     def _profile_jobrun_stop_is_pending(self, request_id: str) -> bool:
         service = typing_cast("RecipeOperationService", self)

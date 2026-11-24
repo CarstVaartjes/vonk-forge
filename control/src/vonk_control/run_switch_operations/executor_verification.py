@@ -11,6 +11,7 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
@@ -21,29 +22,28 @@ from vonk_agent_protocol.state_machines import (
     RouteState,
     RunState,
 )
-
-from ..machine_states import rank_installed
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import (
+from vonk_control.machine_states import rank_installed
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     STOPPABLE_RUN_STATES,
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
 )
-from ..models.fleet import AgentNode
-from ..recipe_operations.interfaces import RecipeRunStatus
-from ..run_admission import run_port_demand
-from ..run_readiness import run_not_ready_for_profile
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import RunSwitchRuntimePlanResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from .errors import RunSwitchRetryLater
-from .interfaces import PhaseExecution
-from .planning_helpers import _latest_inventory, _now
-from .result_helpers import _phase_result
+from vonk_control.models.fleet import AgentNode
+from vonk_control.recipe_operations.interfaces import RecipeRunStatus
+from vonk_control.run_admission import run_port_demand
+from vonk_control.run_readiness import run_not_ready_for_profile
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimePlanResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.planning_helpers import _latest_inventory, _now
+from vonk_control.run_switch_operations.result_helpers import _phase_result
 
 if TYPE_CHECKING:
-    from .executor import RecipeLifecyclePhaseExecutor
+    from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 
 
 class ExecutorVerificationMixin:
@@ -293,7 +293,7 @@ class ExecutorVerificationMixin:
             else None
         )
         if plan.cleanup_mode == "reconcile" and plan.cleanup_disposition != "abandon":
-            if service._lifecycle is None or plan.reconciliation_authority is None:
+            if service._lifecycle is None or plan.reconciliation_authority is None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                 raise RunSwitchRetryLater(
                     RunSwitchCode.RECONCILIATION_AUTHORITY_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,

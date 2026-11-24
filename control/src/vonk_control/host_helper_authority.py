@@ -16,13 +16,10 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import (
-    AgentOperation,
-    AgentProtocolError,
-    AgentUpgradePayload,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_AUTHORITY,
     MAX_HOST_HELPER_GRANT_SECONDS,
@@ -36,7 +33,6 @@ from vonk_agent_protocol.host_helper import (
     HostOperationKind,
     HostRuntimeRequest,
     InstallVonkDebOperation,
-    RecipeReconciliationIdentity,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
@@ -49,31 +45,34 @@ from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
+    RecipeReconciliationIdentity,
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
-
-from . import agent_operation_states
-from .agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS
-from .host_runtime_plan_authority import (
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
+from vonk_control import agent_operation_states
+from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
+from vonk_control.gpu.clock import selected_gpu_clock
+from vonk_control.host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
     RuntimePlanBinding,
     RuntimePlanEvidenceUnavailable,
     RuntimePlanUnsatisfiable,
     derive_runtime_plan_binding,
 )
-from .jobs import states as job_states
-from .logging import log_event
-from .models.fleet import AgentCertificate, AgentNode
-from .models.jobs import Job
-from .models.operations import AgentOperation as StoredAgentOperation
-from .models.operations import AgentOperationAttempt
-from .offline_stops import is_deferred_stop
-from .own_cleanup import CLEANUP_ACTIONS
-from .owner_liveness import run_has_live_operation
-from .package_activation import matches_receipt
-from .strict_json import read_stored_model
-from .untracked_installations import run_wanted_here
+from vonk_control.jobs import states as job_states
+from vonk_control.logging import log_event
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredAgentOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.offline_stops import is_deferred_stop
+from vonk_control.own_cleanup import CLEANUP_ACTIONS
+from vonk_control.owner_liveness import run_has_live_operation
+from vonk_control.package_activation import matches_receipt
+from vonk_control.strict_json import read_stored_model
+from vonk_control.swap import selected_swap
+from vonk_control.untracked_installations import run_wanted_here
 
 _LOGGER = logging.getLogger("vonk_control.host_helper_authority")
 
@@ -167,13 +166,16 @@ def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
             raise HostHelperAuthorityError("host helper private key is unsafe")
         raw = os.read(descriptor, 16 * 1024 + 1)
         after = os.fstat(descriptor)
-        identity = lambda value: (
-            value.st_dev,
-            value.st_ino,
-            value.st_size,
-            value.st_mtime_ns,
-            value.st_ctime_ns,
-        )
+
+        def identity(value):
+            return (
+                value.st_dev,
+                value.st_ino,
+                value.st_size,
+                value.st_mtime_ns,
+                value.st_ctime_ns,
+            )
+
         if len(raw) > 16 * 1024 or identity(before) != identity(after):
             raise HostHelperAuthorityError("host helper private key changed while read")
     except HostHelperAuthorityError:
@@ -199,7 +201,7 @@ class HostHelperGrantIssuer:
 
     def __init__(
         self,
-        private_key: ed25519.Ed25519PrivateKey,
+        private_key: object,
         *,
         clock: Callable[[], datetime] | None = None,
         request_id_factory: Callable[[], object] | None = None,
@@ -309,7 +311,7 @@ class HostHelperGrantIssuer:
                 "host helper authority clock is unavailable"
             ) from error
         if (
-            not isinstance(now, datetime)
+            not isinstance(now, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # an injected clock's result is checked
             or now.tzinfo is None
             or now.utcoffset() is None
         ):
@@ -349,7 +351,7 @@ class HostRuntimeAuthorityService:
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        issuer: HostHelperGrantIssuer,
+        issuer: object,
         *,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -364,7 +366,6 @@ class HostRuntimeAuthorityService:
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def gpu_clock_grant(self, node_id: str) -> SignedHostHelperGrant:
-        from .gpu.clock import selected_gpu_clock
 
         with self._sessions() as session:
             desired = selected_gpu_clock(session, node_id)
@@ -375,7 +376,6 @@ class HostRuntimeAuthorityService:
         )
 
     def swap_grant(self, node_id: str) -> SignedHostHelperGrant:
-        from .swap import selected_swap
 
         with self._sessions() as session:
             desired = selected_swap(session, node_id)

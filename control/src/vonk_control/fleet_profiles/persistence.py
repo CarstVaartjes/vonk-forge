@@ -8,44 +8,52 @@ from datetime import datetime, timedelta
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.agent_words import ProfileAction, ProfileProjectionKind
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_forge_contracts import RecipeDefinition
 
-from ..fleet_profile_contract.applications import (
+from vonk_agent_protocol.agent_words import ProfileAction, ProfileProjectionKind
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
+    FleetProfileIntendedConfiguration,
 )
-from ..fleet_profile_contract.assessment import FleetProfileScopePreview
-from ..fleet_profile_contract.definitions import FleetProfileAssignment
-from ..fleet_profile_contract.effects import FleetProfileEffects
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
-from ..jobs import states as job_states
-from ..jobs.documents import DistributionJobPayload, RunSwitchJobPayload, _RecipeParent
-from ..lifecycle.evidence import (
+from vonk_control.fleet_profile_contract.assessment import FleetProfileScopePreview
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.effects import FleetProfileEffects
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
+from vonk_control.fleet_profiles.activity import _profile_activity_state
+from vonk_control.fleet_profiles.contracts import (
+    FleetProfileConflict,
+    FleetProfileReviewStale,
+    _FleetProfileSupersededIntentConflict,
+)
+from vonk_control.fleet_profiles.projection_support import (
+    _aware,
+    _digest,
+    _validate_remaining_effects,
+)
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
+    DistributionJobPayload,
+    RunSwitchJobPayload,
+    _RecipeParent,
+)
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeRun
-from ..models.fleet import AgentNode, FleetProfileApplication
-from ..models.jobs import Job
-from ..run_route_name import carries_alias
-from ..stored.json_values import read_row_column
-from ..strict_json import read_stored_document, stored_document_detail
-from .activity import _profile_activity_state
-from .contracts import (
-    FleetProfileConflict,
-    _FleetProfileSupersededIntentConflict,
-)
-from .projection_support import (
-    _aware,
-)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.run_route_name import carries_alias
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_document, stored_document_detail
 
 
 def _without_values[T](read: Callable[[], T]) -> Callable[[], T | Damaged]:
@@ -289,7 +297,7 @@ def _persisted_profile_scope(row: FleetProfileApplication) -> tuple[str, ...] | 
         return tuple(plan.scope.node_ids)
     # A damaged step list does not erase the independently typed frozen scope.
     # This projection never reconstructs or authorizes the unknown step effects.
-    if not isinstance(row.plan, dict):
+    if not isinstance(row.plan, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         return None
     try:
         scope = FleetProfileScopePreview.model_validate_json(
@@ -565,7 +573,8 @@ def _remaining_reviewed_effects(
     authorize a newly discovered effect.
     """
     runs = []
-    for run_effect in reviewed.runs:
+    for reviewed_run in reviewed.runs:
+        run_effect = reviewed_run
         if run_effect.previous_alias is not None:
             run = session.get(RecipeRun, run_effect.run_id)
             if run is not None and carries_alias(run, run_effect.alias):
@@ -594,3 +603,113 @@ def _remaining_reviewed_effects(
                 ):
                     pending.append(effect)
     return reviewed.model_copy(update={"superseded": pending})
+
+
+def _intended_profile(
+    application: FleetProfileApplication,
+    *,
+    session: Session,
+) -> FleetProfileIntendedConfiguration | Residue:
+    """The accepted intent of an application, or why none can be established.
+
+    An application whose accepted intent cannot be read (never recorded, or
+    its reviewed plan is damaged) is a :class:`Residue`: the caller retires or
+    skips it. Inconsistent local projections are unknown too: execution never
+    invents accepted effects, and a fresh reviewed load remains admissible.
+    """
+
+    progress = _stored_progress(application)
+    if isinstance(progress, Residue):
+        return progress
+    if progress.intended_profile is None:
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.ROW_INCOMPLETE,
+            "the application carries no accepted intent",
+        )
+    if progress.intended_profile.profile_digest != application.profile_digest:
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "the accepted intent identity differs from its row",
+        )
+    intended = progress.intended_profile
+    root = (
+        application
+        if intended.reviewed_application_id == application.id
+        else session.get(FleetProfileApplication, intended.reviewed_application_id)
+    )
+    if (
+        root is None
+        or root.profile_id != application.profile_id
+        or root.profile_digest != application.profile_digest
+    ):
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_UNAVAILABLE,
+            "the reviewed application is unavailable",
+        )
+    # A first load reviewed itself: its progress and plan are read once.
+    root_progress = progress if root is application else _stored_progress(root)
+    if isinstance(root_progress, Residue):
+        return root_progress
+    root_plan = _persisted_profile_plan(root)
+    if isinstance(root_plan, Residue):
+        return root_plan
+    if (
+        root_progress.retry_of_application_id is not None
+        or root_progress.intended_profile != intended
+        or intended.reviewed_application_id != root.id
+        or intended.reviewed_plan_digest != _digest(root_plan.reviewed_decision())
+    ):
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "the reviewed application identity is inconsistent",
+        )
+    plan = root_plan if root is application else _persisted_profile_plan(application)
+    if isinstance(plan, Residue):
+        return plan
+    if (
+        plan.scope.node_ids != intended.scope.node_ids
+        or plan.resolved_assignments
+        != sorted(intended.assignments, key=lambda item: item.id)
+    ):
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "persisted application plan exceeds its reviewed intent",
+        )
+    try:
+        _validate_remaining_effects(root_plan.effects, plan.effects)
+    except FleetProfileReviewStale:
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "persisted application effects exceed its reviewed intent",
+        )
+    return intended
+
+
+def _reviewed_profile_plan(
+    application: FleetProfileApplication, *, session: Session
+) -> FleetProfilePreview | Residue:
+
+    intended = _intended_profile(application, session=session)
+    if isinstance(intended, Residue):
+        return intended
+    reviewed = session.get(FleetProfileApplication, intended.reviewed_application_id)
+    if reviewed is None:
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_UNAVAILABLE,
+            "the reviewed application is not stored",
+        )
+    return _persisted_profile_plan(reviewed)

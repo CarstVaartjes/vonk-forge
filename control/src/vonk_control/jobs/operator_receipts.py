@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
-
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.categorized_errors import InvalidValue
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
-from ..categorized_errors import InvalidValue
-from ..models.jobs import Job
-from ..operator_receipt_contract import (
+from vonk_control.models.jobs import Job
+from vonk_control.operator_receipt_contract import (
     JobOperatorDecision,
     JobOperatorDecisions,
     JobOperatorReceipt,

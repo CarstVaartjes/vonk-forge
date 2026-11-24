@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -64,9 +65,9 @@ class FakeGitHub:
 
     def __init__(self, resolver) -> None:
         self.resolver = resolver
-        self.markers: list[dict] = []
-        self.runs: dict[int, dict] = {}
-        self.artifacts: dict[int, list[dict]] = {}
+        self.markers: list[dict[str, Any]] = []
+        self.runs: dict[int, dict[str, Any]] = {}
+        self.artifacts: dict[int, list[dict[str, Any]]] = {}
         self.calls: list[str] = []
 
     def release(
@@ -102,7 +103,7 @@ class FakeGitHub:
             },
         )
 
-    def __call__(self, endpoint: str) -> dict:
+    def __call__(self, endpoint: str) -> dict[str, Any]:
         self.calls.append(endpoint)
         path, _, query = endpoint.partition("?")
         parameters = dict(item.split("=", 1) for item in query.split("&") if item)

@@ -16,8 +16,9 @@ import uuid
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.models.execution import ArtifactJob
@@ -29,7 +30,7 @@ from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
-from .test_artifact_job_lifecycle import _issued_job
+from .test_artifact_job_recovery import _issued_job
 
 
 def _damage(sessions, artifact_job_id: str, damage: str) -> str:
@@ -37,7 +38,8 @@ def _damage(sessions, artifact_job_id: str, damage: str) -> str:
 
     with sessions.begin() as session:
         artifact = session.get(ArtifactJob, artifact_job_id)
-        assert artifact is not None and artifact.operation_id is not None
+        assert artifact is not None
+        assert artifact.operation_id is not None
         order = session.get(Job, artifact.operation_id)
         assert order is not None
         (child,) = session.scalars(

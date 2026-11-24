@@ -12,12 +12,18 @@ import json
 import uuid
 from datetime import UTC, datetime
 from importlib.resources import files
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+)
+
 from vonk_control.artifact_reference_scan.model_references import (
     model_set_reference_findings,
 )
@@ -38,11 +44,6 @@ from vonk_control.models.fleet import FleetProfile
 from vonk_control.recipe_operations.execution_contract import (
     parse_stored_installation_plan,
 )
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-)
 
 from .test_removal_review_budget import _world
 
@@ -50,7 +51,7 @@ NOW = datetime(2026, 10, 30, tzinfo=UTC)
 PUBLISHER = "vonk-forge"
 
 
-def _example(name: str) -> dict:
+def _example(name: str) -> dict[str, Any]:
     return json.loads(
         files("vonk_forge_contracts").joinpath("examples", name).read_text("utf-8")
     )

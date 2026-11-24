@@ -7,10 +7,16 @@ from copy import deepcopy
 from typing import Annotated
 
 from fastapi import FastAPI
-from pydantic.json_schema import JsonSchemaValue
+from pydantic import BaseModel
+from pydantic.json_schema import JsonSchemaMode, JsonSchemaValue, models_json_schema
 
-from ..stored.json_values import ExternalPassthrough
-from .constants import _ADMIN_OPERATION_IDS, _HTTP_METHODS
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
+from vonk_agent_protocol.outcome import ErrorCatalog
+from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
+from vonk_control.auth_api import CliTokenDownload
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS, _HTTP_METHODS
+from vonk_control.stored.json_values import ExternalPassthrough, contract_models
+from vonk_control.stored.rows import bindings
 
 type ExternalSchemaDocument = Annotated[
     JsonSchemaValue,
@@ -103,12 +109,6 @@ def admin_openapi_schema(app: FastAPI) -> ExternalSchemaDocument:
 
 
 def _contract_component_schemas() -> dict[str, ExternalSchemaDocument]:
-    from pydantic.json_schema import models_json_schema
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
-    from vonk_agent_protocol.outcome import ErrorCatalog
-    from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
-
-    from ..auth_api import CliTokenDownload
 
     _references, document = models_json_schema(
         [
@@ -134,11 +134,6 @@ def _stored_component_schemas() -> tuple[
     component names of its contract's models (one per kind for a column that
     stores several document families).
     """
-
-    from pydantic import BaseModel
-    from pydantic.json_schema import JsonSchemaMode, models_json_schema
-
-    from ..stored.json_values import bindings, contract_models
 
     stored = {binding.key: contract_models(binding) for binding in bindings().values()}
     members: list[tuple[type[BaseModel], JsonSchemaMode]] = [

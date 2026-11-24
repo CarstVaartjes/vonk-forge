@@ -7,26 +7,64 @@ import hashlib
 import io
 import json
 import os
+import stat
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import timedelta
+from email.message import Message as EmailMessage
 from threading import Event
+from urllib.error import URLError
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient
 from sqlalchemy import delete
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.enrollment import EnrollmentObservationReply
+
+from cluster_profiles import cli
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.control_client.transfers import ControlClient
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import (
+    AgentClaim,
+    AgentDirective,
+    AgentProgress,
+    AgentResult,
+)
+from vonk_agent_protocol.enrollment import (
+    EnrollmentObservationReply,
+    EnrollmentSubmitRequest,
+)
+from vonk_agent_protocol.gpu_clock import (
+    GpuClockMetric,
+    GpuClockObservation,
+    GpuClockUnavailable,
+    GpuClockUnavailableReason,
+)
+from vonk_agent_protocol.telemetry import (
+    GpuUnavailableReason,
+    TelemetryRequest,
+    TelemetrySample,
+)
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
+from vonk_control.agent_api import routes
 from vonk_control.agent_api.common import (
     EnrollmentRateLimiter,
+    _commit_recipe_image_upload,
+    _prepare_recipe_image_upload,
 )
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor
 from vonk_control.enrollment.contract import EnrollmentGrant
+from vonk_control.fleet_projection.common import telemetry_point
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.operator_projection_api.wiring import (
+    build_fleet_operator_services,
+)
+from vonk_control.step_ca import StepCAUnavailable
 from vonk_control.telemetry.samples import TelemetryRepository
 
 from .agent_api_support import (
@@ -45,15 +83,17 @@ from .agent_api_support import (
     upgrade_payload,
     valid_enrollment_body,
 )
+from .package_upgrade_fixtures import source_transport
+from .test_enrollment import RecoveryAuthority, csr, enroll, evidence, expired_proof
 
 
 @pytest.mark.parametrize(
     ("prefix", "suffix"),
-    (
+    [
         (b'{"grant_token":"', b'",]'),
         (b'{"grant_token":"', b'","invalid-utf8":"\xff"}'),
         (b"[" * 1500 + b'{"grant_token":"', b'"}' + b"]" * 1500),
-    ),
+    ],
     ids=("malformed-json", "invalid-utf8", "deep-nesting"),
 )
 def test_invalid_enrollment_json_preserves_identifiable_grant(
@@ -196,7 +236,6 @@ def test_unsafe_artifact_is_removed_then_restored_by_producer(
 def test_artifact_is_named_to_the_edge_without_hashing_or_reading_the_file(
     agent_system,
 ) -> None:
-    from .package_upgrade_fixtures import source_transport
 
     client, services, _, clock = agent_system
     payload = b"stored package bytes"
@@ -273,7 +312,7 @@ def test_protected_agent_routes_gate_untrusted_invalid_bodies_before_parsing(
 def test_revoked_identity_is_gated_before_invalid_json_is_parsed(agent_system) -> None:
     client, services, _, clock = agent_system
     with services.sessions.begin() as session:
-        session.get(AgentCertificate, "serial-a").revoked_at = clock.now  # type: ignore[union-attr]
+        session.get(AgentCertificate, "serial-a").revoked_at = clock.now
     assert (
         client.post(
             "/agent/result",
@@ -288,13 +327,6 @@ def test_revoked_identity_is_gated_before_invalid_json_is_parsed(agent_system) -
 
 
 def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None:
-    from vonk_agent_protocol.contracts import (
-        AgentClaim,
-        AgentDirective,
-        AgentProgress,
-        AgentResult,
-    )
-    from vonk_agent_protocol.wire_model import OperationProgress
 
     client, _services, _sessions, _clock = agent_system
     schema = client.get("/openapi.json").json()
@@ -326,11 +358,11 @@ def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None
 
 @pytest.mark.parametrize(
     "missing",
-    (
+    [
         "protocol_version",
         "runtime_identity",
         "wait_seconds",
-    ),
+    ],
 )
 def test_claim_requires_the_current_agent_document(agent_system, missing: str) -> None:
     client, _services, _sessions, _clock = agent_system
@@ -352,7 +384,6 @@ def test_claim_requires_the_current_agent_document(agent_system, missing: str) -
 
 
 def test_enrollment_openapi_exposes_the_runtime_request_contract(agent_system) -> None:
-    from vonk_agent_protocol.enrollment import EnrollmentSubmitRequest
 
     client, _services, _sessions, _clock = agent_system
     schema = client.get("/openapi.json").json()
@@ -376,17 +407,6 @@ def test_enrollment_openapi_exposes_the_runtime_request_contract(agent_system) -
 def test_cli_enrollment_file_and_recovery_use_the_actual_authority(
     agent_system, tmp_path, capsys, lose_response
 ):
-    from email.message import Message as EmailMessage
-    from urllib.error import URLError
-
-    from vonk_control.operator_projection_api.wiring import (
-        build_fleet_operator_services,
-    )
-
-    from cluster_profiles import cli
-    from cluster_profiles.control_client.transfers import ControlClient
-
-    from .test_enrollment import csr, evidence
 
     _agent_api, services, codec, _clock = agent_system
     api = TestClient(
@@ -501,7 +521,6 @@ def test_reenrollment_refuses_an_unprivileged_actor_before_node_lookup(agent_sys
 def test_enrollment_reader_miss_ends_and_fresh_same_node_is_admitted(
     agent_system, monkeypatch
 ):
-    from vonk_control.step_ca import StepCAUnavailable
 
     client, services, _, _ = agent_system
     original = services.enrollment._authority.issue_node
@@ -523,7 +542,6 @@ def test_enrollment_reader_miss_ends_and_fresh_same_node_is_admitted(
 
 @pytest.mark.parametrize("failure", [None, "grace", "revoked", "removed", "wrong-key"])
 def test_expired_renewal_endpoint_requires_enrolled_key_without_mtls(tmp_path, failure):
-    from .test_enrollment import RecoveryAuthority, csr, enroll, expired_proof
 
     client, services, _codec, clock = make_agent_system(
         tmp_path, authority=RecoveryAuthority()
@@ -576,10 +594,6 @@ def test_fleet_detail_reports_the_claimed_agent_build_and_updates_it(
     agent_system, capsys
 ):
     """An upgrade result is not proof of the binary that most recently claimed."""
-    from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_control.fleet_projection.service import FleetProjection
-
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = agent_system
     projection = FleetProjection(services.sessions, clock=clock)
@@ -617,16 +631,6 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
     agent_system, capsys
 ):
     """Catches dropping the whole clock when decoded JSON contains metric enums."""
-    from vonk_agent_protocol.gpu_clock import (
-        GpuClockMetric,
-        GpuClockObservation,
-        GpuClockUnavailable,
-        GpuClockUnavailableReason,
-    )
-    from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
-    from vonk_control.fleet_projection.service import FleetProjection
-
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = agent_system
     sample = TelemetrySample(
@@ -660,7 +664,8 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
     report(sample)
     projection = FleetProjection(services.sessions, clock=clock)
     node = next(node for node in projection.read().nodes if node.id == NODE_A)
-    assert node.telemetry is not None and node.telemetry.sample is not None
+    assert node.telemetry is not None
+    assert node.telemetry.sample is not None
     assert (
         "gpu_clock"
         not in node.model_dump(mode="json", exclude_none=True)["telemetry"]["sample"]
@@ -690,7 +695,8 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
     ]
     assert stored.gpu_clock == observation
     node = next(node for node in projection.read().nodes if node.id == NODE_A)
-    assert node.telemetry is not None and node.telemetry.sample is not None
+    assert node.telemetry is not None
+    assert node.telemetry.sample is not None
     assert node.telemetry.sample.gpu_clock == observation
     render_payload(
         node.model_dump(mode="json", exclude_none=True), "fleet", action="detail"
@@ -703,12 +709,6 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
 
 def test_gpu_collection_reason_reaches_fleet_and_fresh_report_recovers(agent_system):
     # Catches ingress accepting the reason but omitting it from stored telemetry.
-    from vonk_agent_protocol.telemetry import (
-        GpuUnavailableReason,
-        TelemetryRequest,
-        TelemetrySample,
-    )
-    from vonk_control.fleet_projection.common import telemetry_point
 
     client, services, _, clock = agent_system
     failed = TelemetrySample(
@@ -822,7 +822,6 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
 ):
     # Wrong implementation: stored damage poisons a fresh verified publisher,
     # symlink bytes are accepted, or availability precedes durable directory IO.
-    from vonk_control.agent_api.common import _commit_recipe_image_upload
 
     payload = b"verified archive"
     destination = tmp_path / hashlib.sha256(payload).hexdigest()
@@ -844,14 +843,10 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
         real_sync(descriptor)
 
     monkeypatch.setattr("vonk_control.agent_api.common.os.fsync", sync)
-    try:
+    with suppress(Exception):  # no unverified effect and fresh publication decide
         _commit_recipe_image_upload(temporary, destination, expected_bytes=len(payload))
-    except Exception:  # noqa: BLE001, S110 -- no unverified effect and fresh publication decide
-        pass
     assert outside.read_bytes() == payload
     if damage != "directory-sync":
-        import stat
-
         assert stat.S_ISREG(destination.lstat().st_mode)
         assert not destination.is_symlink()
         assert destination.read_bytes() == payload
@@ -860,8 +855,6 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
     _commit_recipe_image_upload(temporary, destination, expected_bytes=len(payload))
     assert not destination.is_symlink()
     assert destination.read_bytes() == payload
-    import stat
-
     assert any(stat.S_ISDIR(mode) for mode in synced)
 
 
@@ -918,9 +911,6 @@ def test_expired_recovery_limit_cannot_starve_enrollment_and_clears(
 ):
     # Wrong implementation: recovery consumes enrollment's global budget or
     # a saturated recovery budget permanently prevents valid key-proof renewal.
-    from vonk_control.agent_api import routes
-
-    from .test_enrollment import RecoveryAuthority, csr, enroll, evidence, expired_proof
 
     _, services, codec, clock = make_agent_system(
         tmp_path, authority=RecoveryAuthority()
@@ -931,7 +921,10 @@ def test_expired_recovery_limit_cannot_starve_enrollment_and_clears(
     issued = enroll(enrollment, node_id=NODE_C, request=csr(NODE_C, key=key))
     clock.now = issued.not_after + timedelta(days=1)
     admitted_at = clock.now
-    monotonic = lambda: (clock.now - admitted_at).total_seconds()
+
+    def monotonic():
+        return (clock.now - admitted_at).total_seconds()
+
     recovery = EnrollmentRateLimiter(maximum=1, clock=monotonic)
     monkeypatch.setattr(routes, "EnrollmentRateLimiter", lambda **_: recovery)
     client = TestClient(
@@ -979,10 +972,6 @@ def test_expired_recovery_limit_cannot_starve_enrollment_and_clears(
 @pytest.mark.parametrize("entry", ["upload", "publish"])
 def test_unsafe_upload_entry_is_repaired(tmp_path, damage, entry):
     # Catches deterministic local damage poisoning fresh uploads/publication.
-    from vonk_control.agent_api.common import (
-        _commit_recipe_image_upload,
-        _prepare_recipe_image_upload,
-    )
 
     outside = tmp_path / "outside"
     outside.write_bytes(b"untouched")
@@ -996,9 +985,11 @@ def test_unsafe_upload_entry_is_repaired(tmp_path, damage, entry):
     assert destination.read_bytes() == b"verified archive"
     assert outside.read_bytes() == b"untouched"
     if entry == "publish":
-        assert damaged.is_file() and not damaged.is_symlink()
+        assert damaged.is_file()
+        assert not damaged.is_symlink()
     else:
         assert not damaged.exists()
     descriptor, temporary = _prepare_recipe_image_upload(tmp_path, "identity")
     os.close(descriptor)
-    assert temporary.is_file() and not temporary.is_symlink()
+    assert temporary.is_file()
+    assert not temporary.is_symlink()

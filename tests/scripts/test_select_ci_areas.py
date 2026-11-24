@@ -7,10 +7,12 @@ import runpy
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from scripts.protocol_wheel import protocol_wheel_name
+from tools.touched_tests import select
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -240,9 +242,9 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
     # Every job the gate knows is green; only the lane is not selected.
     results = {job: "success" for jobs in gate["AREA_JOBS"].values() for job in jobs}
     results.update(
-        {job: "success" for job in ("lint", "supply-chain", "repository-guards")}
-        | {job: "success" for job in ("consumer-probe", "rust-quality", "rust-tests")}
-        | {job: "success" for job in ("control-image-build", "controller-spark-wire")}
+        dict.fromkeys(("lint", "supply-chain", "repository-guards"), "success")
+        | dict.fromkeys(("consumer-probe", "rust-quality", "rust-tests"), "success")
+        | dict.fromkeys(("control-image-build", "controller-spark-wire"), "success")
         | {"member-web": "skipped", "lane-proof": "skipped"}
     )
     assert gate["verify"]("success", selected, results) == []
@@ -266,7 +268,7 @@ def test_merge_queue_commit_selects_from_its_diff_like_a_pull_request() -> None:
     assert module.select(["scripts/select-ci-areas"], "merge_group") == module.select(
         ["scripts/select-ci-areas"], "pull_request"
     )
-    assert module.select([], "merge_group") == {area: True for area in module.AREAS}
+    assert module.select([], "merge_group") == dict.fromkeys(module.AREAS, True)
     assert module.lane_selected(["tests/acceptance/x.py"], "merge_group") is True
 
 
@@ -370,7 +372,8 @@ def test_changed_image_consumers_keep_the_image_build(path: str) -> None:
     # that executes tests marked built_image.
     module = _module()
     selected = module.select([path], "pull_request")
-    assert selected["control"] and selected["nas_install"]
+    assert selected["control"]
+    assert selected["nas_install"]
 
 
 @pytest.mark.parametrize(
@@ -407,8 +410,6 @@ def test_unavailable_control_test_source_keeps_integrations() -> None:
 
 def test_changed_nas_module_selects_its_real_python_consumers() -> None:
     """A changed standalone package must not escape the local `scripts/test changed` loop."""
-    from tools.touched_tests import select
-
     assert ("repository", "tests/nas_setup/test_pki.py") in select(
         ["nas_setup/src/vonk_nas_setup/pki.py"]
     )
@@ -493,7 +494,7 @@ def test_selector_folds_the_scope_into_lane_and_carry(tmp_path, head, accepts) -
     assert "upgrade_inputs=false" in lines
 
 
-def _pull(ref: str, *, labels=(), fork: bool = False) -> dict:
+def _pull(ref: str, *, labels=(), fork: bool = False) -> dict[str, Any]:
     base = {"repo": {"full_name": "owner/repo"}}
     head = {"ref": ref, "repo": {"full_name": "fork/repo" if fork else "owner/repo"}}
     names = [{"name": name} for name in labels]

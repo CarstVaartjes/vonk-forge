@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.helper_response import HostHelperResponse
+from vonk_agent_protocol.wire_model import canonical_message
 
 
 def test_helper_rejection_keeps_required_nulls_and_omits_unused_diagnostics() -> None:
@@ -46,7 +48,9 @@ def test_helper_rejection_keeps_required_nulls_and_omits_unused_diagnostics() ->
         {"detail": "secret"},
     ],
 )
-def test_helper_response_rejects_untyped_or_unbounded_fields(changes: dict) -> None:
+def test_helper_response_rejects_untyped_or_unbounded_fields(
+    changes: dict[str, Any],
+) -> None:
     with pytest.raises(ValidationError):
         HostHelperResponse.model_validate(
             {

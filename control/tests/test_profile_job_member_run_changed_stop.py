@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_control.models.execution import RecipeRun
 from vonk_control.recipe_operations import job_run_stop
 
@@ -73,6 +74,7 @@ def test_a_job_member_whose_run_changed_before_its_stop_is_re_planned(
         assert drifted == [run_id]
         with world.sessions() as session:
             stopped = session.get(RecipeRun, run_id)
-            assert stopped is not None and stopped.state == "stopped"
+            assert stopped is not None
+            assert stopped.state == "stopped"
     finally:
         world.close()

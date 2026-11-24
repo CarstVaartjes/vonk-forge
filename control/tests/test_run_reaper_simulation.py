@@ -14,6 +14,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+
 from vonk_control.models.execution import RecipeRun
 
 from .lifecycle_simulation.actions import Step, perform
@@ -32,10 +33,7 @@ def _load(sim: Simulation, name: str, assignments: list[dict[str, object]]) -> s
 
 def _states(sim: Simulation) -> dict[str, str]:
     with sim.world.sessions() as session:
-        return {
-            run_id: state
-            for run_id, state in session.execute(select(RecipeRun.id, RecipeRun.state))
-        }
+        return dict(session.execute(select(RecipeRun.id, RecipeRun.state)).all())
 
 
 @pytest.mark.slow(40)

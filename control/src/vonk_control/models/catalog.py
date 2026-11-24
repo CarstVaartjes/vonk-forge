@@ -23,7 +23,6 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column
-from vonk_agent_protocol.state_machines import machine_check
 from vonk_forge_contracts import (
     ModelDisplay,
     RecipeDisplay,
@@ -31,10 +30,15 @@ from vonk_forge_contracts import (
     read_recipe_display,
 )
 
-from ..exact_integer_storage import DecimalIntegerToken, ExactNonnegativeInteger
-from ..model_primitives import Base, _lower_hex
-from ..stored.states import CatalogRevisionState
-from ..unreadable_rows import note_unreadable
+from vonk_agent_protocol.state_machines import machine_check
+from vonk_control.catalog.revision_contract import PublishedDocument
+from vonk_control.exact_integer_storage import (
+    DecimalIntegerToken,
+    ExactNonnegativeInteger,
+)
+from vonk_control.model_primitives import Base, _lower_hex
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.unreadable_rows import note_unreadable
 
 
 class RecipeSourceBundle(Base):
@@ -104,7 +108,7 @@ class CatalogDocument(Base):
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     #: The published display (RecipeDisplay or ModelDisplay) as the signed index
     #: carried it; null until the first sync after the column was added.
-    display: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    display: Mapped[PublishedDocument | None] = mapped_column(JSON, nullable=True)
     created_by: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

@@ -8,10 +8,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy import Engine, create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_control.catalog.revision_collection import GRACE
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.model_cache.service import ModelCacheService
@@ -39,9 +41,11 @@ from vonk_control.storage_demands import (
     StorageDemands,
 )
 from vonk_control.unused_storage_collection.common import ACTOR
+from vonk_control.unused_storage_collection.references import _utc
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .model_cache_support import _artifact, _download
+from .recipe_operations_support import installed_recipe, setup_services
 from .removal_settle import advance_until_ended
 from .runtime_image_fixtures import place_test_image
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
@@ -106,7 +110,8 @@ class FakeLifecycle:
     ) -> None:
         # Joining the Sparks' intent is what keeps an unattended Stop from
         # superseding anything.
-        assert actor == ACTOR and workload_intent_ordinal is not None
+        assert actor == ACTOR
+        assert workload_intent_ordinal is not None
         self.stopped.append(run_id)
 
     def uninstall(
@@ -119,7 +124,8 @@ class FakeLifecycle:
         also_removing=(),
         preserve_model_files=False,
     ) -> None:
-        assert actor == ACTOR and unattended_guard is not None
+        assert actor == ACTOR
+        assert unattended_guard is not None
         assert preserve_model_files
         # The sweep has judged the installation unused; a load can still
         # arrive before the removal is queued.
@@ -287,8 +293,6 @@ def _within_grace(world: Catalog) -> None:
     with world.sessions.begin() as session:
         for model in (RecipeInstallation, InstallationNode, RecipeRun):
             for row in session.scalars(select(model)):
-                from vonk_control.unused_storage_collection.references import _utc
-
                 row.updated_at = NOW - (NOW - _utc(row.updated_at)) / 100
 
 
@@ -464,7 +468,6 @@ def _application(
 
 
 def _real_lifecycle(tmp_path: Path, *, nodes: int = 1, engine: Engine | None = None):
-    from .recipe_operations_support import installed_recipe, setup_services
 
     sessions, service, _queue, mapping_id, build_id, node_ids = setup_services(
         tmp_path, nodes=nodes, engine=engine
@@ -604,10 +607,13 @@ class _Volume:
         self.external = self.total - self.cache_used() - free
 
     def usage(self, _path: object = None):
-        from collections import namedtuple
 
-        usage = namedtuple("usage", "total used free")
-        return usage(self.total, self.total - self.free, self.free)
+        class DiskUsage(NamedTuple):
+            total: int
+            used: int
+            free: int
+
+        return DiskUsage(self.total, self.total - self.free, self.free)
 
     def pair(self, _path: Path) -> tuple[int, int]:
         return self.total, self.free

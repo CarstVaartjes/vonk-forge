@@ -19,20 +19,28 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 from sqlalchemy import select
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     SecurityRefusalReason,
+    WaitReason,
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.reason_codes.runtime import (
+    RuntimeImageCode,
+    RuntimePreflightCode,
+)
 from vonk_control.categorized_errors import SecurityRefused
+from vonk_control.categorized_faults import OperationInterrupted
 from vonk_control.lifecycle.core import STOP_BUDGET
 from vonk_control.lifecycle.run_switch import RunSwitchAdapter
 from vonk_control.lifecycle.types import (
@@ -45,11 +53,21 @@ from vonk_control.lifecycle.types import (
     State,
     Tick,
 )
+from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
 from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import read_wait
+from vonk_control.recovery_policy import RECOVERY
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.run_switch_operations.errors import (
+    RunSwitchOperationConflict,
+    RunSwitchPostStopEvidencePending,
+    _RunSwitchDefiniteConflict,
+)
 from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationUnknown,
+)
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import (
@@ -137,7 +155,8 @@ class _Harness:
 
         with self.sessions.begin() as session:
             job = session.get(Job, self.id)
-            assert job is not None and isinstance(job.result, dict)
+            assert job is not None
+            assert isinstance(job.result, dict)
             result = dict(job.result)
             for key in ("observation_due_at", "retry_attempt", "retry_reason"):
                 result.pop(key, None)
@@ -157,7 +176,8 @@ class _ScriptedExecutor(RecordingArtifactExecutor):
         super().__init__(**kwargs)
         self.faults: dict[str, Any] = {}
 
-    def execute(self, plan, phase, **kwargs):
+    # Scripted phases return deliberately invalid results.
+    def execute(self, plan, phase, **kwargs):  # pyright: ignore[reportIncompatibleMethodOverride]
         fault = self.faults.get(phase.kind)
         if isinstance(fault, BaseException):
             self.calls.append(phase.kind)
@@ -250,7 +270,8 @@ def test_a_legacy_operator_wait_is_re_evaluated_by_the_first_decision() -> None:
     assert row.state is State.NEEDS_OPERATOR  # legacy, only ever read
     healed = adapter.decide(job, _read_progress(job.result), Tick(), now).row
     assert healed.state is State.BACKOFF
-    assert healed.next_action_at is not None and healed.next_action_at > now
+    assert healed.next_action_at is not None
+    assert healed.next_action_at > now
     # with a clock it was already an observation (what its view presents)
     clocked = _job("needs-operator", dict(_SHAPES["clock"]))
     assert (
@@ -565,7 +586,7 @@ def test_an_error_nobody_classified_is_retried_by_the_tick_guard(
             )
         return original(operation_id)
 
-    harness.service._advance = advance  # type: ignore[method-assign]
+    harness.service._advance = advance
     harness.service.tick()
     held = harness.view()
     assert _retrying(held), (held.state, held.status_reason)
@@ -595,7 +616,8 @@ def test_the_retry_clock_is_the_cores_and_resets_on_a_new_cause(tmp_path: Path) 
             break
         delays.append((due - harness.now[0]).total_seconds())
         harness.now[0] = due
-    assert delays and all(1 <= delay <= 75 for delay in delays), delays
+    assert delays, delays
+    assert all(1 <= delay <= 75 for delay in delays), delays
     assert max(delays) <= 75  # one bounded clock, not the old 5 minutes
 
 
@@ -638,7 +660,6 @@ def test_a_changed_accepted_image_ends_the_operation_but_a_stop_gap_is_observed(
 
 
 def module_conflict(message: str) -> RunSwitchOperationConflict:
-    from vonk_control.run_switch_operations.errors import _RunSwitchDefiniteConflict
 
     return _RunSwitchDefiniteConflict(message)
 
@@ -676,11 +697,6 @@ def test_post_stop_inventory_pending_waits_past_the_retry_budget_and_then_heals(
     own; a Run/Switch is bounded by its checkpoint window instead, so the hold
     outlives many backoff steps and continues once fresh inventory arrives.
     """
-
-    from vonk_control.recovery_policy import RECOVERY
-    from vonk_control.run_switch_operations.errors import (
-        RunSwitchPostStopEvidencePending,
-    )
 
     executor = _ScriptedExecutor()
     pending = RunSwitchPostStopEvidencePending("Spark has no post-stop inventory")
@@ -733,12 +749,6 @@ def test_an_unknown_outcome_of_a_phase_is_retried_regardless_of_retryable_flag(
     """Unknown outcomes recover after restart and admit fresh work, regardless of
     the preparation owner's retryable flag."""
 
-    from vonk_agent_protocol.agent_words import ProfileChildPhase
-    from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-    from vonk_control.runtime_image_preparation.contracts import (
-        RuntimeImagePreparationUnknown,
-    )
-
     executor = _ScriptedExecutor()
     unknown = RuntimeImagePreparationUnknown(
         RuntimeImageCode.RECEIPT_UNAVAILABLE,
@@ -784,7 +794,6 @@ def test_an_unknown_outcome_of_a_phase_is_retried_regardless_of_retryable_flag(
 def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.categorized_faults import OperationInterrupted
 
     harness = _Harness(tmp_path, RecordingArtifactExecutor())
     original = harness.service._advance
@@ -795,7 +804,7 @@ def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(
             raise OperationInterrupted("the observation was interrupted")
         return original(operation_id)
 
-    harness.service._advance = advance  # type: ignore[method-assign]
+    harness.service._advance = advance
     harness.service.tick()
     held = harness.view()
     assert _retrying(held), (held.state, held.status_reason)
@@ -813,12 +822,6 @@ def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(
 @pytest.mark.parametrize("cancelling", [False, True])
 def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling):
     """A leftover probe checkpoint must not overwrite the current lifecycle wait."""
-    from dataclasses import replace
-
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
-    from vonk_control.lifecycle_preflight import LifecyclePreflightCheckpoint
-    from vonk_control.persisted_waits import read_wait
 
     adapter = RunSwitchAdapter()
     job = _job(LifecycleState.RUNNING, {})
@@ -840,12 +843,11 @@ def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling)
     adapter.apply(
         job,
         progress,
-        before,
         replace(after, cancel_requested_at=None, cancel_request_key=None),
         NOW,
     )
     if cancelling:
-        adapter.apply(job, progress, before, after, NOW)
+        adapter.apply(job, progress, after, NOW)
     else:
         adapter.retry(job, progress, RunSwitchCode.PHASE_RETRY, NOW)
     waiting = read_wait(job)
@@ -853,4 +855,5 @@ def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling)
     assert waiting.reason is (
         WaitReason.STOP_UNCONFIRMED if cancelling else RunSwitchCode.PHASE_RETRY
     )
-    assert waiting.blockers and waiting.blockers[0].code == waiting.reason
+    assert waiting.blockers
+    assert waiting.blockers[0].code == waiting.reason

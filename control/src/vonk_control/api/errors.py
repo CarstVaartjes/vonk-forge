@@ -13,17 +13,14 @@ from fastapi.exception_handlers import (
 )
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.error_response import (
     RequestValidationIssue,
     RequestValidationProblem,
 )
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
-
-from ..capabilities import CapabilityUnavailableError
-from ..catalog.api import CatalogProblem
-from ..http_errors import TemporaryHTTPError
-from .common import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.api.common import (
     _LOGIN_PATH,
     _bounded_error_content,
     _catalog_error_content,
@@ -32,6 +29,11 @@ from .common import (
     _log_request_failure,
     _validation_detail,
 )
+from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.catalog.api import CatalogProblem
+from vonk_control.http_errors import TemporaryHTTPError
+from vonk_control.library_projection.common import SelectorAmbiguityHTTPError
+from vonk_control.logging import redact_text
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -49,7 +51,6 @@ def install_error_handlers(app: FastAPI) -> None:
     async def canonical_agent_http_error(
         request: Request, error: StarletteHTTPException
     ) -> Response:
-        from ..library.api import SelectorAmbiguityHTTPError
 
         if isinstance(error, TemporaryHTTPError):
             return Response(
@@ -126,7 +127,6 @@ def install_error_handlers(app: FastAPI) -> None:
             )
         if not request.url.path.startswith(("/agent/", "/api/")):
             return await request_validation_exception_handler(request, error)
-        from ..logging import redact_text
 
         if request.url.path.startswith("/agent/"):
             _log_agent_rejection(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -24,18 +25,17 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from tests.wire_probes import prebuilt_probe
+from vonk_agent_protocol.agent_operations import ArtifactDistributionResult
 from vonk_agent_protocol.agent_state import (
     AgentExecutorProbeMode,
     AgentExecutorProbeRequest,
 )
-from vonk_agent_protocol.contracts import (
-    AgentResult,
-    ArtifactDistributionPayload,
-    ArtifactDistributionResult,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentResult, ArtifactDistributionPayload
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, WaitReason
 from vonk_agent_protocol.outcome import OutcomeDone, OutcomeUnknown
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
@@ -43,8 +43,6 @@ from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.operations import AgentOperation
-
-from tests.wire_probes import prebuilt_probe
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
@@ -262,12 +260,12 @@ class DistributionHandler(BaseHTTPRequestHandler):
             server.partial_sent.set()
             server.release_partial.wait(timeout=30)
             selected = selected[3_000_000:]
-        try:
+        with contextlib.suppress(
+            BrokenPipeError, ConnectionResetError, ssl.SSLEOFError
+        ):
             self.wfile.write(selected)
-        except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
-            pass
 
-    def log_message(self, _format: str, *_args: object) -> None:
+    def log_message(self, format: str, *_args: object) -> None:
         return
 
 
@@ -369,7 +367,8 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         "serial-a",
         runtime_identity=PACKAGED_RUNTIME_IDENTITY,
     )
-    assert first is not None and fenced_operation(sessions, first).id == operation.id
+    assert first is not None
+    assert fenced_operation(sessions, first).id == operation.id
     data_root = tmp_path / "agent-data"
     first_process = subprocess.Popen(
         [str(restart_probe)],
@@ -450,7 +449,8 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         jobs.record_result(interrupted)
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.next_action_at is not None
+        assert stored is not None
+        assert stored.next_action_at is not None
         due = stored.next_action_at
     clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
     second = claim_agent(
@@ -459,16 +459,13 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         "serial-a",
         runtime_identity=PACKAGED_RUNTIME_IDENTITY,
     )
-    assert (
-        second is not None
-        and fenced_operation(sessions, second).id
-        == fenced_operation(sessions, first).id
-    )
+    assert second is not None
+    assert fenced_operation(sessions, second).id == fenced_operation(sessions, first).id
     assert (
         fenced_attempt(sessions, second).attempt
         == fenced_attempt(sessions, first).attempt + 1
-        and second.fence != first.fence
     )
+    assert second.fence != first.fence
     completed = _run_probe(
         restart_probe,
         _probe_request("execute-distribution", second, data_root, server, certs),
@@ -477,7 +474,8 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
     jobs.record_result(completed)
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "succeeded"
+        assert stored is not None
+        assert stored.state == "succeeded"
     with server.requests_lock:
         requests = tuple(server.requests)
     assert any(

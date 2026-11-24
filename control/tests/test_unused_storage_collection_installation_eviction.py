@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.catalog.revision_collection import operation_tokens
 from vonk_control.models.catalog import (
@@ -31,7 +32,8 @@ from vonk_control.storage_demands import (
     StorageDemands,
     spark_scope,
 )
-from vonk_control.unused_storage_collection.common import spark_eviction_capacity
+from vonk_control.unused_storage_collection.common import _eviction_order
+from vonk_control.unused_storage_collection.service import spark_eviction_capacity
 
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
 from .unused_storage_collection_support import (
@@ -106,7 +108,8 @@ def test_the_least_recently_used_go_first_and_only_as_many_as_the_shortfall_need
     result = _collector(world, lifecycle, free=90 * GIB).collect()
 
     assert lifecycle.removed == [oldest]
-    assert middle not in lifecycle.removed and newest not in lifecycle.removed
+    assert middle not in lifecycle.removed
+    assert newest not in lifecycle.removed
     scope = result.scopes[0]
     assert scope["scope"] == spark_scope(NODE)
     assert scope["needed_bytes"] == 10 * GIB
@@ -386,7 +389,8 @@ def test_a_release_that_changes_what_runs_outside_the_key_is_an_update(
     with world.sessions() as session:
         running = session.get(CatalogDocumentRevision, installed)
         newest = session.get(CatalogDocumentRevision, head)
-        assert running is not None and newest is not None
+        assert running is not None
+        assert newest is not None
         assert recipe_update_notice("GLM", running, newest) is not None
 
 
@@ -411,7 +415,6 @@ def test_pointed_installations_are_planned_least_recently_used_first(
         (oldest,),
         (newer,),
     ]
-    from vonk_control.unused_storage_collection.common import _eviction_order
 
     assert [item.members[0] for item in _eviction_order(capacity.items)] == [
         oldest,
@@ -622,10 +625,10 @@ def test_shared_model_files_free_only_with_the_last_installation_that_links_them
     # B is shared by M1 and M2: the first model out frees only what no other
     # model links, the second takes B with it.
     first, second = capacity.items
-    assert len(first.members) == 5 and first.freeable == 10 * GIB + 40 * GIB
-    assert (
-        len(second.members) == 3 and second.freeable == 10 * GIB + 60 * GIB + 30 * GIB
-    )
+    assert len(first.members) == 5
+    assert first.freeable == 10 * GIB + 40 * GIB
+    assert len(second.members) == 3
+    assert second.freeable == 10 * GIB + 60 * GIB + 30 * GIB
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

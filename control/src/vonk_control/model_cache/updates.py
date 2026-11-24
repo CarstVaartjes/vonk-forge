@@ -6,22 +6,18 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 
-from ..catalog.queries import active_head_revision
-from ..catalog.revision_contract import (
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.catalog.revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
 )
-from ..categorized_errors import InvalidValue
-from ..models.cache import ModelCacheSet
-from ..models.catalog import CatalogDocumentRevision
-from ..stored.states import CatalogRevisionState
-from ..strict_json import serialize_json_value
-from .artifacts import ArtifactSetManifest, _optional_digest
-from .catalog_helpers import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _optional_digest
+from vonk_control.model_cache.catalog_helpers import (
     _datetime,
     _iso,
     _model_lineage_signature,
@@ -29,14 +25,15 @@ from .catalog_helpers import (
     _revision_identity,
     _same_model_artifact_identity,
 )
-from .constants import (
-    SCHEMA_VERSION,
-    SOURCE_POLICY,
-)
-from .errors import ModelCacheConflictInvalid
+from vonk_control.model_cache.constants import SCHEMA_VERSION, SOURCE_POLICY
+from vonk_control.model_cache.errors import ModelCacheConflictInvalid
+from vonk_control.models.cache import ModelCacheSet
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.stored.states import CatalogRevisionState
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class UpdatesMixin:
@@ -46,82 +43,11 @@ class UpdatesMixin:
     def _model_update_candidate(
         session: Session, manifest: ArtifactSetManifest
     ) -> tuple[CatalogDocumentRevision, CatalogDocumentRevision] | None:
-        from .service import ModelCacheService
 
-        current, candidates = ModelCacheService._model_update_candidates(
-            session, manifest
-        )
+        current, candidates = _model_update_candidates(session, manifest)
         if current is None or len(candidates) != 1:
             return None
         return current, candidates[0]
-
-    @staticmethod
-    def _model_update_candidates(
-        session: Session, manifest: ArtifactSetManifest
-    ) -> tuple[CatalogDocumentRevision | None, list[CatalogDocumentRevision]]:
-        ref = manifest.model_definition_ref
-        if ref is None:
-            return None, []
-        verified = {
-            (reference.publisher, reference.slug): reference
-            for reference in manifest.verified_models
-        }
-        ref = verified.get((ref.publisher, ref.slug), ref)
-        current_digest = ref.content_sha256
-        current = None
-        current = session.scalar(
-            select(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.kind == "model",
-                CatalogDocumentRevision.content_digest == current_digest,
-                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
-            )
-        )
-        if current is None:
-            current = session.scalar(
-                select(CatalogDocumentRevision)
-                .where(
-                    CatalogDocumentRevision.kind == "model",
-                    CatalogDocumentRevision.publisher == ref.publisher,
-                    CatalogDocumentRevision.slug == ref.slug,
-                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
-                )
-                .order_by(CatalogDocumentRevision.revision_number.asc())
-            )
-        if current is None:
-            return None, []
-        try:
-            current_document = read_catalog_document(current)
-        except CatalogRevisionContractError:
-            return None, []
-        if not isinstance(current_document, ModelDefinition):
-            return None, []
-        current_signature = _model_lineage_signature(current_document)
-        candidates: list[CatalogDocumentRevision] = []
-        for candidate in session.scalars(
-            select(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.kind == "model",
-                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
-            )
-        ):
-            if candidate.content_digest == current.content_digest:
-                continue
-            try:
-                candidate_document = read_catalog_document(candidate)
-            except CatalogRevisionContractError:
-                continue
-            if not isinstance(candidate_document, ModelDefinition):
-                continue
-            if _model_lineage_signature(candidate_document) != current_signature:
-                continue
-            if not _same_model_artifact_identity(candidate, manifest) and (
-                candidate.revision_number > current.revision_number
-                or _datetime(candidate.created_at) > _datetime(current.created_at)
-            ):
-                candidates.append(candidate)
-        # Multiple incomparable successors are deliberately exposed as
-        # ambiguous; choosing one by wall-clock order would hide a catalog
-        # lineage decision from operators.
-        return current, candidates
 
     @staticmethod
     def _latest_recipe_digest(session: Session, digest: str) -> str | None:
@@ -202,9 +128,7 @@ class UpdatesMixin:
                 model_update_candidates: list[ModelReference] = []
                 model_update_ambiguous = False
                 latest_recipe = None
-                current_model, candidates = cache._model_update_candidates(
-                    session, manifest
-                )
+                current_model, candidates = _model_update_candidates(session, manifest)
                 if current_model is not None and len(candidates) == 1:
                     latest = candidates[0]
                     latest_model = latest.content_digest
@@ -256,3 +180,71 @@ class UpdatesMixin:
             "total": total,
             "_next_boundary": next_boundary,
         }
+
+
+def _model_update_candidates(
+    session: Session, manifest: ArtifactSetManifest
+) -> tuple[CatalogDocumentRevision | None, list[CatalogDocumentRevision]]:
+    ref = manifest.model_definition_ref
+    if ref is None:
+        return None, []
+    verified = {
+        (reference.publisher, reference.slug): reference
+        for reference in manifest.verified_models
+    }
+    ref = verified.get((ref.publisher, ref.slug), ref)
+    current_digest = ref.content_sha256
+    current = None
+    current = session.scalar(
+        select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.kind == "model",
+            CatalogDocumentRevision.content_digest == current_digest,
+            CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
+        )
+    )
+    if current is None:
+        current = session.scalar(
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.publisher == ref.publisher,
+                CatalogDocumentRevision.slug == ref.slug,
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
+            )
+            .order_by(CatalogDocumentRevision.revision_number.asc())
+        )
+    if current is None:
+        return None, []
+    try:
+        current_document = read_catalog_document(current)
+    except CatalogRevisionContractError:
+        return None, []
+    if not isinstance(current_document, ModelDefinition):
+        return None, []
+    current_signature = _model_lineage_signature(current_document)
+    candidates: list[CatalogDocumentRevision] = []
+    for candidate in session.scalars(
+        select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.kind == "model",
+            CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
+        )
+    ):
+        if candidate.content_digest == current.content_digest:
+            continue
+        try:
+            candidate_document = read_catalog_document(candidate)
+        except CatalogRevisionContractError:
+            continue
+        if not isinstance(candidate_document, ModelDefinition):
+            continue
+        if _model_lineage_signature(candidate_document) != current_signature:
+            continue
+        if not _same_model_artifact_identity(candidate, manifest) and (
+            candidate.revision_number > current.revision_number
+            or _datetime(candidate.created_at) > _datetime(current.created_at)
+        ):
+            candidates.append(candidate)
+    # Multiple incomparable successors are deliberately exposed as
+    # ambiguous; choosing one by wall-clock order would hide a catalog
+    # lineage decision from operators.
+    return current, candidates

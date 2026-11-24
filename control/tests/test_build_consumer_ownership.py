@@ -6,9 +6,11 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from sqlalchemy import select
+from vonk_forge_contracts import RecipeDefinition
+
 import vonk_control.recipe_image_availability.cancellation as availability_module
 import vonk_control.recipe_image_availability.requests as availability_requests
-from sqlalchemy import select
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profiles import queue_application as profile_module
 from vonk_control.jobs.documents import AvailabilityRuntime
@@ -30,7 +32,6 @@ from vonk_control.recipe_image_availability.service import (
 from vonk_control.recipe_operations.availability_intent import RecipeBuildDependency
 from vonk_control.recipe_operations.errors import RecipeOperationConflict
 from vonk_control.recipe_operations.runtime_specs import RUNTIME_INTERFACE
-from vonk_forge_contracts import RecipeDefinition
 
 from .test_build_cancellation_recovery import (
     _active_claims,
@@ -196,7 +197,8 @@ def test_recipe_parent_cancellation_detaches_one_shared_build_consumer(
     assert availability.get(other_parent.id).state == "queued"
     with sessions() as session:
         job = session.get(Job, build.id)
-        assert job is not None and job.result is None
+        assert job is not None
+        assert job.result is None
 
     # The second accepted parent binds the exact shared child by its operation
     # ID even though the build was originally admitted with the first key.
@@ -210,7 +212,8 @@ def test_recipe_parent_cancellation_detaches_one_shared_build_consumer(
     assert availability.get(other_parent.id).state == LifecycleState.OBSERVING
     with sessions() as session:
         job = session.get(Job, build.id)
-        assert job is not None and job.result is not None
+        assert job is not None
+        assert job.result is not None
         assert job.result["cancel_requested"] is True
         assert job.result["cancel_actor"] == "operator"
     assert operations.reconcile_cancelled_builds()
@@ -300,7 +303,8 @@ def test_profile_protects_its_build_before_the_execution_child_exists(
         )
         application = session.get(FleetProfileApplication, application_id)
         node = session.get(AgentNode, node_id)
-        assert application is not None and node is not None
+        assert application is not None
+        assert node is not None
         if change == "superseded":
             node.workload_intent_ordinal += 1
         elif change == "invalid-progress":
@@ -508,9 +512,11 @@ def test_new_availability_consumer_committing_before_cancellation_keeps_shared_b
     assert availability.get(first.id).state == "cancelled"
     with sessions() as session:
         child = session.get(Job, build.id)
-        assert child is not None and child.result is None
+        assert child is not None
+        assert child.result is None
         accepted = session.scalar(select(Job).where(Job.request_id == request_id))
-        assert accepted is not None and accepted.state == "queued"
+        assert accepted is not None
+        assert accepted.state == "queued"
 
 
 @pytest.mark.parametrize("linked", [True, False])
@@ -596,7 +602,8 @@ def test_new_availability_consumer_cannot_join_after_cancellation_fences_shared_
         )
     with sessions() as session:
         child = session.get(Job, build.id)
-        assert child is not None and child.result is not None
+        assert child is not None
+        assert child.result is not None
         assert child.result["cancel_requested"] is True
         assert (
             session.scalar(
@@ -654,7 +661,8 @@ def test_invalid_cleanup_evidence_refuses_consumer_acceptance_with_a_typed_error
     )
     with sessions.begin() as session:
         job = session.get(Job, build.id)
-        assert job is not None and job.result is not None
+        assert job is not None
+        assert job.result is not None
         original_result = job.result
         job.result = dict(job.result) | {"cancel_request_id": None}
     claims = _active_claims(sessions, plan.build_id)

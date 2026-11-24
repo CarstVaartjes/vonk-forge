@@ -18,7 +18,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -26,13 +26,14 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import InvalidRequestError, SecurityRefusalError
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.failure_classification import (
     error_code,
     is_definite,
     is_security_failure,
 )
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
-from vonk_control.model_cache.catalog_helpers import _validate_source
+from vonk_control.model_cache.source_helpers import _validate_source
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
@@ -151,7 +152,8 @@ def test_profile_stop_waits_for_a_briefly_unavailable_owner_then_completes(
     lifecycle.reconcile_pending_service_stops()
     with sessions() as session:
         waiting = session.get(Job, stop_id)
-        assert waiting is not None and waiting.state == LifecycleState.RUNNING.value
+        assert waiting is not None
+        assert waiting.state == LifecycleState.RUNNING.value
     assert _children_of(sessions, stop_id) == []
 
     # The owner is back: the same accepted Stop is dispatched and completes.
@@ -205,7 +207,8 @@ def test_profile_stop_whose_parent_changed_replans_and_completes(
     assert changed
     with sessions() as session:
         root = session.get(Job, changed[0])
-        assert root is not None and root.state != LifecycleState.FAILED.value
+        assert root is not None
+        assert root.state != LifecycleState.FAILED.value
         progress = RunSwitchOperationResult.model_validate_json(
             canonical_message(root.result), strict=True
         )
@@ -274,7 +277,8 @@ def test_profile_stop_accepts_a_parent_stored_with_a_retired_plan_field(
     assert _children_of(sessions, stop_id)
     with sessions() as session:
         root = session.get(Job, aged[0])
-        assert root is not None and root.state != LifecycleState.FAILED.value
+        assert root is not None
+        assert root.state != LifecycleState.FAILED.value
 
 
 def test_cache_resolution_shape_is_an_invalid_request_not_a_refusal() -> None:
@@ -296,7 +300,8 @@ def test_grant_for_another_nodes_plan_is_still_refused_closed(tmp_path) -> None:
         child = session.scalars(
             select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
         ).first()
-        assert parent is not None and child is not None
+        assert parent is not None
+        assert child is not None
         own = derive_runtime_plan_binding(
             session,
             parent=parent,

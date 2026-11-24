@@ -8,10 +8,11 @@ from collections.abc import Mapping
 from datetime import datetime
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from pydantic import JsonValue, ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
@@ -21,12 +22,17 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     NodeIdentityState,
 )
-
+from vonk_control.agent_contacts import ensure_contact
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import EnrollmentRotationClaim
-
-from ..agent_contacts import ensure_contact
-from ..ca_issuance_contract import CertificateIssuanceBinding
-from ..models.fleet import (
+from vonk_control.enrollment.ending import retain_ended_effect
+from vonk_control.enrollment.types import EnrollmentDenied, EnrollmentIssuanceUncertain
+from vonk_control.enrollment.validation import (
+    _load_csr,
+    _stored_utc,
+    _validate_evidence,
+)
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,
@@ -34,18 +40,12 @@ from ..models.fleet import (
     AgentNode,
     AgentNodeProfile,
 )
-from ..pki import IssuedCertificate
-from ..security.enrollment import (
+from vonk_control.pki import IssuedCertificate
+from vonk_control.security.enrollment import (
     certificate_text,
     require_fresh_identity,
     require_grant,
     require_node,
-)
-from .types import EnrollmentDenied, EnrollmentIssuanceUncertain
-from .validation import (
-    _load_csr,
-    _stored_utc,
-    _validate_evidence,
 )
 
 
@@ -112,8 +112,6 @@ def _persist_issued_enrollment(
             .with_for_update(of=AgentCertificateRotation)
         )
         if rotation is not None:
-            from .ending import retain_ended_effect
-
             retain_ended_effect(
                 session,
                 _issuance_binding(rotation.provider_request),
@@ -204,8 +202,8 @@ def _issued(enrollment: AgentEnrollment) -> IssuedCertificate:
         raise RuntimeError("issued certificate projection is inconsistent")
     return IssuedCertificate(
         node_id=enrollment.node_id,
-        certificate_pem=enrollment.certificate_pem.encode("ascii"),  # type: ignore[union-attr]
-        chain_pem=enrollment.chain_pem.encode("ascii"),  # type: ignore[union-attr]
+        certificate_pem=enrollment.certificate_pem.encode("ascii"),
+        chain_pem=enrollment.chain_pem.encode("ascii"),
         serial=enrollment.certificate_serial,  # type: ignore[arg-type]
         fingerprint=enrollment.certificate_fingerprint,  # type: ignore[arg-type]
         not_before=_stored_utc(enrollment.certificate_not_before),  # type: ignore[arg-type]
@@ -216,7 +214,7 @@ def _issued(enrollment: AgentEnrollment) -> IssuedCertificate:
 
 def _replay_matches(
     enrollment: AgentEnrollment,
-    csr: bytes,
+    csr: object,
     evidence: Mapping[str, str],
 ) -> bool:
     # Apply the fresh-submit CSR bound before parsing; an oversized or
@@ -234,8 +232,6 @@ def _replay_matches(
         fingerprint,
     )
     binding = _issuance_binding(enrollment.provider_request)
-    from cryptography import x509
-    from cryptography.hazmat.primitives import serialization
 
     content_matches = (
         hashlib.sha256(

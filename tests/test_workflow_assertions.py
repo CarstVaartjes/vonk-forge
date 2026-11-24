@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import ast
+import importlib.machinery
+import importlib.util
 import re
 import textwrap
 from pathlib import Path
 
 import pytest
 import yaml
+
+from tools import pytest_prereqs
 
 ROOT = Path(__file__).resolve().parents[1]
 _PINNED_PASSED_SUMMARY = re.compile(r"\b[0-9]+\s+passed\b")
@@ -89,7 +93,7 @@ def _pinned_case_counts(source: str) -> list[int]:
         for node in ast.walk(assertion.test)
         if isinstance(node, ast.Compare)
         for left, op, right in zip(
-            [node.left, *node.comparators], node.ops, node.comparators
+            [node.left, *node.comparators], node.ops, node.comparators, strict=False
         )
         if isinstance(op, ast.Eq)
         and (
@@ -113,8 +117,10 @@ def test_workflows_never_pin_executed_case_counts() -> None:
         for block in _PYTHON_HEREDOC.finditer(content):
             source = textwrap.dedent(block.group(2))
             offset = content[: block.start(2)].count("\n")
-            for line in _pinned_case_counts(source):
-                problems.append(f"{path.name}:{offset + line}: pinned execution count")
+            problems.extend(
+                f"{path.name}:{offset + line}: pinned execution count"
+                for line in _pinned_case_counts(source)
+            )
     assert not problems, "Use nonempty coverage and named subsets:\n" + "\n".join(
         problems
     )
@@ -179,7 +185,6 @@ def test_guard_rejects_pinned_passed_summary_but_allows_nonempty_pattern() -> No
 
 def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None:
     """Retiring OCI proof jobs must not silently skip their real ingress tests."""
-    from tools import pytest_prereqs
 
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
     steps = workflow["jobs"]["control-suite"]["steps"]
@@ -247,7 +252,8 @@ def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> No
         [listing] = [
             step for step in steps if "scripts/changed-tests" in step.get("run", "")
         ]
-        assert "pull_request" in listing["if"] and "merge_group" in listing["if"]
+        assert "pull_request" in listing["if"]
+        assert "merge_group" in listing["if"]
         assert "merge_group.base_sha" in listing["env"]["BASE_SHA"]
         [run] = [step for step in steps if command in step.get("run", "")]
         assert "--test-budget-enforce" in run["run"]
@@ -364,8 +370,6 @@ def test_every_job_has_a_timeout_and_a_pinned_runner_label() -> None:
 
 def test_pre_commit_added_line_paths_match_ci() -> None:
     """The hook checks the same pathspec as ci.yml's added-line step."""
-    import importlib.machinery
-    import importlib.util
 
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     match = re.search(r"--unified=0 \"\$BASE_SHA\" -- \\\n\s+([^|\n]+?)\s*\|", ci)
@@ -377,4 +381,4 @@ def test_pre_commit_added_line_paths_match_ci() -> None:
     assert spec
     hook = importlib.util.module_from_spec(spec)
     loader.exec_module(hook)
-    assert hook.ADDED_LINE_PATHS == match.group(1).split()
+    assert match.group(1).split() == hook.ADDED_LINE_PATHS

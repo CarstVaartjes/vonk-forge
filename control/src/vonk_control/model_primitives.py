@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any, override
 
 from sqlalchemy import (
     Integer,
@@ -14,6 +15,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql.functions import FunctionElement
 from sqlalchemy.types import TypeDecorator, TypeEngine
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     LifecycleSubject,
@@ -110,7 +112,7 @@ class CertificateGenerationStorage(TypeDecorator[int]):
     impl = Numeric(20, 0)
     cache_ok = True
 
-    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine:
+    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
         if dialect.name == "sqlite":
             return dialect.type_descriptor(String(20))
         return dialect.type_descriptor(Numeric(20, 0))
@@ -122,6 +124,7 @@ class CertificateGenerationStorage(TypeDecorator[int]):
             return None
         return f"{value:020d}" if dialect.name == "sqlite" else Decimal(value)
 
+    @override
     def process_result_value(
         self, value: str | Decimal | None, dialect: Dialect
     ) -> int | None:

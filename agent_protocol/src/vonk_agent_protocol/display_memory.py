@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireEnum, WireModel
+from vonk_agent_protocol.wire_model import (
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    WireEnum,
+    WireModel,
+)
 
 
 class DisplayMemorySignal(WireEnum):

@@ -22,51 +22,68 @@ names why the image was or was not used.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import re
+import tarfile
 import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select, true, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    canonical_message,
-)
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_agent_protocol.outcome import UnknownOutcomeError
-from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
 from vonk_forge_contracts import RecipeDefinition, read_recipe, read_recipe_display
 from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
 
-from .catalog.revision_contract import BuildSecurityProjection
-from .image_store_collection import GRACE
-from .lifecycle.image_availability import PrebuiltImageAdapter
-from .models.cache import RecipeBuild
-from .models.jobs import Job
-from .oci_image_store import (
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
+from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.catalog.revision_contract import (
+    BuildSecurityProjection,
+    build_policy_projection,
+)
+from vonk_control.image_store_collection import GRACE
+from vonk_control.lifecycle.image_availability import PrebuiltImageAdapter
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.jobs import Job
+from vonk_control.oci_image_store import (
     IMAGE_CACHE_DIRECTORY,
     STORE_BUSY,
     OciImageStore,
     OciImageStoreError,
     StoreUnknown,
 )
-from .recipe_library_types import RecipeLibraryItem
-from .recipe_operations.execution_contract import (
+from vonk_control.recipe_builds.cancellation import build_cancellation
+from vonk_control.recipe_builds.common import (
+    canonical_build,
+    derive_build_input_identity,
+    inspect_package_source_policy,
+)
+from vonk_control.recipe_library_types import RecipeLibraryItem
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredBuildPolicyReport,
     parse_stored_build_policy,
 )
-from .source_bundles import GeneratedSourceBundle
-from .stored.states import RecipeBuildState
+from vonk_control.recipe_operations.observation_helpers import record_build_evidence
+from vonk_control.recipe_packages.client import load_recipe_package
+from vonk_control.runtime.adapters import (
+    RUNTIME_ADAPTER_DIGEST_LABEL,
+    RUNTIME_ADAPTER_LABEL,
+    RUNTIME_INTERFACE_LABEL,
+    RUNTIME_INTERFACE_LABEL_VALUE,
+    resolve_runtime_adapter,
+)
+from vonk_control.source_bundles import GeneratedSourceBundle, parse_source_bundle
+from vonk_control.source_policy import SourcePolicyError, dockerfile_base_images
+from vonk_control.stored.states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,27 +99,8 @@ _CONVERSION_BACKOFF = timedelta(minutes=10)
 _CONVERSION_BACKOFF_CAP = timedelta(hours=2)
 _REFERENCE = re.compile(PREBUILT_REFERENCE_PATTERN)
 
-# Why a plan did or did not use the catalog's prebuilt image.  The codes are
-# stable: they are stored with the build, logged, and shown as operation
-# blockers, so an operator can tell a Spark build from an image pull.
-PREBUILT_USED = PrebuiltImageCode.USED
 PREBUILT_NOT_PINNED = PrebuiltImageCode.NOT_PINNED
 PREBUILT_KEY_MISMATCH = PrebuiltImageCode.BUILD_KEY_MISMATCH
-
-
-@dataclass(frozen=True, slots=True)
-class PrebuiltDecision:
-    """The named outcome of choosing between a prebuilt image and a Spark build."""
-
-    code: str
-    detail: str
-
-    @property
-    def used(self) -> bool:
-        return self.code == PREBUILT_USED
-
-    def __str__(self) -> str:
-        return f"{self.code}: {self.detail}"
 
 
 def executable_build_key(identity: Mapping[str, object]) -> str:
@@ -148,11 +146,6 @@ def package_build_intent(
     a stored revision, fed from a recipe package instead.  Only the fields
     :func:`executable_build_key` reads matter for a prebuilt image.
     """
-
-    from .catalog.entities import build_policy_projection
-    from .recipe_builds.common import canonical_build, derive_build_input_identity
-    from .runtime.adapters import resolve_runtime_adapter
-    from .source_policy import dockerfile_base_images
 
     recipe = (
         document if isinstance(document, RecipeDefinition) else read_recipe(document)
@@ -267,18 +260,6 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
     prebuilt image.
     """
 
-    import io
-    import tarfile
-
-    from .catalog.entities import build_policy_projection
-    from .runtime.adapters import (
-        RUNTIME_ADAPTER_DIGEST_LABEL,
-        RUNTIME_ADAPTER_LABEL,
-        RUNTIME_INTERFACE_LABEL,
-        RUNTIME_INTERFACE_LABEL_VALUE,
-        resolve_runtime_adapter,
-    )
-
     index = json.loads((library_root / "catalog-index.json").read_text("utf-8"))
     images: dict[str, dict[str, object]] = {}
     skipped: list[dict[str, str]] = []
@@ -328,7 +309,8 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
         )
         resources = policy["build_resources"]
         security = policy["build_security"]
-        assert isinstance(resources, Mapping) and isinstance(security, Mapping)
+        assert isinstance(resources, Mapping)
+        assert isinstance(security, Mapping)
         adapter = resolve_runtime_adapter(recipe.runtime.engine, recipe.topology)
         directory = output / key / "context"
         directory.mkdir(parents=True, exist_ok=True)
@@ -386,15 +368,13 @@ def _library_recipe(
 ) -> tuple[RecipeLibraryItem, GeneratedSourceBundle]:
     """Load one indexed recipe package with its verified build-context bundle."""
 
-    from .recipe_packages.client import load_recipe_package
-    from .source_bundles import parse_source_bundle
-
     document = entry["document"]
     assert isinstance(document, Mapping)
     identity = document["identity"]
     package = entry["package"]
     display = entry["display"]
-    assert isinstance(identity, Mapping) and isinstance(package, Mapping)
+    assert isinstance(identity, Mapping)
+    assert isinstance(package, Mapping)
     assert isinstance(display, Mapping)
     item = load_recipe_package(
         library_root / str(package["path"]),
@@ -416,8 +396,6 @@ def _require_source_policy(
     bundle: GeneratedSourceBundle,
     source_sha256: str | None,
 ) -> None:
-    from .recipe_builds.common import inspect_package_source_policy
-    from .source_policy import SourcePolicyError
 
     report = inspect_package_source_policy(
         document, bundle, source_sha256=source_sha256
@@ -462,7 +440,7 @@ def _bundle_relative(dockerfile: str, context: str) -> str:
 def prebuilt_reference(job: Job) -> str | None:
     """The pinned image a Controller-executed build job pulls, if any."""
 
-    payload = job.payload if isinstance(job.payload, Mapping) else {}
+    payload = job.payload if isinstance(job.payload, Mapping) else {}  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
     reference = payload.get("prebuilt_image")
     if isinstance(reference, str) and _REFERENCE.fullmatch(reference):
         return reference
@@ -667,7 +645,6 @@ class PrebuiltImageImporter:
         )
 
     def _claim(self, job_id: str | None = None) -> str | None:
-        from .recipe_builds.cancellation import build_cancellation
 
         now = self._clock()
         with self._sessions.begin() as session:
@@ -718,7 +695,6 @@ class PrebuiltImageImporter:
                 }
 
     def run(self, job_id: str) -> None:
-        from .recipe_builds.cancellation import build_cancellation
 
         with self._sessions() as session:
             job = session.get(Job, job_id)
@@ -808,7 +784,6 @@ class PrebuiltImageImporter:
         evidence: RecipeBuildEvidence | None = None,
         failure: tuple[str, str] | None = None,
     ) -> None:
-        from .recipe_operations.observation_helpers import record_build_evidence
 
         now = self._clock()
         with self._sessions.begin() as session:
@@ -873,8 +848,6 @@ __all__ = [
     "PREBUILT_KEY_MISMATCH",
     "PREBUILT_KEY_SCHEMA_VERSION",
     "PREBUILT_NOT_PINNED",
-    "PREBUILT_USED",
-    "PrebuiltDecision",
     "PrebuiltImageImporter",
     "executable_build_key",
     "library_source_policy_failures",

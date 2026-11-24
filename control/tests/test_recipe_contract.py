@@ -4,16 +4,17 @@ import copy
 
 import pytest
 from pydantic import ValidationError
-from vonk_control.recipe_operations.runtime_specs import (
-    RecipeRuntimeSpecError,
-    compile_runtime_spec,
-)
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
     document_sha256,
     read_model,
     read_recipe,
+)
+
+from vonk_control.recipe_operations.runtime_specs import (
+    RecipeRuntimeSpecError,
+    compile_runtime_spec,
 )
 
 from .canonical_recipe_fixtures import canonical_example

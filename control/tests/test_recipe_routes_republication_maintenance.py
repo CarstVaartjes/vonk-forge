@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -12,7 +13,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import AgentOperation
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_agent_protocol.state_machines import (
@@ -29,6 +31,7 @@ from vonk_control.fleet_profile_contract.endpoints import (
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.gateway.route_runtime import (
     AtomicRouteBundlePublisher,
+    verify_active_route_bundle,
 )
 from vonk_control.jobs.documents import RecipeStartParent
 from vonk_control.models.execution import (
@@ -42,12 +45,14 @@ from vonk_control.models.routes import (
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_routes import withdrawal as withdrawal_steps
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.recipe_routes.shared import (
     RecipeRouteNotReady,
     RecipeRouteOwnerBusy,
     RecipeRouteSuperseded,
+    _RecipeRunContended,
 )
 
 from .recipe_routes_support import (
@@ -64,6 +69,7 @@ from .recipe_routes_support import (
     atomic_service,
     setup,
 )
+from .test_route_runtime import _supervisor
 
 
 @pytest.mark.parametrize("missing_observations", [False, True])
@@ -130,9 +136,8 @@ def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
         run = _recipe_run(session, run_id)
         assert run.route_state == "published"
         assert run.route_error is None
-        assert (
-            run.route_generation is not None and run.route_generation > first.generation
-        )
+        assert run.route_generation is not None
+        assert run.route_generation > first.generation
 
 
 def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
@@ -224,9 +229,6 @@ def test_worker_keeps_every_serving_route_while_reports_are_missing(
 def test_postgres_current_publication_withdrawal_and_owner_recovery(
     tmp_path: Path, postgres_engine, monkeypatch
 ) -> None:
-    from vonk_control.gateway.route_runtime import verify_active_route_bundle
-
-    from .test_route_runtime import _supervisor
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(
@@ -238,7 +240,8 @@ def test_postgres_current_publication_withdrawal_and_owner_recovery(
     bundle = verify_active_route_bundle(root)
     assert not isinstance(bundle, UnknownError)
     request = _supervisor(monkeypatch, root)._active_request()
-    assert request is not None and request.activation_sha256 == bundle.marker.digest
+    assert request is not None
+    assert request.activation_sha256 == bundle.marker.digest
     with service.sessions() as session:
         owner = _publication_owner(session)
         publication = _publication(session, owner.authority_id)
@@ -280,12 +283,13 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
         try:
             return service.publish_run(run_id)
         except UnknownOutcomeError as error:
-            if not isinstance(error, (RecipeRouteSuperseded, RecipeRouteOwnerBusy)):
-                assert error.typed_reason == WaitReason.SCOPE_CHANGED
-            # The loser of the race is replaced by the newer claim, or finds
-            # the owner held; the worker simply retries it, so it is not a
-            # failure.
-            return None
+            lost = error
+        if not isinstance(lost, (RecipeRouteSuperseded, RecipeRouteOwnerBusy)):
+            assert lost.typed_reason == WaitReason.SCOPE_CHANGED
+        # The loser of the race is replaced by the newer claim, or finds
+        # the owner held; the worker simply retries it, so it is not a
+        # failure.
+        return None
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         published = list(pool.map(publish, services))
@@ -407,6 +411,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
             raise OSError("supervisor acknowledgement lost")
 
     runtime = AtomicRouteBundlePublisher(root, await_supervisor_ack=acknowledge)
+    fail_activate = None
     if failure_point == "before-activation":
         activate = runtime._activate
         fail_activate = [True]
@@ -472,6 +477,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
     clock.now = due_at + timedelta(seconds=1)
     fail_ack[0] = False
     if failure_point == "before-activation":
+        assert fail_activate is not None
         fail_activate[0] = False
     restarted_runtime = AtomicRouteBundlePublisher(
         root, await_supervisor_ack=acknowledge
@@ -632,9 +638,6 @@ def test_bookkeeping_damage_retains_the_accepted_serving_route(
 def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     tmp_path: Path, damage: str
 ) -> None:
-    from copy import deepcopy
-
-    from vonk_control.gateway.route_runtime import verify_active_route_bundle
 
     clock = MutableClock(NOW)
     base, _publisher, _applied, first = setup(tmp_path / "database", clock=clock)
@@ -845,7 +848,8 @@ def test_normal_start_optional_recovery_does_not_block_route_publication(
     service.publish_run(second)
     with service.sessions() as session:
         generation = _recipe_run(session, run_id).route_generation
-        assert generation is not None and generation >= first.generation
+        assert generation is not None
+        assert generation >= first.generation
         assert _recipe_run(session, second).route_state == "published"
 
 
@@ -857,7 +861,6 @@ def test_maintenance_contention_uses_the_typed_wait_schedule(
     contention,
 ) -> None:
     """Run contention must not fall through _advance's generic traceback handler."""
-    from vonk_control.recipe_routes.shared import _RecipeRunContended
 
     clock = MutableClock(NOW)
     routes, _, _, _ = setup(tmp_path, clock=clock)
@@ -928,7 +931,6 @@ def test_route_maintenance_decides_once_per_pass(
 def test_withdrawal_maintenance_raises_after_one_decision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vonk_control.recipe_routes import withdrawal as withdrawal_steps
 
     service, _publisher, _applied, _run_id = setup(tmp_path)
     calls = _count_maintenance_decisions(service, monkeypatch)

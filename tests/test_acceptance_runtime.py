@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import pty
 import socket
 import ssl
 import subprocess
@@ -10,8 +11,6 @@ import threading
 from pathlib import Path
 
 import pytest
-
-pytestmark = pytest.mark.linux_only
 
 from tests.acceptance.runtime import (
     AcceptanceError,
@@ -24,6 +23,8 @@ from tests.acceptance.runtime import (
     run_interactive,
     write_all,
 )
+
+pytestmark = pytest.mark.linux_only
 
 
 def test_bootstrap_command_forwards_only_explicit_installer_arguments() -> None:
@@ -122,7 +123,6 @@ def test_interactive_runner_rejects_secret_in_fast_exit_argv_before_fork(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pty
 
     def unexpected_fork():
         pytest.fail("secret-bearing caller input reached process execution")
@@ -141,15 +141,14 @@ def test_interactive_runner_rejects_secret_in_fast_exit_argv_before_fork(
 
 @pytest.mark.parametrize(
     "environment",
-    (
+    [
         {"PATH": "/usr/bin:/bin", "PAIRING_token-value": "safe"},
         {"PATH": "/usr/bin:/bin", "PAIRING_TOKEN": "prefix-token-value-suffix"},
-    ),
+    ],
 )
 def test_interactive_runner_rejects_secret_in_fast_exit_environment_before_fork(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: dict[str, str]
 ) -> None:
-    import pty
 
     def unexpected_fork():
         pytest.fail("secret-bearing caller input reached process execution")
@@ -610,4 +609,5 @@ def test_phase_timings_summarise_every_phase_even_when_one_fails(
     )
     assert list(json.loads(line.split(" ", 1)[1])["seconds"]) == ["bring-up", "install"]
     text = summary.read_text(encoding="utf-8")
-    assert "| bring-up |" in text and "| install |" in text
+    assert "| bring-up |" in text
+    assert "| install |" in text

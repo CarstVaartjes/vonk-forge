@@ -11,6 +11,7 @@ from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_control import fleet_events
 from vonk_control.fleet_event_contract import JobPayload
 from vonk_control.fleet_events import (
@@ -22,6 +23,8 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import FleetEventCursor, FleetStreamEvent
 from vonk_control.stored.json_values import write_guard_mode
+
+from .insert_collision_support import Rendezvous
 
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 WRITERS = 8
@@ -122,12 +125,12 @@ def test_concurrent_appends_reach_a_live_reader_once_in_order_without_gaps(
 ) -> None:
     sessions = _fresh_sessions(postgres_engine)
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
-    start = threading.Barrier(WRITERS + 1)
+    start = Rendezvous(WRITERS + 1, timeout=10)
     writers_done = threading.Event()
 
     def writer(index: int) -> None:
         pause = random.Random(index)
-        start.wait(timeout=10)
+        start.wait()
         for sequence in range(EVENTS_PER_WRITER):
             with sessions.begin() as session:
                 # Writers queue only for one another's commit, never for open work.
@@ -142,7 +145,7 @@ def test_concurrent_appends_reach_a_live_reader_once_in_order_without_gaps(
         # Polls like FleetStream: any hole raises, so passing proves none showed.
         cursor = 0
         seen: list[tuple[int, str]] = []
-        start.wait(timeout=10)
+        start.wait()
         while True:
             done = writers_done.is_set()
             replay = repository.replay_after(cursor, NOW, limit=128)
@@ -189,14 +192,18 @@ def test_failed_commit_time_numbering_rolls_back_and_leaves_no_gap(
                 "WHERE singleton_id = 1 FOR UPDATE"
             )
         )
+
+        def expected_failure():
+            refused.execute(text("SET LOCAL lock_timeout = '200ms'"))
+            refused.add(_job("job-refused"))
+            repository.append_in_session(refused, _draft("draft-refused"))
+
         with (
             write_guard_mode(strict=False),
             pytest.raises(OperationalError, match="lock timeout"),
             refused.begin(),
         ):
-            refused.execute(text("SET LOCAL lock_timeout = '200ms'"))
-            refused.add(_job("job-refused"))
-            repository.append_in_session(refused, _draft("draft-refused"))
+            expected_failure()
         assert not refused.info.get(fleet_events._STAGED_KEY)
         blocker.rollback()
     refused.close()
@@ -225,14 +232,22 @@ def test_savepoint_rollback_discards_only_the_events_it_staged(
     with write_guard_mode(strict=False), sessions.begin() as session:
         session.add(_job("job-outer"))
         session.flush()
-        with pytest.raises(RuntimeError), session.begin_nested():
+
+        def refuse_savepoint():
             session.add(_job("job-rolled-back"))
             session.flush()
             raise RuntimeError("savepoint refused")
+
         with pytest.raises(RuntimeError), session.begin_nested():
+            refuse_savepoint()
+
+        def refuse_outer_savepoint():
             with session.begin_nested():
                 repository.append_in_session(session, _draft("inner-released"))
             raise RuntimeError("outer savepoint refused")
+
+        with pytest.raises(RuntimeError), session.begin_nested():
+            refuse_outer_savepoint()
         with session.begin_nested():
             session.add(_job("job-released"))
 

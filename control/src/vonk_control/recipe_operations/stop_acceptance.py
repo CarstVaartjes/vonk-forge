@@ -9,43 +9,45 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileSwitchChildKind
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import RouteState
-
-from ..admission_locking import (
-    set_admission_timeout,
-)
-from ..fleet_profiles.stop_authority import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.admission_locking import set_admission_timeout
+from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
+from vonk_control.fleet_profiles.stop_authority import validate_profile_stop_owner
+from vonk_control.fleet_profiles.stop_contract import (
     ProfileStopAuthorityError,
     ProfileStopOwnerBinding,
-    validate_profile_stop_owner,
 )
-from ..jobs.documents import (
+from vonk_control.jobs.documents import (
     RecipeStopParent,
     RunSwitchJobPayload,
     ServiceRunStopReview,
     controller_recipe_document,
 )
-from ..logging import redact_text
-from ..models.execution import RecipeInstallation, RecipeRun
-from ..models.fleet import FleetProfileApplication
-from ..models.jobs import Job
-from ..stored.json_values import read_row_column
-from .errors import RecipeRequestInvalid, RecipeRetryLater
-from .impact_plans import (
-    StopPlan,
+from vonk_control.logging import redact_text
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid, RecipeRetryLater
+from vonk_control.recipe_operations.impact_plans import StopPlan
+from vonk_control.recipe_operations.interfaces import new_recipe_job
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_operations.observation_helpers import (
+    _phase_request_key,
+    _stop_child_request_key,
 )
-from .interfaces import new_recipe_job
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class StopAcceptanceMixin:
@@ -60,15 +62,9 @@ class StopAcceptanceMixin:
         ordinal: int | None,
     ) -> ProfileStopOwnerBinding:
         service = typing_cast("RecipeOperationService", self)
-        from ..fleet_profiles.persistence import _persisted_profile_progress
-        from ..run_switch_contract.operations import RunSwitchOperationResult
-        from ..run_switch_operations.observation_helpers import (
-            _phase_request_key,
-            _stop_child_request_key,
-        )
 
         application = session.get(FleetProfileApplication, profile_application_id)
-        if application is None or application.current_step is None or ordinal is None:
+        if application is None or application.current_step is None or ordinal is None:  # pyright: ignore[reportUnnecessaryComparison]  # NOT NULL column; kept with its retry message
             raise RecipeRetryLater("accepted profile Stop owner is unavailable")
         adapter = _persisted_profile_progress(application).switch_adapter
         children = (
@@ -125,8 +121,8 @@ class StopAcceptanceMixin:
             phase_index = candidate_progress.phase_index
             item_index = candidate_progress.item_index
             if (
-                phase_index is None
-                or item_index is None
+                phase_index is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
+                or item_index is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                 or phase_index >= len(candidate_root.plan.phases)
                 or item_index >= len(candidate_root.plan.stops)
             ):
@@ -158,8 +154,8 @@ class StopAcceptanceMixin:
                 progress.profile_application_id != application.id
                 or progress.workload_intent_ordinal != ordinal
                 or progress.cancellation is not None
-                or phase_index is None
-                or item_index is None
+                or phase_index is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
+                or item_index is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                 or phase_index >= len(root.plan.phases)
                 or item_index >= len(root.plan.stops)
             ):

@@ -13,6 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
+
+from tests.subprocess_environment import isolated_environment
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -106,7 +108,6 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
         _https_api_peer(tmp_path, api, headers) as (url, certificate, peer),
     ):
         environment = _process_environment(tmp_path, url, certificate, headers)
-        from tests.subprocess_environment import isolated_environment
 
         consumer_environment = isolated_environment(
             tmp_path / "consumer-home",

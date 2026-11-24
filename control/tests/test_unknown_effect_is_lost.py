@@ -14,6 +14,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.failure_evidence import (
     FailureDiagnostics,
     FailureLogTail,
@@ -127,10 +128,12 @@ def test_an_unconfirmed_stop_is_lost_with_its_claims_until_a_newer_stop(tmp_path
     state, ranks = _states(sessions, run_id)
     assert state == RunState.LOST
     assert ranks == {nodes[0]: RunState.STOPPED, nodes[1]: RunState.LOST}
-    assert held > 0 and _claims(sessions, run_id) == held
+    assert held > 0
+    assert _claims(sessions, run_id) == held
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_error  # the evidence stays
+        assert run is not None
+        assert run.route_error
     # Still observed: nothing settles it while no Spark says it is gone.
     _ownership_rule(sessions)
     assert _states(sessions, run_id)[0] == RunState.LOST
@@ -154,7 +157,7 @@ def test_an_unconfirmed_stop_is_lost_with_its_claims_until_a_newer_stop(tmp_path
     assert service.get(stop.id).state == "succeeded"
     assert _states(sessions, run_id) == (
         RunState.STOPPED,
-        {node: RunState.STOPPED for node in nodes},
+        dict.fromkeys(nodes, RunState.STOPPED),
     )
     assert _claims(sessions, run_id) == 0
     _fresh_load(sessions, service, installation_id, "n" * 36)
@@ -202,7 +205,8 @@ def test_a_failed_start_without_exact_cleanup_authority_is_lost(
         RunState.LOST,
         {nodes[0]: RunState.LOST},
     )
-    assert held > 0 and _claims(sessions, start.owner_id) == held
+    assert held > 0
+    assert _claims(sessions, start.owner_id) == held
 
     _report_absent(sessions, start.owner_id)
     _ownership_rule(sessions)
@@ -303,7 +307,8 @@ def test_a_lost_run_whose_spark_reports_its_exit_ends_with_that_evidence(
     with services.sessions() as session:
         run = session.get(RecipeRun, run_id)
         node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert run is not None and node is not None
+        assert run is not None
+        assert node is not None
         assert run.state == RunState.STOPPED
         assert node.observation_process_running is False
         assert node.last_exit_diagnostics is not None

@@ -13,18 +13,20 @@ from pydantic import (
     ValidationInfo,
     field_validator,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
-from ..jobs.documents import AvailabilityJobPayload
-from ..model_cache.contract import (
+from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.model_cache.contract import (
     ModelCacheCancellation,
     ModelCacheDownloadPreviewResponse,
 )
-from ..recipe_operations.availability_intent import RecipeAvailabilityIntent
-from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
-from ..strict_json import read_stored_document
-from .clocks_contract import readable_or_none
+from vonk_control.recipe_image_availability.clocks_contract import readable_or_none
+from vonk_control.recipe_operations.availability_intent import RecipeAvailabilityIntent
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.strict_json import read_stored_document
 
 
 class StoredAvailabilityIdentity(BaseModel):

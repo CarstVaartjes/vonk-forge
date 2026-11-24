@@ -11,6 +11,7 @@ import uuid
 
 import pytest
 from sqlalchemy import text
+
 from vonk_control.db.schema import reconcile_schema
 from vonk_control.model_primitives import Base
 
@@ -91,7 +92,7 @@ def test_an_owner_lookup_uses_the_index(postgres_engine, predicate):
         plan = "\n".join(
             row[0]
             for row in connection.execute(
-                text(f"EXPLAIN SELECT id FROM jobs WHERE {predicate}")
+                text(f"EXPLAIN SELECT id FROM jobs WHERE {predicate}")  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             )
         )
     assert "ix_jobs_owner" in plan, plan

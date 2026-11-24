@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
-from .common import IMAGE_MIME_TYPES, Accessor, _array, _index, _object
-from .images import _image_bytes
+from cluster_profiles.glb_validation.common import (
+    IMAGE_MIME_TYPES,
+    Accessor,
+    _array,
+    _index,
+    _object,
+)
+from cluster_profiles.glb_validation.images import _image_bytes
 
 
 def _textures(

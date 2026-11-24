@@ -77,7 +77,6 @@ MODES = (
     "intent-ordinal",
     "savepoints",
     "durable-revocations",
-    "barriers",
     "sync-in-async",
     "git-free-tests",
     "loopback-bind",
@@ -408,11 +407,15 @@ def contact_writes(source: str) -> list[int]:
         for target in targets:
             if isinstance(target, ast.Attribute) and (
                 target.attr in _CONTACT_ONLY
-                or target.attr in _CONTACT_SHARED
-                and (
-                    "contact" in ast.unparse(target.value).lower()
-                    or isinstance(target.value, ast.Name)
-                    and target.value.id in rows
+                or (
+                    target.attr in _CONTACT_SHARED
+                    and (
+                        "contact" in ast.unparse(target.value).lower()
+                        or (
+                            isinstance(target.value, ast.Name)
+                            and target.value.id in rows
+                        )
+                    )
                 )
             ):
                 found.add(target.lineno)
@@ -940,10 +943,13 @@ def _agent_stamp_ages(tree: ast.Module, path: str = "") -> list[int]:
 
         def stamp(value: ast.AST, stamps: set[str] = stamps) -> bool:
             return any(
-                isinstance(part, ast.Attribute)
-                and part.attr == "observed_at"
-                or isinstance(part, ast.Name)
-                and (part.id in stamps or _STAMP_NAME.fullmatch(part.id) is not None)
+                (isinstance(part, ast.Attribute) and part.attr == "observed_at")
+                or (
+                    isinstance(part, ast.Name)
+                    and (
+                        part.id in stamps or _STAMP_NAME.fullmatch(part.id) is not None
+                    )
+                )
                 for part in ast.walk(value)
             )
 
@@ -1024,18 +1030,14 @@ def controller_contact_clock_checks(source: str) -> list[int]:
 
         def contact(value: ast.AST, contacts: set[str] = contacts) -> bool:
             return any(
-                isinstance(part, ast.Attribute)
-                and part.attr in attributes
-                or isinstance(part, ast.Name)
-                and part.id in contacts
+                (isinstance(part, ast.Attribute) and part.attr in attributes)
+                or (isinstance(part, ast.Name) and part.id in contacts)
                 for part in ast.walk(value)
             )
 
         def age(value: ast.AST, ages: set[str] = ages) -> bool:
-            return (
-                isinstance(value, ast.Name)
-                and value.id in ages
-                or isinstance(value, ast.BinOp)
+            return (isinstance(value, ast.Name) and value.id in ages) or (
+                isinstance(value, ast.BinOp)
                 and isinstance(value.op, ast.Sub)
                 and contact(value.right)
             )
@@ -1061,22 +1063,23 @@ def controller_contact_clock_checks(source: str) -> list[int]:
                 (node.left, *node.comparators), node.ops, node.comparators, strict=False
             ):
                 if (
-                    contact(left)
-                    and clock(right)
-                    and (
-                        isinstance(op, ast.Gt | ast.GtE)
-                        or id(node) in filters
+                    (
+                        contact(left)
+                        and clock(right)
+                        and (
+                            isinstance(op, ast.Gt | ast.GtE)
+                            or (
+                                id(node) in filters and isinstance(op, ast.Lt | ast.LtE)
+                            )
+                        )
+                    )
+                    or (
+                        clock(left)
+                        and contact(right)
                         and isinstance(op, ast.Lt | ast.LtE)
                     )
-                    or clock(left)
-                    and contact(right)
-                    and isinstance(op, ast.Lt | ast.LtE)
-                    or age(left)
-                    and zero(right)
-                    and isinstance(op, ast.Lt | ast.LtE)
-                    or zero(left)
-                    and age(right)
-                    and isinstance(op, ast.Lt | ast.LtE)
+                    or (age(left) and zero(right) and isinstance(op, ast.Lt | ast.LtE))
+                    or (zero(left) and age(right) and isinstance(op, ast.Lt | ast.LtE))
                 ):
                     found.add(node.lineno)
     found.update(
@@ -1183,20 +1186,21 @@ def unknown_to_terminal_handlers(source: str) -> list[int]:
             name.endswith("Unknown") or name == "UnknownOutcomeError" for name in caught
         ):
             continue
-        for node in (n for stmt in handler.body for n in ast.walk(stmt)):
+        found.extend(
+            node.value.lineno if isinstance(node, ast.keyword) else node.lineno
+            for node in (n for stmt in handler.body for n in ast.walk(stmt))
             if (
                 isinstance(node, ast.Attribute)
                 and node.attr == "FAILED"
                 and ast.unparse(node.value).split(".")[-1] == "LifecycleState"
-            ) or (
+            )
+            or (
                 isinstance(node, ast.keyword)
                 and node.arg == "retryable"
                 and isinstance(node.value, ast.Constant)
                 and node.value.value is False
-            ):
-                found.append(
-                    node.value.lineno if isinstance(node, ast.keyword) else node.lineno
-                )
+            )
+        )
     return sorted(set(found))
 
 
@@ -1590,10 +1594,14 @@ def background_retry_calls(source: str) -> list[int]:
         for node in ast.walk(ast.parse(source))
         if isinstance(node, ast.Call)
         and (
-            isinstance(node.func, ast.Attribute)
-            and node.func.attr in BACKGROUND_RETRY_CALLS
-            or isinstance(node.func, ast.Name)
-            and node.func.id in BACKGROUND_RETRY_CALLS
+            (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in BACKGROUND_RETRY_CALLS
+            )
+            or (
+                isinstance(node.func, ast.Name)
+                and node.func.id in BACKGROUND_RETRY_CALLS
+            )
         )
     ]
 
@@ -1810,13 +1818,16 @@ def planner_defect_waits(source: str) -> list[int]:
             )
             if caught == {"ValidationError"}:
                 protected = any(
-                    isinstance(part, ast.Raise)
-                    and (
-                        part.exc is None
-                        or (
-                            isinstance(part.exc, ast.Call)
-                            and isinstance(part.exc.func, ast.Name)
-                            and part.exc.func.id == "FleetProfileRecheckContractDefect"
+                    (
+                        isinstance(part, ast.Raise)
+                        and (
+                            part.exc is None
+                            or (
+                                isinstance(part.exc, ast.Call)
+                                and isinstance(part.exc.func, ast.Name)
+                                and part.exc.func.id
+                                == "FleetProfileRecheckContractDefect"
+                            )
                         )
                     )
                     or (

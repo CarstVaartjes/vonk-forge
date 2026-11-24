@@ -5,15 +5,15 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from pydantic import ValidationError
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..models.cache import RecipeBuild
-from ..run_switch_contract.evidence import FreshnessEvidence
-from ..run_switch_contract.phase_results import RunSwitchContainerBuildResult
-from ..stored.states import RecipeBuildState
-from .constants import _CONTAINER_BUILD_STATE_ADAPTER
-from .errors import RunSwitchRetryLater
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.run_switch_contract.evidence import FreshnessEvidence
+from vonk_control.run_switch_contract.phase_results import RunSwitchContainerBuildResult
+from vonk_control.run_switch_operations.constants import _CONTAINER_BUILD_STATE_ADAPTER
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.stored.states import RecipeBuildState
 
 
 def _refreshed_freshness(

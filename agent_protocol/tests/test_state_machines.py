@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
 from vonk_agent_protocol.state_machines import (
     MACHINE_ALIASES,
@@ -15,6 +16,7 @@ from vonk_agent_protocol.state_machines import (
     machine_check,
     machine_words,
 )
+from vonk_agent_protocol.wire_model import WireEnum
 
 
 def test_every_machine_is_published_through_the_vocabulary_carrier() -> None:
@@ -66,8 +68,13 @@ def test_a_check_expression_lists_the_words_in_member_order() -> None:
     assert machine_words(RouteState, [RouteState.FAILED]) == ("failed",)
 
 
-@pytest.mark.parametrize("machine", sorted(MACHINES.values(), key=lambda m: m.__name__))
-def test_the_check_of_a_machine_admits_exactly_its_members(machine: type) -> None:
+_MACHINES = sorted(MACHINES.values(), key=lambda m: m.__name__)
+
+
+@pytest.mark.parametrize("machine", _MACHINES)
+def test_the_check_of_a_machine_admits_exactly_its_members(
+    machine: type[WireEnum],
+) -> None:
     expression = machine_check(machine)
     for member in machine:
         assert f"'{member.value}'" in expression

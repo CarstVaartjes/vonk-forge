@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from vonk_agent_protocol.telemetry import EngineFormat
+from vonk_control.harnesses.errors import HarnessCompileError
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,7 +414,7 @@ def _merge_environment(
         **_environment_defaults(slug),
         **dict(telemetry_contract(slug).environment),
     }
-    if defaults is None:
+    if defaults is None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
         raise _compile_error(f"runtime writable-path contract is unavailable: {slug}")
     supplied_map: dict[str, str] = {}
     for name, value in supplied:
@@ -524,9 +525,6 @@ def document(
 
 
 def _compile_error(message: str) -> ValueError:
-    # Import lazily because the harness package imports this module.
-    from ..harnesses.common import HarnessCompileError
-
     return HarnessCompileError(message)
 
 

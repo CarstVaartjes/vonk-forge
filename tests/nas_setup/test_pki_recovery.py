@@ -13,8 +13,13 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from vonk_agent_protocol.installer_setup import NasInstallTemplate
-from vonk_nas_setup import publication
+
+from vonk_agent_protocol.installer_setup import (
+    NasInstallTemplate,
+    NasInternalValue,
+    NasSecretPrompt,
+)
+from vonk_nas_setup import publication, setup
 from vonk_nas_setup.environment import parse_environment, render_environment
 from vonk_nas_setup.pki import renew_controller_leaf, validate_pki_material
 from vonk_nas_setup.prompts import PromptIo
@@ -28,13 +33,13 @@ from vonk_nas_setup.filesystem import acquire_owner
 root, ready, boundary = map(Path, sys.argv[1:])
 bundle = root / "vonk-forge"
 if str(boundary) == "snapshot":
-    original = publication.os.replace
+    original = os.replace
     def interrupted(source, target):
         original(source, target)
         if source == bundle / publication.VERIFIED:
             ready.write_text("snapshot-swapped")
             time.sleep(10)
-    publication.os.replace = interrupted
+    os.replace = interrupted
 else:
     original = publication.write_member
     def interrupted(target, name, content):
@@ -71,7 +76,6 @@ def test_killed_pki_publisher_replays_bound_old_template_before_new_inputs(
     boundary: str,
 ) -> None:
     """Catch key/cert mismatch after death or applying new inventory to old intent."""
-    from vonk_agent_protocol.installer_setup import NasSecretPrompt
 
     source, template = pki_project
     bundle = tmp_path / "vonk-forge"
@@ -168,8 +172,6 @@ def test_failed_pki_renewal_keeps_previous_bundle_and_rerun_publishes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Catch a failed run leaving a new Compose/.env next to old secrets."""
-    from vonk_agent_protocol.installer_setup import NasInternalValue
-    from vonk_nas_setup import pki
 
     source, template = pki_project
     bundle = tmp_path / "vonk-forge"
@@ -193,7 +195,7 @@ def test_failed_pki_renewal_keeps_previous_bundle_and_rerun_publishes(
         raise ValueError("PKI renewal failed")
 
     with monkeypatch.context() as patch:
-        patch.setattr(pki, "renew_controller_leaf", broken_renewal)
+        patch.setattr(setup, "renew_controller_leaf", broken_renewal)
         with pytest.raises(ValueError, match="PKI"):
             prepare(newer, tmp_path, PromptIo(io.StringIO("")), upgrade=True)
     assert {name: (bundle / name).read_bytes() for name in before} == before

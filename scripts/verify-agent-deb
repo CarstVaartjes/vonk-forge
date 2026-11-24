@@ -241,7 +241,9 @@ def _verify_control(control: Path) -> None:
         mode = stat.S_IMODE((control / name).stat().st_mode)
         source = (SOURCE_ROOT / "packaging/debian" / name).read_bytes()
         if mode != 0o755 or (control / name).read_bytes() != source:
-            raise VerificationError(f"maintainer script differs from its source: {name}")
+            raise VerificationError(
+                f"maintainer script differs from its source: {name}"
+            )
 
 
 def _verify_payload(payload: Path, control: Path, architecture: str) -> None:

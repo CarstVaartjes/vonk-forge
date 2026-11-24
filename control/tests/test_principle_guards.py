@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import ast
+import gc
+import weakref
 
 import pytest
 
 from . import principle_guards, unproven_run_failures
+from . import principle_guards as guards
 from .principle_guards import (
     ROOT,
     rust_test_files,
+    scan_compose_shell,
     scan_rust,
     scan_rust_fixed_caps,
     scan_shell,
@@ -18,7 +22,7 @@ from .principle_guards import (
 
 
 @pytest.mark.parametrize(
-    "mode,bad,good",
+    ("mode", "bad", "good"),
     [
         (
             "waits",
@@ -245,7 +249,6 @@ def test_real_activation_or_submission_is_fresh_admission_after_ending():
 
 
 def test_compose_embedded_shell_requires_a_bound_in_the_executed_loop():
-    from .principle_guards import scan_compose_shell
 
     source = """services:
   consumer:
@@ -355,7 +358,6 @@ def test_nested_package_get_helper_refusal_follows_concrete_import(
     tmp_path, monkeypatch
 ):
     """Moving a GET's rejecting helper cannot erase its existing refusal finding."""
-    from . import principle_guards as guards
 
     root = tmp_path / "control/src/vonk_control"
     root.mkdir(parents=True)
@@ -409,13 +411,10 @@ def test_bounded_ending_requires_distinct_fresh_execution_and_completion():
     )
 
 
-@pytest.mark.parametrize("fault", (False, True))
-@pytest.mark.parametrize("collecting", (False, True))
+@pytest.mark.parametrize("fault", [False, True])
+@pytest.mark.parametrize("collecting", [False, True])
 def test_inventory_restores_gc_policy_on_every_exit(monkeypatch, fault, collecting):
     """Catches scanner failure leaking a disabled collector into later work."""
-    import gc
-
-    from . import principle_guards
 
     original = gc.isenabled()
     try:
@@ -438,15 +437,11 @@ def test_inventory_restores_gc_policy_on_every_exit(monkeypatch, fault, collecti
         gc.enable() if original else gc.disable()
 
 
-@pytest.mark.parametrize("failure_at", (None, 8))
+@pytest.mark.parametrize("failure_at", [None, 8])
 def test_inventory_releases_temporary_trees_without_scanning_old_generations(
     tmp_path, monkeypatch, failure_at
 ):
     """Catches retained parsed trees, including an interrupted inventory."""
-    import gc
-    import weakref
-
-    from . import principle_guards
 
     sources = []
     for index in range(16):
@@ -710,7 +705,7 @@ FIXED_CAPS = [
 ]
 
 
-@pytest.mark.parametrize("bad,good", FIXED_CAPS)
+@pytest.mark.parametrize(("bad", "good"), FIXED_CAPS)
 def test_a_transfer_ends_on_inactivity_never_on_a_fixed_total(bad, good):
     assert scan_rust(bad, path="agent.rs")
     assert not scan_rust_fixed_caps(good, path="agent.rs")
@@ -743,7 +738,8 @@ def test_every_agent_transfer_ends_on_inactivity():
     crate = ROOT / "rust/crates/vonk-agent/src"
     tests = rust_test_files(crate)
     production = [path for path in sorted(crate.rglob("*.rs")) if path not in tests]
-    assert len(production) > 50 and len(tests) > 20  # the scan sees the crate
+    assert len(production) > 50
+    assert len(tests) > 20
     sites = [
         site
         for path in production
@@ -989,7 +985,9 @@ def _cross_spark_ordinal_orders(source: str, path: str = "") -> list[int]:
             if not isinstance(compare, ast.Compare):
                 continue
             operands = [compare.left, *compare.comparators]
-            for op, left, right in zip(compare.ops, operands, operands[1:]):
+            for op, left, right in zip(
+                compare.ops, operands, operands[1:], strict=False
+            ):
                 if (
                     isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE))
                     and ordinal(left)
@@ -1080,7 +1078,9 @@ def _waiting_fence_identity_checks(source: str) -> list[int]:
             if not isinstance(compare, ast.Compare):
                 continue
             operands = [compare.left, *compare.comparators]
-            for op, left, right in zip(compare.ops, operands, operands[1:]):
+            for op, left, right in zip(
+                compare.ops, operands, operands[1:], strict=False
+            ):
                 if (
                     isinstance(op, (ast.Eq, ast.NotEq))
                     and ordinal(left)
@@ -1125,7 +1125,7 @@ def test_no_waiting_load_reads_a_joining_spark_as_a_newer_intent_anywhere():
 
 
 @pytest.mark.parametrize(
-    "event_type,bounded", [("asyncio.Event", True), ("threading.Event", False)]
+    ("event_type", "bounded"), [("asyncio.Event", True), ("threading.Event", False)]
 )
 def test_wait_for_bounds_only_an_async_event(event_type: str, bounded: bool) -> None:
     source = f"async def tick(stop: {event_type}):\n    await asyncio.wait_for(stop.wait(), timeout=5)\n"

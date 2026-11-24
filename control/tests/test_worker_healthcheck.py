@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import runpy
+import threading
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import sessionmaker
+
+from vonk_control.db import connections
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import ControlProcessHeartbeat
-from vonk_control.worker.liveness import WorkerHeartbeatRecorder
+from vonk_control.settings import Settings
+from vonk_control.worker.liveness import (
+    WorkerHeartbeatRecorder,
+    WorkerWatchdog,
+    watch_worker,
+)
 from vonk_control.worker_healthcheck import verify_worker_ready
 
 NOW = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
@@ -46,11 +56,11 @@ def test_worker_readiness_requires_a_fresh_completed_loop_from_exact_process(
 
 @pytest.mark.parametrize(
     ("heartbeat", "process_instance_id"),
-    (
+    [
         (None, INSTANCE_A),
         (_heartbeat(completed_at=NOW - timedelta(seconds=31)), INSTANCE_A),
         (_heartbeat(), INSTANCE_B),
-    ),
+    ],
 )
 def test_worker_readiness_fails_closed_without_current_scheduler_evidence(
     tmp_path,
@@ -138,7 +148,8 @@ def test_missing_heartbeat_projection_repairs_without_blocking_a_fresh_worker_lo
     verify_worker_ready(sessions, process_instance_id=INSTANCE_A, now=NOW)
     with sessions() as session:
         row = session.scalar(select(ControlProcessHeartbeat))
-        assert row is not None and row.loop_sequence == 1
+        assert row is not None
+        assert row.loop_sequence == 1
     recorder.completed_loop()
     verify_worker_ready(sessions, process_instance_id=INSTANCE_A, now=NOW)
 
@@ -155,9 +166,6 @@ def test_slow_step_is_published_by_the_watchdog_and_cleared_by_the_next_loop(
     tmp_path,
 ) -> None:
     """A step running past a third of the readiness window is named once."""
-    import threading
-
-    from vonk_control.worker.liveness import WorkerWatchdog, watch_worker
 
     engine = create_engine(f"sqlite:///{tmp_path / 'step.sqlite'}")
     Base.metadata.create_all(engine)
@@ -204,7 +212,8 @@ def test_slow_step_is_published_by_the_watchdog_and_cleared_by_the_next_loop(
     )
     running, started = read()
     assert running == "slow-step"
-    assert started is not None and started.replace(tzinfo=UTC) == wall
+    assert started is not None
+    assert started.replace(tzinfo=UTC) == wall
 
     recorder.completed_loop()
     assert read() == (None, None)
@@ -212,9 +221,6 @@ def test_slow_step_is_published_by_the_watchdog_and_cleared_by_the_next_loop(
 
 
 def _watched(watchdog, polls, **kwargs):
-    import threading
-
-    from vonk_control.worker.liveness import watch_worker
 
     stop = threading.Event()
     remaining = iter(polls)
@@ -223,7 +229,6 @@ def _watched(watchdog, polls, **kwargs):
 
 
 def test_failed_step_record_is_retried_on_the_next_poll() -> None:
-    from vonk_control.worker.liveness import WorkerWatchdog
 
     now = [0.0]
     wall = datetime(2026, 11, 1, tzinfo=UTC)
@@ -250,9 +255,6 @@ def test_failed_step_record_is_retried_on_the_next_poll() -> None:
 
 
 def test_blocked_step_record_never_delays_the_hung_step_restart() -> None:
-    import threading
-
-    from vonk_control.worker.liveness import WorkerWatchdog
 
     now = [0.0]
     watchdog = WorkerWatchdog(timeout_seconds=180, clock=lambda: now[0])
@@ -274,3 +276,32 @@ def test_blocked_step_record_never_delays_the_hung_step_restart() -> None:
     assert exits == [70]
     # The restart happened while the write was still blocked.
     assert unblocked_by_exit in ([True], [])
+
+
+def test_the_healthcheck_runs_as_its_container_runs_it(monkeypatch) -> None:
+    """Compose runs `python -m vonk_control.worker_healthcheck`: the module's
+    entry point must find every name it calls, wherever the probe then stops
+    (no /proc identity off Linux, no heartbeat in this empty fake)."""
+
+    class Sessions:
+        def __call__(self):
+            return nullcontext(self)
+
+        def scalar(self, _statement):
+            return None
+
+    monkeypatch.setattr(
+        Settings, "from_env_and_secrets", classmethod(lambda cls: _StubSettings())
+    )
+    monkeypatch.setattr(connections, "build_engine", lambda *_a, **_k: object())
+    monkeypatch.setattr(connections, "session_factory", lambda _engine: Sessions())
+    try:
+        runpy.run_module("vonk_control.worker_healthcheck", run_name="__main__")
+    except NameError:
+        raise
+    except (OSError, RuntimeError, ValueError):
+        pass  # the probe reached the process identity or the readiness check
+
+
+class _StubSettings:
+    database_url = "postgresql+psycopg://healthcheck@unused/unused"

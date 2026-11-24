@@ -32,8 +32,10 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 # The sibling helper, however this file is loaded.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from check_environment import ensure_catalog
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from check_environment import (  # noqa: E402 -- imports follow this entry point's sys.path or environment setup
+    ensure_catalog,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -282,7 +284,7 @@ def stream(command: list[str], *, timeout: float = 20 * 60) -> tuple[int, str]:
 def stream_owned_container(command: list[str], log_path: Path) -> tuple[int, str]:
     """End only this invocation's Docker container and retain partial output."""
     name = "vonk-wire-lane-" + uuid.uuid4().hex
-    owned = command[:3] + ["--name", name] + command[3:]
+    owned = [*command[:3], "--name", name, *command[3:]]
     try:
         code, output = stream(owned)
         log_path.write_text(output, encoding="utf-8")
@@ -341,7 +343,7 @@ def require_linux_engine() -> str:
 
 
 def resolve_recipe_library(
-    argument: str | None, allow_any_revision: bool
+    argument: str | None, *, allow_any_revision: bool
 ) -> tuple[Path, str]:
     """Return the sibling recipe-library checkout and the pinned revision."""
     candidate = argument or os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
@@ -565,7 +567,7 @@ def main(argv: list[str] | None = None) -> int:
 def run(args: argparse.Namespace) -> int:
     started = time.monotonic()
     library, revision = resolve_recipe_library(
-        args.recipe_library, args.any_recipe_revision
+        args.recipe_library, allow_any_revision=args.any_recipe_revision
     )
     cache = cache_root(args.cache_root)
     docker = shutil.which("docker")

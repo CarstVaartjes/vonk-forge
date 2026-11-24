@@ -14,8 +14,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.routing import Route
+
+from cluster_profiles import cli
+from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.error_response import BoundedErrorResponse
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_control.api.application import create_app
+from vonk_control.api.common import _bounded_error_content
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.catalog.api import CatalogProblem
@@ -23,6 +28,8 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
 from vonk_control.models.jobs import Job
 from vonk_control.passwords import hash_password
+
+from .test_metrics import _fleet_snapshot
 
 ADMIN_PASSWORD = "correct horse battery staple"
 ADMIN_VERIFIER = hash_password(ADMIN_PASSWORD)
@@ -75,7 +82,6 @@ def _client(role: str, *, agent_upgrades=None, fleet_projection=None):
         jobs=jobs,
         tokens=codec,
         now=lambda: 10,
-        agent_upgrades=agent_upgrades,
         fleet_projection=fleet_projection,
     )
     client = TestClient(app)
@@ -123,13 +129,7 @@ def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
     issued = service.login("admin", ADMIN_PASSWORD)
     codec = TokenCodec(b"k" * 32)
     jobs = Jobs()
-    app = create_app(
-        jobs=jobs,
-        tokens=codec,
-        now=lambda: 10,
-        browser_auth=service,
-        agent_upgrades=agent_upgrades,
-    )
+    app = create_app(jobs=jobs, tokens=codec, now=lambda: 10, browser_auth=service)
     client = TestClient(app, base_url="https://forge.example.test")
     return client, issued, service, sessions, clock, codec, jobs
 
@@ -153,12 +153,6 @@ def test_central_api_http_errors_are_serialized_by_the_declared_models() -> None
 
 
 def test_fleet_ambiguity_preserves_every_candidate_through_the_cli(tmp_path, capsys):
-    import json
-
-    from cluster_profiles import cli
-    from cluster_profiles.control_client.transfers import ControlClient
-
-    from .test_metrics import _fleet_snapshot
 
     snapshot = _fleet_snapshot()
     template = snapshot.nodes[0]
@@ -207,7 +201,8 @@ def test_fleet_ambiguity_preserves_every_candidate_through_the_cli(tmp_path, cap
     assert cli.main(("fleet", "detail", "Atlas", "--json"), control_client=client) == 2
     problem = json.loads(capsys.readouterr().out)
     assert problem["candidates"] == [node.id for node in snapshot.nodes]
-    assert problem["http_status"] == 422 and problem["request_id"]
+    assert problem["http_status"] == 422
+    assert problem["request_id"]
     assert cli.main(("fleet", "detail", "Atlas"), control_client=client) == 2
     output = capsys.readouterr()
     assert all(node.id in output.err for node in snapshot.nodes)
@@ -272,7 +267,6 @@ def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -
 
     # Method and path are both part of the authority boundary. Near-matches
     # retain the ordinary one-MiB API ceiling.
-    from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 
     refused = client.post(route, content=body)
     assert refused.status_code == 413
@@ -412,7 +406,6 @@ def test_bounded_error_detail_never_echoes_the_rejected_value() -> None:
     ``ValidationError`` stringifies the submitted input, so an unredacted
     detail would hand the failing value straight back to the caller.
     """
-    from vonk_control.api.common import _bounded_error_content
 
     with pytest.raises(ValidationError) as rejected:
         _RejectedPlan.model_validate({"retries": "token=super-secret-value"})

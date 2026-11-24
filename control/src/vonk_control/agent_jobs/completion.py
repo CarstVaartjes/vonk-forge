@@ -7,13 +7,10 @@ import json
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import (
-    AgentOperation,
-    AgentResultPayload,
-    canonical_message,
-    canonical_payload,
-)
+from vonk_agent_protocol.contracts import AgentResultPayload, canonical_payload
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
 from vonk_agent_protocol.outcome import (
     OutcomeDone,
@@ -24,21 +21,22 @@ from vonk_agent_protocol.outcome import (
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
-
-from ..agent_operation_facts import aware as _aware
-from ..agent_operation_facts import job_output_retention_expiry
-from ..agent_operation_facts import (
-    start_deadline as _start_deadline,
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_jobs.retry import result_disposition
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_operation_facts import (
+    job_attempt_did_not_launch,
+    job_output_retention_expiry,
 )
-from ..evidence_repeats import note_repeat
-from ..inventory.items import record_preflight
-from ..lifecycle.agent_operation import cancel_requested_at
-from ..lifecycle.types import Effect, Outcome, Reported
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from .retry import job_attempt_did_not_launch, result_disposition
+from vonk_control.agent_operation_facts import start_deadline as _start_deadline
+from vonk_control.evidence_repeats import note_repeat
+from vonk_control.inventory.items import record_preflight
+from vonk_control.lifecycle.agent_operation import cancel_requested_at
+from vonk_control.lifecycle.types import Effect, Outcome, Reported
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
 
 
 def _report_event(
@@ -122,9 +120,11 @@ def _report_event(
             Effect.NONE
             if result.get("helper_error_code")
             == HelperErrorCode.GRANT_TIME_WINDOW.value
-            or operation.kind == AgentOperation.RECIPE_JOB_RUN.value
-            and job_attempt_did_not_launch(result)
-            and verdict is Disposition.WAIT
+            or (
+                operation.kind == AgentOperation.RECIPE_JOB_RUN.value
+                and job_attempt_did_not_launch(result)
+                and verdict is Disposition.WAIT
+            )
             else None
         )
         return Reported.failed(

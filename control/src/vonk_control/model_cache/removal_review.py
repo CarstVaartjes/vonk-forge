@@ -8,52 +8,61 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_jobs.lifecycle import (
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactKind,
     ArtifactLifecycleError,
     ArtifactReferenceUnsettled,
 )
-from ..artifact_reference_scan.model_references import model_set_reference_findings
-from ..artifact_reference_scan.model_sets import model_set_objects
-from ..cache_removal_review import (
+from vonk_control.artifact_reference_scan.model_references import (
+    model_set_reference_findings,
+)
+from vonk_control.artifact_reference_scan.model_sets import model_set_objects
+from vonk_control.cache_removal_review import (
     CacheRemovalBlocker,
     CacheRemovalFinding,
     CacheRemovalReview,
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-from ..categorized_errors import InvalidValue
-from ..content_identity import recipes_bound_to
-from ..lifecycle.evidence import Residue
-from ..models.cache import (
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.content_identity import recipes_bound_to
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.artifacts import _is_digest, _unique_artifacts
+from vonk_control.model_cache.catalog_helpers import _recipe_model_content_digests
+from vonk_control.model_cache.contract import (
+    ModelCacheRemovalPayload,
+    ModelCacheSetState,
+)
+from vonk_control.model_cache.errors import (
+    ModelCacheRemovalOwnerInvalid,
+    ModelCacheStorageInvalid,
+)
+from vonk_control.model_cache.fleet_removal import model_installations, model_reference
+from vonk_control.model_cache.lineage import (
+    first_requested_sets,
+    lineage_contents,
+    model_sets,
+)
+from vonk_control.model_cache.persistence import _operation_removal
+from vonk_control.model_cache.source_helpers import _model_selector, _request_key
+from vonk_control.model_cache.views import CacheOperationView, ModelCacheRemovalScope
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
-from ..models.catalog import CatalogDocumentRevision
-from ..unused_storage_collection.evidence import _Evidence
-from . import states as model_cache_states
-from .artifacts import _unique_artifacts
-from .catalog_helpers import _recipe_model_content_digests
-from .contract import ModelCacheRemovalPayload, ModelCacheSetState
-from .errors import (
-    ModelCacheRemovalOwnerInvalid,
-    ModelCacheStorageInvalid,
-)
-from .fleet_removal import model_installations, model_reference
-from .lineage import first_requested_sets, lineage_contents, model_sets
-from .persistence import _operation_removal
-from .source_helpers import _model_selector, _request_key
-from .views import CacheOperationView, ModelCacheRemovalScope
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.unused_storage_collection.evidence import _Evidence
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class RemovalReviewMixin:
@@ -130,7 +139,6 @@ class RemovalReviewMixin:
                     return cache._replay_model_removal(
                         existing, actor=actor, selector=normalized_selector
                     )
-                from .artifacts import _is_digest
 
                 digest = (
                     normalized_selector
@@ -292,23 +300,25 @@ class RemovalReviewMixin:
         if not selected_sets:
             return ()
         cancelled: list[str] = []
-        for operation_id in session.scalars(
-            select(ModelCacheOperation.id)
-            .where(
-                ModelCacheOperation.kind == "download",
-                ModelCacheOperation.state.in_(model_cache_states.LIVE),
-                ModelCacheOperation.artifact_set_sha256.in_(list(selected_sets)),
+        cancelled.extend(
+            operation_id
+            for operation_id in session.scalars(
+                select(ModelCacheOperation.id)
+                .where(
+                    ModelCacheOperation.kind == "download",
+                    ModelCacheOperation.state.in_(model_cache_states.LIVE),
+                    ModelCacheOperation.artifact_set_sha256.in_(list(selected_sets)),
+                )
+                .order_by(ModelCacheOperation.id)
             )
-            .order_by(ModelCacheOperation.id)
-        ):
             if cache.cancel_operation_in_session(
                 session,
                 operation_id,
                 actor=actor,
                 request_key=str(uuid.uuid5(uuid.UUID(request_key), operation_id)),
                 reason="superseded by a newer model removal request",
-            ):
-                cancelled.append(operation_id)
+            )
+        )
         return tuple(cancelled)
 
     def review_model_removal(self, selector: str) -> CacheRemovalReview:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import httpx2
 import pytest
 
@@ -63,10 +65,8 @@ def test_key_mutation_reconnects_to_exact_receipt_and_new_request_changes_key(
     if explicit:
         arguments.extend(["--request-key", FIRST])
     args = cli._parser().parse_args(arguments)
-    try:
+    with contextlib.suppress(OSError):
         run_controller(args, peer, lambda: FIRST)
-    except OSError:
-        pass
     result = run_controller(args, peer, lambda: SECOND)
     assert result["key"] == peer.receipts[FIRST]["key"]
     assert peer.effects == 1

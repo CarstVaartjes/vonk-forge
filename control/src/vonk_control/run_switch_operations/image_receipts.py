@@ -4,25 +4,27 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from ..content_identity import differing_image_fields
-from ..models.cache import RecipeBuild
-from ..preparation_contract import (
-    RuntimeImageIdentity,
-)
-from ..run_switch_contract.observation import (
+from vonk_control.content_identity import differing_image_fields
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.run_switch_contract.observation import (
     RunSwitchEffectiveBuildReceipt,
     RunSwitchObservedImageIdentity,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import RunSwitchContainerBuildResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..stored.states import RecipeBuildState
-from .errors import RunSwitchRetryLater
-from .identity_helpers import _is_hex_digest, _is_oci_digest, _node_missing_bytes
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import RunSwitchContainerBuildResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+from vonk_control.run_switch_operations.identity_helpers import (
+    _is_hex_digest,
+    _is_oci_digest,
+    _node_missing_bytes,
+)
+from vonk_control.stored.states import RecipeBuildState
 
 
 def _planned_model_download_bytes(plan: RunSwitchPlan) -> int | None:
@@ -45,7 +47,7 @@ def _planned_transfer_bytes(
 
     node_ids = list(_plan_target_node_ids(plan))
     if plan.action == "stop":
-        return 0, {node_id: 0 for node_id in node_ids}
+        return 0, dict.fromkeys(node_ids, 0)
     model_download_bytes = _planned_model_download_bytes(plan)
     model_bytes = plan.storage.missing_spark_bytes
     image_bytes = plan.runtime_storage.missing_image_distribution_bytes
@@ -126,7 +128,7 @@ def effective_build_receipt(
         and planned_layout is not None
         and planned_bytes is not None
     ):
-        try:
+        try:  # noqa: SIM105 -- contextlib.suppress would re-add a malformed-value-becomes-absent guard finding
             candidates.append(
                 RunSwitchEffectiveBuildReceipt(
                     build_id=expected_build_id,

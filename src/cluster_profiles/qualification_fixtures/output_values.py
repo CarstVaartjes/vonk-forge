@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from .contracts import FixtureError
-from .values import (
+from cluster_profiles.qualification_fixtures.contracts import FixtureError
+from cluster_profiles.qualification_fixtures.values import (
     _number_value,
     _numeric_token,
     _object,

@@ -16,11 +16,15 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import (
     build_observation as availability_production_obs,
@@ -41,12 +45,14 @@ from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.models.operations import AgentOperation as AgentOperationRow
-from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds.common import (
+    RecipeBuildAdmissionBusy,
     RecipeBuildPlan,
     RecipeBuildResolution,
+    RecipeBuildUnknown,
     RecipeSourcePolicyError,
 )
 from vonk_control.recipe_builds.service import RecipeBuildService
@@ -69,8 +75,8 @@ from vonk_control.revision_images import revision_images
 from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_policy import SourcePolicyFinding, SourcePolicyReport
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .insert_collision_support import Rendezvous
 from .recipe_builds_support import _write_controller_build_receipt
 from .recipe_builds_support import setup as _build_setup
 from .recipe_image_availability_support import _typed_availability_payload
@@ -712,9 +718,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
     class Operations:
         def build(self, plan, **_kwargs):
             if capacity_busy:
-                from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
-
-                raise RecipeBuildAdmissionBusy()
+                raise RecipeBuildAdmissionBusy
             return SimpleNamespace(
                 id=str(uuid.uuid4()),
                 state="succeeded",
@@ -797,7 +801,7 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
     busy_id = "00000000-0000-4000-8000-000000000801"
     waiting_id = "00000000-0000-4000-8000-000000000802"
 
-    def availability_job(job_id: str, request_id: str, payload: dict) -> Job:
+    def availability_job(job_id: str, request_id: str, payload: dict[str, Any]) -> Job:
         return Job(
             id=job_id,
             request_id=request_id,
@@ -996,7 +1000,7 @@ def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
     occupant_id = "00000000-0000-4000-8000-000000000811"
     waiting_id = "00000000-0000-4000-8000-000000000812"
 
-    def availability_job(job_id: str, request_id: str, payload: dict) -> Job:
+    def availability_job(job_id: str, request_id: str, payload: dict[str, Any]) -> Job:
         return Job(
             id=job_id,
             request_id=request_id,
@@ -1167,7 +1171,7 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
     now = datetime.now(UTC)
     waiting_id = "00000000-0000-4000-8000-000000000822"
 
-    def availability_job(job_id: str, request_id: str, payload: dict) -> Job:
+    def availability_job(job_id: str, request_id: str, payload: dict[str, Any]) -> Job:
         return Job(
             id=job_id,
             request_id=request_id,
@@ -1951,7 +1955,8 @@ def test_a_failed_build_step_keeps_its_own_error_lines_and_names_its_spark(
     assert failed.failure["retryable"] is False
     detail = failed.failure["detail"]
     excerpt = failed.failure["log_excerpt"]
-    assert isinstance(detail, str) and isinstance(excerpt, str)
+    assert isinstance(detail, str)
+    assert isinstance(excerpt, str)
     assert "exit code 1" in detail
     assert "ERROR: Failed to build installable wheels (flash-attn)" in detail
     assert detail.endswith("while running runtime: exit status 1")
@@ -2144,7 +2149,10 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
             )
         )
 
-    barrier = threading.Barrier(2)
+    # Both dispatches meet once at their first preparation and once at their
+    # build: two rendezvous, each passed once per thread.
+    prepared = Rendezvous(2)
+    building = Rendezvous(2)
     preparation_lock = threading.Lock()
     prepared_threads: set[int] = set()
     persisted_nodes: list[str] = []
@@ -2165,7 +2173,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                 first_preparation = thread_id not in prepared_threads
                 prepared_threads.add(thread_id)
             if first_preparation:
-                barrier.wait(timeout=30)
+                prepared.wait()
             suffix = node_id[-1]
             return SimpleNamespace(
                 build_input_sha256=(suffix * 64),
@@ -2199,7 +2207,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         def build(self, plan, **_kwargs):
             # Keep both builds in flight: an instant completion permits the
             # second request to legitimately reuse the first builder.
-            barrier.wait(timeout=30)
+            building.wait()
             return SimpleNamespace(
                 id=str(uuid.uuid4()),
                 state="succeeded",
@@ -2496,7 +2504,6 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> None:
-    from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
     engine = create_engine("sqlite://")
     AgentOperation.metadata.tables[AgentOperation.__tablename__].create(engine)
@@ -2563,9 +2570,6 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
 
 def test_unknown_build_planning_preserves_typed_reason_and_retry_policy() -> None:
     """A stale plan must re-enter observation rather than become terminal debt."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
-    from vonk_control.recipe_builds.common import RecipeBuildUnknown
 
     failure = availability_production._planning_failure(
         RecipeBuildUnknown(

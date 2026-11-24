@@ -59,7 +59,7 @@ def uv_lock_packages(lock: bytes) -> list[dict[str, str]]:
     packages: list[dict[str, str]] = []
     for record in records:
         fields = UV_LOCK_SCALAR.findall(record)
-        values = {key: value for key, value in fields}
+        values = dict(fields)
         if len(fields) != 2 or set(values) != {"name", "version"}:
             raise ValueError("uv lock package record is not canonical")
         packages.append({**values, "record": record})

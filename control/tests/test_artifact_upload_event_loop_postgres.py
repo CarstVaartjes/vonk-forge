@@ -8,6 +8,7 @@ import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 import pytest
+
 from vonk_control.artifact_jobs.contracts import ArtifactJobView
 
 from .artifact_jobs_support import (

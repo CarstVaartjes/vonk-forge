@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.install_admission.contracts import InstallPlanStale
@@ -11,6 +12,7 @@ from vonk_control.models.execution import RecipeInstallation, RecipeRun
 from vonk_control.models.jobs import Job
 from vonk_control.run_admission import RunPlanInvalid
 
+from .artifact_jobs_support import _configure_artifact_recipe
 from .recipe_operations_support import installed_recipe, setup_services
 
 
@@ -19,7 +21,6 @@ def test_precommit_retry_refuses_changed_execution_effects(
     method, tmp_path, monkeypatch
 ):
     """Catch a retry that quietly substitutes another image or endpoint port."""
-    from .artifact_jobs_support import _configure_artifact_recipe
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,

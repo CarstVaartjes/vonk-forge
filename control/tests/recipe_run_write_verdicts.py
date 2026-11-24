@@ -5,12 +5,14 @@ from __future__ import annotations
 import ast
 import hashlib
 
+from .optimistic_boundaries import scan_unwrapped_recipe_run_writes
+
 # Caller-owned sessions are not automatically transition decisions. These
 # verdicts classify writes/callbacks, not permission to add another occurrence.
 RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     "agent_jobs/claim_authority.py": {
         "_reconcile_agent_upgrade": (
-            "d6c8ab046beaf89745b11957b46e98f7511c203669ffd22d90b535ea34734067",
+            "ac453280113b3a6436dd3d9969fe80c215a8c959510bb065f8e57a9dcb2eed28",
             "HTTP wait: result consumer can lose a run fence; middleware disposition owns 503",
         ),
         "_reject_recipe_build_claim": (
@@ -26,19 +28,19 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "agent_jobs/observation_receipts.py": {
         "adopt_observation_receipt": (
-            "f57e0f77ab25d966222fc927817d886720f9c143d7ae3ba782e67299f752694b",
+            "805d701b7bb98de86029b668eae41e06a565a3a2bbee581dabbe26770edc3e2a",
             "HTTP/background wait: middleware or per-candidate order sweep classifies conflicts; rollback retains receipt for next pass",
         ),
     },
     "recipe_operations/result_consumption.py": {
         "consume_agent_result": (
-            "e5921b370347f1eeb19e14877bea482db8f81bfb369a96b21670dde3b6d29baf",
+            "0ecf77e8a3fac0c8d41fd9f2468f5c5f9c2b213af99acfb46f700a428f2a7548",
             "caller-owned: queue claim/result and background order-sweep transactions fence child effects; HTTP disposition or per-candidate sweep waits and re-observes",
         ),
     },
     "recipe_routes/candidate.py": {
         "_candidate_once": (
-            "c7b952d45aa3373bdf569964a63cca059c527f51f35084b65de710379e49d965",
+            "cfd112104c61fcd7874464c2aad5a8a5aaac10a0ddd338ed17a1f4c25af17133",
             "caller-owned: lock=True bumps every candidate; publication transition fences it; reduce churn in follow-up",
         ),
     },
@@ -132,7 +134,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/stop_dispatch.py": {
         "_dispatch_stop_after_withdrawal": (
-            "fdc46fa30f3541ff9c6a5a63c3b42f7047693e2b7ae27405eadfadbd11700347",
+            "ef67f7cb908084c77f7e2b24e465f2d798e643c105229d639f13522046ae0216",
             "caller-owned: accepted Stop continuation binds exact dispatch",
         ),
         "queue_recovery_stop_in_session": (
@@ -142,13 +144,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/job_activation.py": {
         "_activate_job_run_once": (
-            "85eb03f5adb9f08e10f282aaaf0100dd601f6f3c2cd70995a6e842a401c57a88",
+            "ad48f12b95111d18757930b1479c09d5c1c433afb6233ccf5e72ac2302350907",
             "retain: activation admission binds accepted run intent",
         ),
     },
     "recipe_operations/start.py": {
         "_start_once": (
-            "47b9dec23186d0206a96641ab4c0c760115cc5b34336611e240fa42c7fefae3f",
+            "bfd62cdf17e896a066779f29dc84550c9c04ebf98df050add20adcdca7f8aa80",
             "retain: Start admission binds run and capacity",
         ),
     },
@@ -160,7 +162,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/terminal_projection.py": {
         "_project_terminal_result": (
-            "f067db709a4c69906d40d11c627b251c241a1b9d881b52640b04c4e3a5846275",
+            "e2d6f940cbfcdfdfbcb2c61ce98eb18b1e7fb7d5a770b916217cd922bb17e16f",
             "caller-owned: queue result transaction owns terminal projection",
         ),
     },
@@ -170,7 +172,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "caller-owned: the head of end_unfinished_run; the failed-start terminal projection (queue result transaction) writes it alone and the Stop is queued after commit, with the run reaper as backstop",
         ),
         "end_unfinished_run": (
-            "b9d8748c4afd41ccc54c21ab4b966f2205f1768c794496eca1782f7d6eb83590",
+            "7d5b9edd0cca9297823ed439774efa3b6f79aa83c3626a0b41495e73102c761a",
             "caller-owned: the failed-start terminal projection (queue result transaction) and the recovery tick's run reaper (optimistic publication transaction) own the cleanup Stop or the lost verdict",
         ),
     },
@@ -207,7 +209,6 @@ def classified_write_lines(path: str, source: str) -> set[int]:
     Function ASTs tolerate formatting/movement, but any changed helper needs
     an explicit verdict, even in an already listed file and function.
     """
-    from .optimistic_boundaries import scan_unwrapped_recipe_run_writes
 
     verdicts = RECIPE_RUN_WRITE_VERDICTS.get(
         path.removeprefix("control/src/vonk_control/"), {}

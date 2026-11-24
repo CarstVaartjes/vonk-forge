@@ -10,46 +10,56 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, SessionTransaction
+
 from vonk_agent_protocol.agent_words import (
     RunSwitchReasonScopeName,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-
-from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
-from ..catalog.revision_contract import RecipeRevisionProjection, read_recipe_projection
-from ..content_identity import (
+from vonk_control.catalog.queries import WITHOUT_DOCUMENT, active_head_revision
+from vonk_control.catalog.revision_contract import (
+    RecipeRevisionProjection,
+    read_recipe_projection,
+)
+from vonk_control.content_identity import (
     cache_resolution_answers_revision,
     catalog_selector_membership,
 )
-from ..fleet_profile_contract.definitions import (
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
     FleetProfileNode,
 )
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..model_cache.contract import CacheResolution
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..models.fleet import FleetProfile
-from ..recipe_operations.runtime_specs import recipe_topology
-from ..stored.states import CatalogRevisionState
-from .contracts import (
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileInvalid,
     FleetProfileStalePlanConflict,
 )
-from .persistence import _stored_recipe
-from .projection_support import (
+from vonk_control.fleet_profiles.persistence import _stored_recipe
+from vonk_control.fleet_profiles.projection_support import (
     _choice_id,
     _digest,
     _effective_option_choices,
     _expanded_roles,
     _profile_document,
 )
-from .read_observation import observe_storage
+from vonk_control.fleet_profiles.read_observation import observe_storage
+from vonk_control.fleet_profiles.saved_profiles import _definition
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.model_cache.contract import CacheResolution
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.fleet import FleetProfile
+from vonk_control.recipe_operations.runtime_specs import recipe_topology
+from vonk_control.stored.states import CatalogRevisionState
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 @dataclass
@@ -377,9 +387,8 @@ class FleetProfileService:
     @staticmethod
     def _choices(row: FleetProfile) -> tuple[FleetProfileAssignmentInput, ...]:
         """Every saved choice belongs to the exact definition, including on review."""
-        from .service import FleetProfileService
 
-        return tuple(FleetProfileService._definition(row).assignments)
+        return tuple(_definition(row).assignments)
 
     def _validate_draft_review_identity(
         self,

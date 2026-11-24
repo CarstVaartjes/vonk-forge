@@ -15,16 +15,18 @@ import time
 import wave
 import zipfile
 import zlib
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from importlib.resources.abc import Traversable
 from pathlib import Path, PurePosixPath
 
 from cluster_profiles.glb_validation.validation import validate_mesh_glb_bytes
-
-from .contracts import FixtureError, FixtureObservationUnknown
-from .values import _strict_json_loads
+from cluster_profiles.qualification_fixtures.contracts import (
+    FixtureError,
+    FixtureObservationUnknown,
+)
+from cluster_profiles.qualification_fixtures.values import _strict_json_loads
 
 _MEDIA_DEADLINE: ContextVar[float | None] = ContextVar(
     "qualification_media_deadline", default=None
@@ -32,7 +34,7 @@ _MEDIA_DEADLINE: ContextVar[float | None] = ContextVar(
 
 
 @contextmanager
-def media_budget(timeout_seconds: float) -> Iterator[None]:
+def media_budget(timeout_seconds: float) -> Generator[None]:
     token = _MEDIA_DEADLINE.set(time.monotonic() + timeout_seconds)
     try:
         yield
@@ -289,13 +291,13 @@ def _ffprobe_metadata(path: Path) -> dict[str, object]:
         format_value.get("format_name", "")
     ).split(","):
         raise FixtureError("artifact output is not an MP4 container")
-    if isinstance(format_value, Mapping) and "duration" not in stream:
+    if isinstance(format_value, Mapping) and "duration" not in stream:  # pyright: ignore[reportUnnecessaryIsInstance]  # media probe output is checked before use
         stream["duration"] = format_value.get("duration")
     return {
         "video": stream,
         "audio": audio,
         "streams": [dict(item) for item in streams],
-        "format": dict(format_value) if isinstance(format_value, Mapping) else {},
+        "format": dict(format_value) if isinstance(format_value, Mapping) else {},  # pyright: ignore[reportUnnecessaryIsInstance]  # media probe output is checked before use
     }
 
 
@@ -365,8 +367,7 @@ def _safe_zip_entries(content: bytes) -> list[tuple[str, bytes]]:
                     total > 256 * 1024**2
                     or info.file_size > 128 * 1024**2
                     or expansion_ratio > 10_000
-                    or info.compress_size == 0
-                    and info.file_size > 0
+                    or (info.compress_size == 0 and info.file_size > 0)
                 ):
                     raise FixtureError("ZIP expansion is unsafe")
                 data = archive.read(info)

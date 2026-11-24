@@ -1,10 +1,13 @@
+import argparse
+import re
 import sys
 from io import BytesIO, TextIOWrapper
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
+import cluster_profiles
+from cluster_profiles.cli_presentations import PRESENTATIONS
 from cluster_profiles.cli_render.activity import (
     activity_continuation,
     unknown_membership,
@@ -20,6 +23,7 @@ from cluster_profiles.cli_render.fleet import (
     NO_SPARKS,
     RunProblem,
     _fleet_status_line,
+    _gpu,
     _needs_attention,
     clock_metric,
     run_problem,
@@ -36,12 +40,15 @@ from cluster_profiles.cli_render.progress import progress_line
 from cluster_profiles.cli_render.review import ReviewVerdict, review_verdict
 from cluster_profiles.cli_states_generated import GpuClockMetric, QualificationStatus
 from cluster_profiles.control_client.errors import ControlMalformedResponse
+from cluster_profiles.controller_cli.parser import add_controller_commands
 from cluster_profiles.generated_control.models.gpu_clock_observation import (
     GpuClockObservation,
 )
 from cluster_profiles.generated_control.models.gpu_clock_unavailable import (
     GpuClockUnavailable,
 )
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.telemetry import GpuUnavailableReason
 
 
 def test_unknown_transfer_total_does_not_hide_measured_work_or_invent_percent():
@@ -56,7 +63,8 @@ def test_unknown_transfer_total_does_not_hide_measured_work_or_invent_percent():
             },
         }
     )
-    assert "0 B" in line and "total unknown" in line
+    assert "0 B" in line
+    assert "total unknown" in line
     assert "%" not in line
 
 
@@ -106,12 +114,6 @@ def test_recipe_library_reads_any_unreadable_published_status_as_not_yet_verifie
 
 
 def test_every_controller_command_has_a_registered_presentation() -> None:
-    import argparse
-    import re
-
-    import cluster_profiles
-    from cluster_profiles.cli_presentations import PRESENTATIONS
-    from cluster_profiles.controller_cli.parser import add_controller_commands
 
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command")
@@ -136,9 +138,6 @@ def test_every_controller_command_has_a_registered_presentation() -> None:
 
 def test_gpu_partial_readings_and_typed_failure_survive_fleet_render():
     # Catches discarding temperature when utilisation is unsupported.
-    from vonk_agent_protocol.telemetry import GpuUnavailableReason
-
-    from cluster_profiles.cli_render.fleet import _gpu
 
     assert (
         _gpu(
@@ -259,7 +258,11 @@ def test_the_next_activity_page_keeps_every_filter_of_this_one():
         "opaque+token", limit=1, state="running", target=_SPARK, request_id="r"
     )
     assert command is not None
-    assert command[3:] == ["--limit", "1", "--cursor", "opaque+token"] + [
+    assert command[3:] == [
+        "--limit",
+        "1",
+        "--cursor",
+        "opaque+token",
         "--state",
         "running",
         "--target",
@@ -351,7 +354,16 @@ def _cpu_spark(*, low_clock):
 def test_fleet_detail_shows_cpu_clock_with_temperature_and_throttle_hint(capsys):
     render_payload(_cpu_spark(low_clock=False), "fleet", action="detail")
     output = capsys.readouterr().out
-    assert "2.1 of 3.9 GHz" in output and "84" in output
+    # The average and maximum clock and the temperature each reach the detail.
+    for field in (
+        "cpu_frequency_avg_mhz",
+        "cpu_frequency_max_mhz",
+        "gpu_temperature_c",
+    ):
+        spark = _cpu_spark(low_clock=False)
+        spark["telemetry"]["sample"][field] //= 2
+        render_payload(spark, "fleet", action="detail")
+        assert capsys.readouterr().out != output, field
 
     render_payload(_cpu_spark(low_clock=True), "fleet", action="detail")
     assert capsys.readouterr().out != output

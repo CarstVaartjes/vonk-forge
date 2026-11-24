@@ -116,7 +116,9 @@ def _unsealed_sha256(package: Path) -> str:
 
 def _wheel_content(wheel: Path) -> str:
     sys.path.insert(0, str(ROOT / "src"))
-    from cluster_profiles.runtime_identity import wheel_content_identity
+    from cluster_profiles.runtime_identity import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
+        wheel_content_identity,
+    )
 
     with zipfile.ZipFile(wheel) as archive:
         identity = wheel_content_identity(archive)

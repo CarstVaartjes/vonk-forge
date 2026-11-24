@@ -7,12 +7,11 @@ from typing import TYPE_CHECKING, cast
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from ..categorized_errors import MissingRecord
-from ..jobs import states as job_states
-from ..models.jobs import Job
-from ..persisted_waits import read_wait, wait_due
-from .contract import (
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.jobs import states as job_states
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import read_wait, wait_due
+from vonk_control.recipe_update_batches.contract import (
     UPDATE_KIND,
     RecipeUpdateDocument,
     RecipeUpdateResponse,
@@ -20,9 +19,9 @@ from .contract import (
 )
 
 if TYPE_CHECKING:
-    from .service import RecipeUpdateBatches
+    from vonk_control.recipe_update_batches.service import RecipeUpdateBatches
 
-from .helpers import _SETTLED, _now
+from vonk_control.recipe_update_batches.helpers import _SETTLED, _now
 
 
 class ProjectionMixin:

@@ -8,15 +8,17 @@ selection (`COMPOSE_PROFILES` in `.env`) is resolved here once.
 
 from __future__ import annotations
 
+from typing import Any
+
 import yaml
 
-from .environment import SELECTION_ENV, profiles
-from .filesystem import SetupError
+from vonk_nas_setup.environment import SELECTION_ENV, profiles
+from vonk_nas_setup.filesystem import SetupError
 
 _SECTIONS = ("networks", "secrets", "volumes", "configs")
 
 
-def _used(service: dict, section: str) -> set[str]:
+def _used(service: dict[str, Any], section: str) -> set[str]:
     entries = service.get(section) or []
     names: set[str] = set()
     for entry in entries:

@@ -2,13 +2,33 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
+
+from vonk_agent_protocol.agent_operations import RecipeStartResult
+from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobEvidence,
+    RecipeJobOutputManifest,
+    RecipeJobRunResult,
+    manifest_sha256,
+)
+from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_jobs.stored import column_message
 from vonk_control.bounded_json import require_mapping
+from vonk_control.fleet_profiles.stop_contract import (
+    JobRunStopScope,
+    OfflineStopIntent,
+    ProfileJobRunStopAuthorization,
+    ProfileJobRunStopJob,
+    ProfileJobRunStopPhaseItem,
+    ProfileJobRunStopTarget,
+    ProfileStopOwnerBinding,
+)
 from vonk_control.jobs.documents import (
     DistributedRecoveryMarker,
     RecipeStopParent,
@@ -17,12 +37,15 @@ from vonk_control.jobs.documents import (
 )
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.recipe_operations.contracts import RecipeOperationContext
+from vonk_control.recipe_operations.contracts import (
+    RecipeInstallationAbandonResult,
+    RecipeOperationContext,
+)
 from vonk_control.recipe_operations.lifecycle_contract import (
     parse_recipe_lifecycle_result,
 )
 from vonk_control.recipe_operations.observation_helpers import _RECIPE_PARENT_READERS
-from vonk_control.stored.json_values import bindings
+from vonk_control.stored.rows import bindings
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 from .recipe_operations_support import installed_recipe, setup_services, start_evidence
@@ -73,7 +96,7 @@ def test_start_receipts_keep_the_agent_canonical_encoding(tmp_path, nodes):
         assert view.result == json.loads(canonical_message(view.lifecycle_result))
 
 
-@pytest.mark.parametrize("kind,reader", list(_RECIPE_PARENT_READERS.items()))
+@pytest.mark.parametrize(("kind", "reader"), list(_RECIPE_PARENT_READERS.items()))
 def test_controller_parent_documents_round_trip(kind, reader):
     """Catch canonical egress dropping defaults from a Controller parent write."""
     parent = reader.validate_json(
@@ -89,7 +112,6 @@ def test_controller_parent_documents_round_trip(kind, reader):
     stored = controller_recipe_document(parent)
     assert stored == parent.model_dump(mode="json")
     assert reader.validate_json(json.dumps(stored)) == parent
-    from vonk_control.agent_jobs.stored import column_message
 
     row = Job(kind=kind, payload=stored)
     assert column_message(row, "payload") == canonical_message(parent)
@@ -125,7 +147,7 @@ def test_controller_recovery_context_round_trip():
 
 
 @pytest.mark.parametrize(
-    "kind,document",
+    ("kind", "document"),
     [
         (
             "recipe.start",
@@ -158,18 +180,6 @@ def test_lifecycle_receipts_round_trip_through_stored_union(kind, document):
 
 def test_profile_stop_authorization_documents_round_trip():
     """Catch partial serialization losing Stop scope or profile parent defaults."""
-    import hashlib
-
-    from vonk_agent_protocol.recipe_operations import RecipeStopPayload
-    from vonk_control.fleet_profiles.stop_authority import (
-        JobRunStopScope,
-        OfflineStopIntent,
-        ProfileJobRunStopAuthorization,
-        ProfileJobRunStopJob,
-        ProfileJobRunStopPhaseItem,
-        ProfileJobRunStopTarget,
-        ProfileStopOwnerBinding,
-    )
 
     identity = "11111111-1111-4111-8111-111111111111"
     node = "spk_" + "a" * 32
@@ -262,13 +272,6 @@ def test_profile_stop_authorization_documents_round_trip():
 
 def test_jobrun_and_disposal_receipts_round_trip():
     """Catch canonical receipts omitting required nullable execution evidence."""
-    from vonk_agent_protocol.recipe_jobs import (
-        RecipeJobEvidence,
-        RecipeJobOutputManifest,
-        RecipeJobRunResult,
-        manifest_sha256,
-    )
-    from vonk_control.recipe_operations.contracts import RecipeInstallationAbandonResult
 
     identity = "11111111-1111-4111-8111-111111111111"
     jobrun = RecipeJobRunResult(

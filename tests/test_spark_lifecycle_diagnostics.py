@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import json
+import ssl
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -42,10 +46,11 @@ def test_failure_report_survives_every_failure_boundary(
     )
     run = module.SparkLifecycle.__new__(module.SparkLifecycle)
     attempts: list[float] = []
-    cleanup_reports: list[dict] = []
+    cleanup_reports: list[dict[str, Any]] = []
 
     def transport(method, path, _body, _headers, timeout):
-        assert method == "GET" and path == "/litellm/health/readiness"
+        assert method == "GET"
+        assert path == "/litellm/health/readiness"
         assert 0 < timeout <= 30
         attempts.append(clock[0])
         return (200 if fault == "delayed" and clock[0] >= 100 else 502), b"{}"
@@ -74,7 +79,7 @@ def test_failure_report_survives_every_failure_boundary(
                 run._await_inference_ready(inference)
             elif fault == "cleanup":
                 return {}
-            raise AssertionError()
+            raise AssertionError
 
         def __exit__(self, *_error):
             if fault != "cleanup":
@@ -94,7 +99,8 @@ def test_failure_report_survives_every_failure_boundary(
         assert cleanup_reports[0]["status"] == "failed"
         assert cleanup_reports[0]["failure"]["cause"]
     if fault == "delayed":
-        assert clock[0] >= 100 and len(attempts) > 1
+        assert clock[0] >= 100
+        assert len(attempts) > 1
     if fault == "unavailable":
         assert 0 < clock[0] <= module._LITELLM_READINESS_SECONDS
     # A failed attempt leaves no local admission gate: a fresh run succeeds.
@@ -110,7 +116,7 @@ def test_same_line_diagnostics_preserve_type_phase_request_and_chain(monkeypatch
     monkeypatch.setenv("VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", "secret-value")
     try:
         try:
-            raise TimeoutError()
+            raise TimeoutError
         except TimeoutError as cause:
             raise module.SliceError(
                 "POST /v1/chat/completions returned HTTP 502\nsecret-value"
@@ -130,8 +136,6 @@ def test_failed_report_cannot_be_signed_as_release_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import importlib.machinery
-    import importlib.util
 
     module = _module()
     arguments = _arguments(tmp_path)
@@ -183,10 +187,10 @@ def test_startup_failure_reports_before_cleanup_and_allows_a_fresh_run(
     run = module.SparkLifecycle.__new__(module.SparkLifecycle)
     run.arguments = arguments
     run._assert_spark_target_is_fresh = lambda: None
-    observed: list[dict] = []
+    observed: list[dict[str, Any]] = []
 
     def start():
-        raise TimeoutError()
+        raise TimeoutError
 
     run._start_controller = start
     run._cleanup = lambda: observed.append(json.loads(arguments.output.read_text()))
@@ -203,7 +207,6 @@ def test_startup_failure_reports_before_cleanup_and_allows_a_fresh_run(
 
 @pytest.mark.parametrize("failure", ["access", "tls"])
 def test_readiness_does_not_retry_security_failures(failure, monkeypatch):
-    import ssl
 
     module = _module()
     attempts = []
@@ -252,4 +255,5 @@ def test_noisy_logs_cannot_hide_the_canary_phase_in_final_stderr(
     line = capsys.readouterr().err.strip()
     assert "\n" not in line
     assert "synthetic canary/route-publication" in line
-    assert "SliceError" in line and "GET /api/fleet returned HTTP 503" in line
+    assert "SliceError" in line
+    assert "GET /api/fleet returned HTTP 503" in line

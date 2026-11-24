@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from importlib import resources
 
+from vonk_forge_contracts import read_recipe
+
 from vonk_control.recipe_image_availability.reader_contract import (
     StoredAvailabilityIdentity,
 )
-from vonk_forge_contracts import read_recipe
 
 
 def test_a_stored_recipe_with_a_retired_field_reads_and_damage_is_absent() -> None:

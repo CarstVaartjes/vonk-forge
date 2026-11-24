@@ -18,10 +18,12 @@ from vonk_forge_contracts.qualification_status import (
     PublishedQualificationStatusView,
 )
 
+from vonk_agent_protocol.wire_model import canonical_message
+
 if TYPE_CHECKING:
-    from .catalog.revision_contract import PublishedDocument
-    from .catalog.sync_contract import ManagedCatalogSyncProblem
-    from .recipe_packages.client import RecipePackageHandle
+    from vonk_control.catalog.revision_contract import PublishedDocument
+    from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
+    from vonk_control.recipe_packages.client import RecipePackageHandle
 
 
 class RecipeLibraryError(RuntimeError):
@@ -144,3 +146,24 @@ __all__ = [
     "RecipeLibrarySourceFile",
     "RecipePackageEntry",
 ]
+
+
+def _snapshot_content(value: RecipeLibrarySnapshot) -> bytes:
+    return canonical_message(
+        (
+            sorted(
+                [
+                    (
+                        item.uri,
+                        item.content_sha256,
+                        item.package_sha256,
+                        item.source_bundle_sha256,
+                        item.prebuilt_image,
+                    )
+                    for item in value.items
+                ],
+                key=lambda item: item[0],
+            ),
+            sorted(model.entry.content_sha256 for model in value.catalog_entities),
+        )
+    )

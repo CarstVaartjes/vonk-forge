@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
 from vonk_control.stalled_process import run_until_stalled, tree_bytes
 
 _WRITER = """

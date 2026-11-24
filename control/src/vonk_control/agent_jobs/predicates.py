@@ -14,33 +14,32 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
-from vonk_agent_protocol.contracts import (
-    AgentOperation,
-    canonical_message,
-    canonical_payload,
-)
+
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.contracts import canonical_payload
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
-
-from .. import agent_operation_states
-from ..agent_operation_facts import aware as _aware
-from ..agent_operation_facts import (
-    operation_start_deadline as _operation_start_deadline,
-)
-from ..jobs.agent_contract import ClaimFacts
-from ..logging import redact_text
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt
-from ..own_cleanup import CLEANUP_KINDS
-from ..stored.json_values import read_row_column
-from .contracts import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import (
     _CLAIM_NOTE_PREFIX,
     _CLAIM_REFUSAL_PREFIX,
     _MAX_CLAIM_REFUSAL_REASON,
-    _WORKLOAD_INTENT_OPERATIONS,
 )
+from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_operation_facts import (
+    operation_start_deadline as _operation_start_deadline,
+)
+from vonk_control.jobs.agent_contract import ClaimFacts
+from vonk_control.jobs.documents import RecipeStartParent
+from vonk_control.logging import redact_text
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
+from vonk_control.own_cleanup import CLEANUP_KINDS
+from vonk_control.stored.rows import read_row_column
 
 
 def _refusal_reason(prefix: str, check: str, **facts: object) -> str:
@@ -74,7 +73,9 @@ def _document(value: BaseModel) -> Any:
     return json.loads(canonical_message(value))
 
 
-def _json_flag_parts(element: FunctionElement, compiler, **kwargs) -> tuple[str, str]:
+def _json_flag_parts(
+    element: FunctionElement[Any], compiler, **kwargs
+) -> tuple[str, str]:
     column, key = list(element.clauses)
     column_sql = compiler.process(column, **kwargs)
     key_sql = compiler.process(key, **kwargs)
@@ -394,7 +395,6 @@ def _anchor_start_budget(
     """
 
     # job_documents reaches this module through the build contracts.
-    from ..jobs.documents import RecipeStartParent
 
     job = session.get(Job, operation.parent_job_id, with_for_update=True)
     if job is None:
@@ -467,7 +467,6 @@ def _claim_condition_facts(
     operation: StoredOperation,
     attempt: AgentOperationAttempt | None,
     node: AgentNode,
-    now: datetime,
 ) -> ClaimFacts:
     """Return the bounded facts that explain one failed named condition."""
 

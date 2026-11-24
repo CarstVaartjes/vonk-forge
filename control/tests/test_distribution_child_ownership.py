@@ -4,8 +4,9 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
+from vonk_agent_protocol.agent_operations import AgentInstallResult
 from vonk_agent_protocol.agent_words import FailureStage, ProfileEffectState
-from vonk_agent_protocol.contracts import AgentInstallResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs.service import AgentJobService
@@ -169,4 +170,5 @@ def test_owned_distribution_without_receipts_stays_with_distribution(
     assert artifact.get(str(uuid4())) is None
     with sessions() as session:
         stored = session.get(Job, operation_id)
-        assert stored is not None and stored.state == LifecycleState.RUNNING
+        assert stored is not None
+        assert stored.state == LifecycleState.RUNNING

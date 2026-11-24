@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import (
@@ -15,29 +17,15 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import MUTATION_ROLES, Actor, CursorCodec
-from ..bounded_json import require_integer, require_sequence
-from ..cache_removal_review import CacheRemovalReview
-from ..operation_api.contracts import (
-    OperationApiServices,
-    OperationListPage,
-    OperationProvider,
-    OperationQuery,
-    bounded_error_responses,
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import MUTATION_ROLES, Actor, CursorCodec
+from vonk_control.bounded_json import require_integer, require_sequence
+from vonk_control.cache_removal_review import CacheRemovalReview
+from vonk_control.library_projection.common import (
+    LibrarySelectorAmbiguous,
+    SelectorAmbiguityHTTPError,
 )
-from ..operations.contract import AvailabilityOperationFailure
-from ..operations.item_contract import (
-    OperationItem,
-    OperationOwnerReference,
-    OperationResultFacts,
-)
-from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
-from ..strict_json import read_stored_model
-from .contract import (
+from vonk_control.model_cache.contract import (
     UUID_PATTERN,
     CacheOperationKind,
     ModelCacheCancellationRequest,
@@ -47,15 +35,36 @@ from .contract import (
     ModelCacheRemovalRequest,
     ModelCacheRemovalResult,
 )
-from .errors import (
+from vonk_control.model_cache.errors import (
     ModelCacheConflict,
     ModelCacheError,
     ModelCacheNotFound,
     ModelCacheResolutionError,
     ModelCacheSelectorAmbiguous,
 )
-from .progress import project_cache_progress
-from .service import ModelCacheService
+from vonk_control.model_cache.progress import project_cache_progress
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import (
+    OperationApiServices,
+    OperationListPage,
+    OperationProvider,
+    OperationQuery,
+    bounded_error_responses,
+)
+from vonk_control.operation_api.providers import observation_cursors
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.operations.item_contract import (
+    OperationItem,
+    OperationOwnerReference,
+    OperationResultFacts,
+)
+from vonk_control.operator_acceptance import (
+    OperatorReceiptResolver,
+    operator_acceptance,
+)
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.strict_json import read_stored_model
 
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/model/operations/{operation_id}"): "getModelOperation",
@@ -125,9 +134,6 @@ def model_cache_http_error(error: BaseException) -> HTTPException:
         # answer (503, Retry-After, error code) says to ask again.
         raise error
     if isinstance(error, ModelCacheSelectorAmbiguous):
-        from ..library.api import SelectorAmbiguityHTTPError
-        from ..library_projection.common import LibrarySelectorAmbiguous
-
         return SelectorAmbiguityHTTPError(
             LibrarySelectorAmbiguous("model", error.candidates),
             status_code=409,
@@ -168,8 +174,6 @@ def install_model_operator_routes(
     The service resolves selectors against an explicit immutable model digest.
     Replays bind the actor, request identity, action, selector, and digest.
     """
-
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(MODEL_CACHE_OPERATION_IDS)
 
@@ -296,6 +300,7 @@ def install_model_operator_routes(
     )
     def review_removal(
         selector: Annotated[str, Path(min_length=1, max_length=256)],
+        *,
         fleet: bool = False,
         actor: Actor = actor_dependency,
     ) -> CacheRemovalReview:
@@ -416,7 +421,6 @@ class ModelCacheOperationProvider:
         self, service: ModelCacheService, cursors: CursorCodec | None = None
     ) -> None:
         self._service = service
-        from ..operation_api.providers import observation_cursors
 
         self._cursors = cursors or observation_cursors()
 
@@ -569,9 +573,8 @@ def register_model_cache_operation_provider(
     existing = services.operation_providers
     if any(item.family == "model-cache" for item in existing):
         return services
-    from dataclasses import replace
 
-    return replace(services, operation_providers=existing + (provider,))
+    return replace(services, operation_providers=(*existing, provider))
 
 
 __all__ = [

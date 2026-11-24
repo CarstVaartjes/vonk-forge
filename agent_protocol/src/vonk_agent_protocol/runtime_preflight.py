@@ -6,10 +6,9 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from .host_helper import Uuid4Text
-from .reason_codes.runtime import RuntimePreflightFindingCode
-from .reason_codes.vocabulary import adopt_preflight_finding_code
-from .wire_model import WireModel
+from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightFindingCode
+from vonk_agent_protocol.reason_codes.vocabulary import adopt_preflight_finding_code
+from vonk_agent_protocol.wire_model import Uuid4Text, WireModel
 
 
 class RuntimePreflightRequest(WireModel):

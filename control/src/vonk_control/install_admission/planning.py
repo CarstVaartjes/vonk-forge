@@ -8,53 +8,28 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
-
-from ..categorized_errors import (
+from vonk_control.categorized_errors import (
     BookkeepingUnknown,
     InvalidType,
     InvalidValue,
     MissingRecord,
 )
-from ..cluster_mappings import validate_mapping_parameters
-from ..disk_reservations import (
+from vonk_control.cluster_mappings import validate_mapping_parameters
+from vonk_control.disk_reservations import (
     describe_disk_charges,
     model_sets_stored_on_nodes,
     outstanding_disk_charges,
     runtime_images_named_on_nodes,
 )
-from ..gpu.health import gpu_health_reason
-from ..inventory.items import inventory_items
-from ..inventory.repository import (
-    INVENTORY_MAX_AGE_SECONDS,
-    InventoryRepository,
-    InventorySnapshotView,
-)
-from ..legal_admission import stored_model_display, territorial_admission
-from ..models.cache import RecipeBuild
-from ..models.fleet import AgentNode
-from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..recipe_operations.runtime_specs import (
-    RecipeRuntimeSpecError,
-    recipe_topology,
-    resolve_recipe_entities,
-)
-from ..resource_planning.types import installation_disk_requirement
-from ..runtime.preflight import (
-    admission_blockers,
-    latest_result,
-    recipe_requirements,
-    request_digest,
-)
-from ..spark_disk import spark_free_bytes
-from ..stored.states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
-from ..topology import Placement, TopologyError, validate_topology
-from .contracts import (
+from vonk_control.gpu.health import gpu_health_reason
+from vonk_control.install_admission.contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
     IMAGE_PULL_CAPABILITY,
     UNSETTLED_PLAN_PREFIX,
@@ -62,12 +37,41 @@ from .contracts import (
     InstallNodePlan,
     InstallPlan,
 )
-from .identity import (
+from vonk_control.install_admission.identity import (
     _compiled_build_matches,
     _installation_plan_digest,
     _installation_plan_identity,
 )
-from .validation import _active_recipe_revision
+from vonk_control.install_admission.validation import _active_recipe_revision
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.repository import (
+    INVENTORY_MAX_AGE_SECONDS,
+    InventoryRepository,
+    InventorySnapshotView,
+)
+from vonk_control.legal_admission import stored_model_display, territorial_admission
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.recipe_operations.runtime_specs import (
+    RecipeRuntimeSpecError,
+    recipe_topology,
+    resolve_recipe_entities,
+)
+from vonk_control.resource_planning.types import installation_disk_requirement
+from vonk_control.runtime.preflight import (
+    admission_blockers,
+    latest_result,
+    recipe_requirements,
+    request_digest,
+)
+from vonk_control.spark_disk import spark_free_bytes
+from vonk_control.stored.states import (
+    CatalogRevisionState,
+    ClusterMappingState,
+    RecipeBuildState,
+)
+from vonk_control.topology import Placement, TopologyError, validate_topology
 
 
 class InstallPlanningService:
@@ -118,11 +122,7 @@ class InstallPlanningService:
                     reason=InvalidRequestReason.NOT_READY,
                 )
             revision = _active_recipe_revision(session, mapping.recipe_revision_id)
-            if (
-                revision is None
-                or revision.state != CatalogRevisionState.ACTIVE
-                or revision.content_digest is None
-            ):
+            if revision is None or revision.state != CatalogRevisionState.ACTIVE:
                 raise InvalidValue(
                     "recipe revision is not resolved",
                     reason=InvalidRequestReason.NOT_READY,
@@ -217,7 +217,6 @@ class InstallPlanningService:
                         session=session,
                         revision=revision,
                         build=build,
-                        mapping=mapping,
                         mapping_nodes=mapping_nodes,
                         parameters=validate_mapping_parameters(mapping.parameters),
                         resolved_entities=resolved_entities,
@@ -243,7 +242,7 @@ class InstallPlanningService:
             # archive is provenance, not the recipe allowed to consume it now.
             # Bind that authorized receipt back to the exact selected result so
             # reuse cannot silently select a different build or archive.
-            if build is not None and any(
+            if build is not None and any(  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                 not _compiled_build_matches(value, build, revision.content_digest)
                 for value in compiled_plan_by_node.values()
             ):
@@ -360,7 +359,7 @@ class InstallPlanningService:
                         )
                     )
             actual_artifact_bytes = sum(artifact_sizes.values())
-            if image_bytes is None:
+            if image_bytes is None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                 blockers.append(
                     AdmissionReason(
                         InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE,
@@ -425,7 +424,7 @@ class InstallPlanningService:
             # never prunes it); any other is charged, as it may be pruned.
             reused_image = (
                 image_bytes
-                if image_bytes is not None
+                if image_bytes is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                 and image_digest in named_images_by_node[mapping_node.node_id]
                 else 0
             )

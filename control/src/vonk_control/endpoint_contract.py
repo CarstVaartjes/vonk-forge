@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 
 from pydantic import ConfigDict, Field
-from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 from vonk_forge_contracts import EndpointAlias
 
-from .strict_json import StrictJSONModel
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
+from vonk_control.strict_json import StrictJSONModel
 
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"

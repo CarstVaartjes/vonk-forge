@@ -8,9 +8,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from ..cli_states_generated import WAIT_DEPENDENCY_PENDING
-from .common import _bytes, _optional, _text
-from .phase_words import Meter, measured, phase_words, wait_words
+from cluster_profiles.cli_render.common import _bytes, _optional, _text
+from cluster_profiles.cli_render.phase_words import (
+    Meter,
+    measured,
+    phase_words,
+    wait_words,
+)
+from cluster_profiles.cli_states_generated import WAIT_DEPENDENCY_PENDING
 
 _BAR_WIDTH = 10
 

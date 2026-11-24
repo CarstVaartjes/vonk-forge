@@ -15,7 +15,9 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.optional_evidence import redact_host_paths
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 
@@ -64,5 +66,7 @@ def test_a_route_rendered_as_a_url_path_is_redacted_in_the_diagnostic() -> None:
 
     assert message.evidence_warnings == (AgentEvidenceCode.RESULT_HOST_PATH_REDACTED,)
     assert stored.diagnostic == redact_host_paths(old)
-    assert "endpoint=" in stored.diagnostic and "/" not in stored.diagnostic
+    assert stored.diagnostic is not None
+    assert "endpoint=" in stored.diagnostic
+    assert "/" not in stored.diagnostic
     assert stored.stage == evidence["stage"]

@@ -7,15 +7,14 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_forge_contracts import CONTRACT_MAJOR
+
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
-from vonk_forge_contracts import CONTRACT_MAJOR
-
-from ..catalog.sync_contract import ManagedCatalogSyncProblem
-from ..recipe_library_types import RecipeLibraryError, RecipeLibrarySnapshot
+from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
+from vonk_control.recipe_library_types import RecipeLibraryError
 
 _RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 
@@ -51,7 +50,7 @@ def _select_release(
         tag = _RELEASE_TAG.fullmatch(release.tag_name)
         if release.draft or tag is None or int(tag[1]) != CONTRACT_MAJOR:
             continue
-        if selector != "latest" and release.tag_name != selector:
+        if selector not in ("latest", release.tag_name):
             continue
         key = (int(tag[2]), int(tag[3]))
         if best is None or key > best[0]:
@@ -119,24 +118,3 @@ class RecipePackageRequestInvalid(InvalidRequestError, RecipePackageError):
         RecipePackageError.__init__(self, code, detail)
         self.typed_reason = InvalidRequestReason.MALFORMED
         self.typed_field = "snapshot"
-
-
-def _snapshot_content(value: RecipeLibrarySnapshot) -> bytes:
-    return canonical_message(
-        (
-            sorted(
-                [
-                    (
-                        item.uri,
-                        item.content_sha256,
-                        item.package_sha256,
-                        item.source_bundle_sha256,
-                        item.prebuilt_image,
-                    )
-                    for item in value.items
-                ],
-                key=lambda item: item[0],
-            ),
-            sorted(model.entry.content_sha256 for model in value.catalog_entities),
-        )
-    )

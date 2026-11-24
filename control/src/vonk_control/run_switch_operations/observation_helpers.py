@@ -6,6 +6,7 @@ import uuid
 from dataclasses import replace
 
 import httpx2
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -14,27 +15,28 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_control.failure_classification import error_code, is_security_failure
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import RunSwitchIntent
+from vonk_control.models.execution import ACTIVE_RUN_STATES
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.interfaces import (
+    RecipeOperationView,
+    RecipeRunStatusReader,
+)
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
+from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 
-from ..failure_classification import error_code, is_security_failure
-from ..jobs import states as job_states
-from ..jobs.documents import RunSwitchIntent
-from ..models.execution import ACTIVE_RUN_STATES
-from ..models.jobs import Job
-from ..recipe_operations.interfaces import RecipeOperationView
-from ..recipe_operations.service import RecipeOperationService
-from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.plans import RunSwitchPlan
-from .errors import RunSwitchRequestInvalid
-from .planning_helpers import _run_switch_payload
 
-
-def _EstablishedEffect(child: RecipeOperationView, run_id: str) -> RecipeOperationView:
+def _established_effect(child: RecipeOperationView, run_id: str) -> RecipeOperationView:
     """Present the same exact child's established effect without duck delegation."""
     return replace(child, state=LifecycleState.SUCCEEDED.value, owner_id=run_id)
 
 
 def _established_start_effect(
-    lifecycle: RecipeOperationService | None,
+    lifecycle: RecipeRunStatusReader | None,
     phase: RunSwitchPhase,
     child: object,
 ) -> str | None:
@@ -53,7 +55,7 @@ def _established_start_effect(
 
 
 def _established_stop_effect(
-    lifecycle: RecipeOperationService | None,
+    lifecycle: RecipeRunStatusReader | None,
     phase: RunSwitchPhase,
     child: object,
 ) -> str | None:
@@ -79,7 +81,7 @@ def _established_stop_effect(
 
 
 def _start_still_progressing(
-    lifecycle: RecipeOperationService | None,
+    lifecycle: RecipeRunStatusReader | None,
     phase: RunSwitchPhase,
     child: object,
 ) -> bool:

@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import or_, select, true
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.contracts import validate_result_for_operation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
@@ -17,30 +18,35 @@ from vonk_agent_protocol.state_machines import (
     ReservationState,
     RunState,
 )
-
-from ..agent_jobs.predicates import _JsonFlagIsTrue
-from ..jobs import states as job_states
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    retire_as_unknown,
+from vonk_control.agent_jobs.predicates import _JsonFlagIsTrue
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.logging import redact_text
+from vonk_control.models.execution import (
+    RecipeInstallation,
+    RecipeRun,
+    ResourceReservation,
 )
-from ..logging import redact_text
-from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..persisted_waits import schedule_wait
-from ..recipe_routes.shared import RecipeRouteError
-from ..stored.json_values import read_row_column
-from ..strict_json import serialize_json_value
-from .errors import RecipeOperationConflict
-from .intent import _intent_is_current, _job_workload_intent, _shared_workload_intent
-from .progress import (
-    _parent_identity,
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.recipe_operations.intent import (
+    _intent_is_current,
+    _job_workload_intent,
+    _shared_workload_intent,
 )
-from .results import _recorded_result_document, _validated_result
+from vonk_control.recipe_operations.progress import _parent_identity
+from vonk_control.recipe_operations.results import (
+    _recorded_result_document,
+    _validated_result,
+)
+from vonk_control.recipe_routes.shared import RecipeRouteError
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 #: A run no newer load can take over: its Stop is cleanup whatever intent now
 #: owns its Sparks.
@@ -293,14 +299,15 @@ class RetirementMixin:
                         reservation.state = ReservationState.RELEASED
                         reservation.released_at = service._clock()
             completed = (
-                owner is None
-                and existing is not None
-                or owner is not None
-                and owner.state
-                == (
-                    RunState.STOPPED
-                    if kind == WireAgentOperation.RECIPE_STOP.value
-                    else InstallationState.UNINSTALLED
+                (owner is None and existing is not None)
+                or (
+                    owner is not None
+                    and owner.state
+                    == (
+                        RunState.STOPPED
+                        if kind == WireAgentOperation.RECIPE_STOP.value
+                        else InstallationState.UNINSTALLED
+                    )
                 )
             ) and session.scalar(
                 select(ResourceReservation.id)

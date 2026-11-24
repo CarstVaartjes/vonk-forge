@@ -15,9 +15,10 @@ from typing import Any, Final, Literal
 
 from starlette.responses import Response
 from starlette.types import Scope
-from vonk_agent_protocol.outcome import InvalidRequestError, SecurityRefusalError
 
-from .cursor_contract import MAX_CURSOR_LENGTH
+from vonk_agent_protocol.outcome import InvalidRequestError, SecurityRefusalError
+from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
 
 # The one definition of the administrator role. Browser sessions and their
 # response contract both refer to it, so the set cannot drift.
@@ -168,7 +169,7 @@ class AgentSource:
     management_address: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.identity, AgentIdentity):
+        if not isinstance(self.identity, AgentIdentity):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             raise AuthError("invalid proxy-observed agent source")
         try:
             address = ipaddress.ip_address(self.management_address)
@@ -257,8 +258,6 @@ class TrustedProxyAgentIdentityMiddleware:
         if callable(proxy_auth):
             # Ordinary admin reads do not depend on the agent ingress secret.
             if supplied_proxy_auth:
-                from .capabilities import CapabilityUnavailableError
-
                 try:
                     proxy_auth = await asyncio.to_thread(proxy_auth)
                 except CapabilityUnavailableError as error:
@@ -434,7 +433,7 @@ class CursorCodec:
 
     def decode(
         self,
-        token: str,
+        token: object,
         *,
         resource: str,
         order: str,

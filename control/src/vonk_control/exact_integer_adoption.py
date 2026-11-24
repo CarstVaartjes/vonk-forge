@@ -22,9 +22,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.schema import CreateTable, DropTable
 
-from .exact_integer_storage import DecimalIntegerToken
-from .settings import DATABASE_WAIT_BUDGETS
+from vonk_control import (
+    models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+)
+from vonk_control.exact_integer_storage import DecimalIntegerAtMost, DecimalIntegerToken
+from vonk_control.model_primitives import Base
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
 _COLUMNS = {
     "catalog_document_revisions": ("download_bytes", "installed_bytes"),
@@ -42,10 +47,6 @@ _OWNED_CHECKS = {
 def _validate_rows(
     connection: Connection, table_name: str, columns: tuple[str, ...]
 ) -> None:
-    from . import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from .model_primitives import Base
 
     table = Base.metadata.tables[table_name]
     predicates = []
@@ -59,14 +60,13 @@ def _validate_rows(
     if table_name == "model_cache_sets":
         # Before any mutation, the old owning values must also obey their
         # cross-field bound. This validates exact token magnitude, not affinity.
-        from .exact_integer_storage import DecimalIntegerAtMost
 
         order = DecimalIntegerAtMost(
             literal_column("verified_bytes"), literal_column("expected_bytes")
         )
         predicates.append(f"NOT ({order.compile(dialect=connection.dialect)})")
     invalid = connection.exec_driver_sql(
-        f"SELECT 1 FROM {table_name} WHERE {' OR '.join(predicates)} LIMIT 1"
+        f"SELECT 1 FROM {table_name} WHERE {' OR '.join(predicates)} LIMIT 1"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
     ).first()
     if invalid is not None:
         raise ValueError(f"exact integer adoption refused invalid rows in {table_name}")
@@ -76,12 +76,6 @@ def _postgres_owned_checks_current(
     connection: Connection, table_name: str, names: tuple[str, ...]
 ) -> bool:
     """Compare only owning CHECKs using the server's exact native rendering."""
-    from sqlalchemy.schema import CreateTable, DropTable
-
-    from . import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from .model_primitives import Base
 
     declared = Base.metadata.tables[table_name]
     temporary = Table(
@@ -106,14 +100,13 @@ def _postgres_owned_checks_current(
             check["name"]: check["sqltext"]
             for check in inspect(connection).get_check_constraints(table_name)
         }
-        validated = {
-            name: value
-            for name, value in connection.exec_driver_sql(
+        validated = dict(
+            connection.exec_driver_sql(
                 "SELECT conname,convalidated FROM pg_constraint "
                 "WHERE conrelid=to_regclass(%s) AND contype='c'",
                 (table_name,),
-            )
-        }
+            ).all()
+        )
         return all(
             validated.get(name) is True and actual.get(name) == expression
             for name, expression in expected.items()
@@ -123,10 +116,6 @@ def _postgres_owned_checks_current(
 
 
 def _pending_adoption(connection: Connection) -> dict[str, tuple[str, ...]]:
-    from . import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from .model_primitives import Base
 
     inspector = inspect(connection)
     tables = set(inspector.get_table_names())
@@ -154,7 +143,9 @@ def _pending_adoption(connection: Connection) -> dict[str, tuple[str, ...]]:
         if connection.dialect.name == "sqlite":
             # SQLite preserves the declared expression spelling. Compare only
             # our owned canonical expressions, never normalize unknown checks.
-            normalize = lambda value: str(value).strip()
+            def normalize(value):
+                return str(value).strip()
+
             for constraint in Base.metadata.tables[table_name].constraints:
                 if (
                     isinstance(constraint, CheckConstraint)
@@ -193,7 +184,7 @@ def _sqlite_extensions(
     # declaration; unsupported column collation must not silently disappear.
     for check in inspect(connection).get_check_constraints(table_name):
         expression = check["sqltext"]
-        if isinstance(expression, str):
+        if isinstance(expression, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # reflected check constraints differ by dialect
             table_sql = table_sql.replace(expression, "")
     if re.search(r"\bCOLLATE\b", table_sql, flags=re.IGNORECASE):
         raise ValueError(
@@ -316,10 +307,6 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
     The caller owns the transaction. SQLite callers with foreign-key
     enforcement must use reconcile_exact_integer_schema before service use.
     """
-    from . import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from .model_primitives import Base
 
     pending = _pending_adoption(connection)
     if not pending:
@@ -356,7 +343,7 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
                 if check["name"] in _OWNED_CHECKS[table_name]:
                     continue
                 expression = check["sqltext"]
-                if not isinstance(expression, str):
+                if not isinstance(expression, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # reflected check constraints differ by dialect
                     raise TypeError(f"unreadable check constraint in {table_name}")
                 if any(
                     re.search(
@@ -399,7 +386,7 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
                         continue  # Its validated token is already the owner encoding.
                     original_type = old_type.compile(dialect=connection.dialect)
                     lossy = connection.exec_driver_sql(
-                        f"SELECT 1 FROM {table_name} WHERE {name} IS NOT NULL "
+                        f"SELECT 1 FROM {table_name} WHERE {name} IS NOT NULL "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                         f"AND ({name}::text)::{original_type} <> {name} LIMIT 1"
                     ).first()
                     if lossy is not None:

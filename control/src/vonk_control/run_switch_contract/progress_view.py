@@ -5,31 +5,31 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-from pydantic import BaseModel
-from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.wire_model import OperationProgress
+from pydantic import BaseModel, ValidationError
 
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    retire_as_unknown,
-)
-from ..lifecycle.run_switch import (
-    set_member_state,
-)
-from ..operations.progress import project_progress
-from ..stall_window import last_progress_at, stall_deadline
-from .evidence import RunSwitchPhase
-from .observation import (
-    RunSwitchObservedEvidence,
-)
-from .operations import RunSwitchOperationResult
-from .plans import RunSwitchPlan
-from .progress import (
+from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.lifecycle.run_switch import set_member_state
+from vonk_control.operations.progress import project_progress, sample_progress
+from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.observation import RunSwitchObservedEvidence
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress import (
     RunSwitchMemberProgress,
     RunSwitchMemberReceipt,
     RunSwitchProgress,
 )
+from vonk_control.run_switch_contract.vocabulary import RunSwitchProgressState
+from vonk_control.run_switch_operations.constants import _PROGRESS_STATE_ADAPTER
+from vonk_control.run_switch_operations.image_receipts import (
+    _plan_target_node_ids,
+    _planned_transfer_bytes,
+    _planned_transfer_parts,
+)
+from vonk_control.stall_window import last_progress_at, stall_deadline
 
 #: Preparation, transfer and verification end after this long without progress.
 RECOVERY_STALL_WINDOW = timedelta(hours=1)
@@ -76,11 +76,6 @@ def _merge_measured_evidence(
     now: datetime | None = None,
 ) -> None:
     """Merge typed measured observations while retaining exact phase ownership."""
-    from ..run_switch_operations.image_receipts import (
-        _plan_target_node_ids,
-        _planned_transfer_parts,
-    )
-    from ..run_switch_operations.result_helpers import _observe_progress
 
     if isinstance(evidence, RunSwitchObservedEvidence):
         payload = evidence
@@ -176,10 +171,6 @@ def _merge_measured_evidence(
 def _complete_phase_progress(
     progress: RunSwitchOperationResult, plan: RunSwitchPlan, phase: RunSwitchPhase
 ) -> None:
-    from ..run_switch_operations.image_receipts import (
-        _planned_transfer_bytes,
-        _planned_transfer_parts,
-    )
 
     progress.retry_attempt = None
     if phase.kind != "transfer":
@@ -217,7 +208,6 @@ def _complete_phase_progress(
 def _complete_operation_progress(
     plan: RunSwitchPlan, progress: RunSwitchOperationResult
 ) -> RunSwitchOperationResult:
-    from ..run_switch_operations.image_receipts import _planned_transfer_bytes
 
     total, member_totals = _planned_transfer_bytes(plan)
     if total is not None:
@@ -253,12 +243,6 @@ def _progress_view(
     node_ids: Sequence[str] | None = None,
 ) -> RunSwitchProgress:
     """Project durable typed progress without advancing the operation."""
-    from ..run_switch_operations.image_receipts import (
-        _plan_target_node_ids,
-        _planned_transfer_bytes,
-    )
-    from ..run_switch_operations.ownership import _UNKNOWN_MEMBER_NODE_ID
-    from ..run_switch_operations.result_helpers import _progress_operation_state
 
     node_ids = (
         list(_plan_target_node_ids(plan))
@@ -315,7 +299,8 @@ def _progress_view(
                 else "running"
                 if state == "running" and node_id in current_nodes
                 else "pending"
-                if state == "queued" or state == "running" and raw.completed_phases
+                if state == LifecycleState.QUEUED
+                or (state == LifecycleState.RUNNING and raw.completed_phases)
                 else "unknown"
             )
         error = item.error if item is not None else None
@@ -381,3 +366,20 @@ def _progress_view(
         subphase=subphase,
         members=members,
     )
+
+
+def _progress_operation_state(value: object) -> RunSwitchProgressState:
+    try:
+        return _PROGRESS_STATE_ADAPTER.validate_python(value, strict=True)
+    except ValidationError:
+        return OutcomeKind.UNKNOWN
+
+
+def _observe_progress(
+    previous: OperationProgress | None, current: OperationProgress, now: datetime
+) -> OperationProgress:
+    """Sample the canonical operation meter without a JSON round trip."""
+    return sample_progress(previous, current, now)
+
+
+_UNKNOWN_MEMBER_NODE_ID = "spk_" + "0" * 32

@@ -18,8 +18,8 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field
 
-from .host_tuning import FreeMemory, MemoryBytes
-from .wire_model import WireEnum, WireModel
+from vonk_agent_protocol.host_tuning import FreeMemory, MemoryBytes
+from vonk_agent_protocol.wire_model import WireEnum, WireModel
 
 
 class PageCacheDropKind(WireEnum):

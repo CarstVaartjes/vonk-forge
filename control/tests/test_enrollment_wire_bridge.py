@@ -4,17 +4,23 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
+
+from tests.wire_probes import prebuilt_probe
+from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, ClaimRequest
 from vonk_agent_protocol.enrollment import (
+    ActivateRequest,
     EnrollmentBootstrapResponse,
     EnrollmentSubmitRequest,
     IssuedCertificateResponse,
+    RenewRequest,
 )
-
-from tests.wire_probes import prebuilt_probe
+from vonk_control.models.fleet import AgentCertificate
 
 from .agent_api_support import (
     NODE_A,
@@ -34,7 +40,6 @@ def test_rust_claim_producer_uses_the_controller_request_contract(
     agent_system,
     enrollment_wire_probe: Path,
 ) -> None:
-    from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, ClaimRequest
 
     client, _services, _sessions, _clock = agent_system
     raw = _roundtrip(
@@ -106,9 +111,6 @@ def _roundtrip(probe: Path, content: bytes, *arguments: str) -> bytes:
 def test_controller_bootstrap_uses_the_setup_parser(
     agent_system, bootstrap_wire_probe: Path, private_address: bool
 ) -> None:
-    from dataclasses import replace
-
-    from pydantic import ValidationError
 
     client, services, _, _ = agent_system
     object.__setattr__(
@@ -175,7 +177,6 @@ def test_rust_enrollment_request_and_controller_issued_response(
 def test_controller_renewal_uses_the_same_issued_response(
     agent_system, enrollment_wire_probe: Path
 ) -> None:
-    from vonk_control.models.fleet import AgentCertificate
 
     client, services, _, _ = agent_system
     with services.enrollment._sessions.begin() as session:
@@ -201,7 +202,6 @@ def test_certificate_rotation_requires_explicit_node_identity(
     path: str,
     missing: bool,
 ) -> None:
-    from vonk_agent_protocol.enrollment import ActivateRequest, RenewRequest
 
     client, _services, _sessions, _clock = agent_system
     body: dict[str, object] = (
@@ -223,7 +223,6 @@ def test_certificate_rotation_requires_explicit_node_identity(
 
 @pytest.mark.parametrize("value", [True, 1.0, "1"])
 def test_issued_generation_rejects_coercible_values(value: object) -> None:
-    from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
         IssuedCertificateResponse.model_validate(

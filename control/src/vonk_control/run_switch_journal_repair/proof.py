@@ -8,29 +8,50 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
-from ..content_identity import same_image
-from ..jobs.documents import RecipeInstallParent
-from ..models.fleet import AgentCertificate, FleetProfileApplication
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.progress import stored_progress
-from ..recipe_operations.progress import current_recipe_progress_attribution
-from ..run_switch_contract.journal import (
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.content_identity import same_image
+from vonk_control.fleet_profiles.continuing_effects import (
+    _adopted_application_scope,
+    _application_is_current_selection,
+)
+from vonk_control.fleet_profiles.persistence import _stored_progress
+from vonk_control.jobs.documents import RecipeInstallParent
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.fleet import AgentCertificate, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.progress import stored_progress
+from vonk_control.recipe_operations.progress import current_recipe_progress_attribution
+from vonk_control.run_switch_contract.journal import (
     JournalRepairPurpose,
     NativeProgressWitness,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import (
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
     RunSwitchRuntimeInstallResult,
     RunSwitchRuntimePlanResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchVerifyResult,
 )
-from ..stored.json_values import read_row_column
+from vonk_control.run_switch_operations.artifact_validation import (
+    _validate_artifact_execution,
+)
+from vonk_control.run_switch_operations.contracts import ScopeIntentStatus
+from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.image_receipts import (
+    _plan_target_node_ids,
+    _planned_transfer_parts,
+)
+from vonk_control.run_switch_operations.observation_helpers import _phase_request_key
+from vonk_control.run_switch_operations.planning_helpers import (
+    _digest,
+    _run_switch_payload,
+    _scope_intent_status,
+)
+from vonk_control.stored.rows import read_row_column
 
 
 def _prove(
@@ -41,18 +62,6 @@ def _prove(
     purpose: JournalRepairPurpose,
 ) -> list[NativeProgressWitness] | None:
     # Import the sole owner predicates, not a second plan/authority interpreter.
-    from ..fleet_profiles.persistence import _stored_progress
-    from ..fleet_profiles.service import FleetProfileService
-    from ..lifecycle.evidence import Residue
-    from ..run_switch_operations.artifact_validation import _validate_artifact_execution
-    from ..run_switch_operations.executor import RecipeLifecyclePhaseExecutor
-    from ..run_switch_operations.image_receipts import (
-        _plan_target_node_ids,
-        _planned_transfer_parts,
-    )
-    from ..run_switch_operations.observation_helpers import _phase_request_key
-    from ..run_switch_operations.planning_helpers import _digest, _run_switch_payload
-    from ..run_switch_operations.service import RunSwitchOperationService
 
     parent = _run_switch_payload(job)
     plan = parent.plan if parent is not None else None
@@ -78,8 +87,7 @@ def _prove(
         or progress.item_index != 0
         or (
             purpose == JournalRepairPurpose.MEASUREMENT
-            and RunSwitchOperationService._scope_intent_status(session, job)
-            != "current"
+            and _scope_intent_status(session, job) != ScopeIntentStatus.CURRENT
         )
     ):
         return None
@@ -159,12 +167,12 @@ def _prove(
         application_progress = _stored_progress(application)
         if isinstance(application_progress, Residue):
             return None
-        adopted = FleetProfileService._adopted_application_scope(session, application)
+        adopted = _adopted_application_scope(session, application)
         journal = application_progress.switch_adapter
         if (
             (
                 purpose == JournalRepairPurpose.MEASUREMENT
-                and not FleetProfileService._application_is_current_selection(
+                and not _application_is_current_selection(
                     session, application, application_progress
                 )
             )
@@ -231,7 +239,7 @@ def _prove(
     if (
         runtime_plan is None
         or runtime_plan.installation_id != child_parent.owner_id
-        or runtime_plan.mapping_id is None
+        or runtime_plan.mapping_id is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
     ):
         return None
     RecipeLifecyclePhaseExecutor._bound_installation(
@@ -259,7 +267,7 @@ def _prove(
             operation.authority_revision != child.authority_revision
             or operation.workload_intent_ordinal != parent.workload_intent_ordinal
             or operation.payload_digest != _digest(operation.payload)
-            or (operation.current_attempt > 0 and attempt is None)
+            or (operation.current_attempt > 0 and attempt is None)  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         ):
             return None
     # Measurement repair requires every current sample field/freshness.
@@ -273,7 +281,7 @@ def _prove(
         return None
     witnesses = []
     for operation, attempt in rows:
-        if attempt is None:
+        if attempt is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
             continue
         sample = stored_progress(attempt)
         # Without a retained parent attempt witness, a later native attempt
@@ -300,4 +308,4 @@ def _prove(
                 sample=sample,
             )
         )
-    return witnesses if witnesses else None
+    return witnesses or None

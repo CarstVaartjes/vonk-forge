@@ -18,10 +18,10 @@ from typing import Literal
 from sqlalchemy import delete, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from .auth import ADMIN_ROLE, Actor
-from .db.connections import require_durable_commit
-from .models.fleet import LoginSession, User
-from .passwords import hash_password, verify_password
+from vonk_control.auth import ADMIN_ROLE, Actor
+from vonk_control.db.connections import require_durable_commit
+from vonk_control.models.fleet import LoginSession, User
+from vonk_control.passwords import hash_password, verify_password
 
 _ADMIN_SUBJECT = "admin"
 _ADMIN_ROLE = ADMIN_ROLE
@@ -89,11 +89,11 @@ class LoginRateLimiter:
     def __init__(
         self,
         *,
-        token_signing_key: bytes,
+        token_signing_key: object,
         clock: Callable[[], float] = time.monotonic,
-        maximum_tracked_subjects: int = _MAX_TRACKED_SUBJECTS,
-        maximum_subject_failures: int = _MAX_SUBJECT_FAILURES,
-        maximum_global_failures: int = _MAX_GLOBAL_FAILURES,
+        maximum_tracked_subjects: object = _MAX_TRACKED_SUBJECTS,
+        maximum_subject_failures: object = _MAX_SUBJECT_FAILURES,
+        maximum_global_failures: object = _MAX_GLOBAL_FAILURES,
         window_seconds: float = _LOGIN_WINDOW_SECONDS,
     ) -> None:
         if not isinstance(token_signing_key, bytes) or not token_signing_key:
@@ -149,7 +149,7 @@ class LoginRateLimiter:
             self._attempts[attempt_id] = state
             return LoginAttempt(self._owner, attempt_id)
 
-    def fail(self, attempt: LoginAttempt) -> None:
+    def fail(self, attempt: object) -> None:
         if not isinstance(attempt, LoginAttempt) or attempt._owner is not self._owner:
             raise ValueError("login attempt is invalid")
         now = self._clock()
@@ -159,7 +159,7 @@ class LoginRateLimiter:
             if state is not None:
                 state.failed = True
 
-    def succeed(self, attempt: LoginAttempt) -> None:
+    def succeed(self, attempt: object) -> None:
         if not isinstance(attempt, LoginAttempt) or attempt._owner is not self._owner:
             raise ValueError("login attempt is invalid")
         now = self._clock()
@@ -182,7 +182,7 @@ class LoginRateLimiter:
             else:
                 del self._subjects[state.identifier]
 
-    def _identifier(self, subject: str) -> str:
+    def _identifier(self, subject: object) -> str:
         if not isinstance(subject, str):
             return ""
         return hmac_new(
@@ -209,9 +209,9 @@ class BrowserAuthService:
         self,
         sessions: sessionmaker[Session],
         *,
-        token_signing_key: bytes,
-        clock: Callable[[], datetime],
-        token_source: Callable[[], str] | None = None,
+        token_signing_key: object,
+        clock: Callable[[], object],
+        token_source: Callable[[], object] | None = None,
         rate_limiter: LoginRateLimiter | None = None,
     ) -> None:
         if not isinstance(token_signing_key, bytes) or not token_signing_key:
@@ -227,7 +227,7 @@ class BrowserAuthService:
     def login(self, subject: str, password: str) -> IssuedBrowserSession:
         attempt = self._rate_limiter.reserve(subject)
         if attempt is None:
-            raise BrowserAuthenticationThrottledError()
+            raise BrowserAuthenticationThrottledError
         now = self._now()
         issued: IssuedBrowserSession | None = None
         authenticated = False
@@ -270,7 +270,7 @@ class BrowserAuthService:
             raise
         if not authenticated:
             self._rate_limiter.fail(attempt)
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         self._rate_limiter.succeed(attempt)
         if issued is None:
             raise RuntimeError("authenticated login did not issue a session")
@@ -304,7 +304,7 @@ class BrowserAuthService:
             .where(LoginSession.digest == digest)
         ).one_or_none()
         if result is None:
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         row, user = result
         if (
             row.revoked_at is not None
@@ -313,7 +313,7 @@ class BrowserAuthService:
             or user.subject != _ADMIN_SUBJECT
             or user.role != _ADMIN_ROLE
         ):
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         return row, user
 
     def _cleanup_expired(self, db: Session, now: datetime) -> None:
@@ -332,9 +332,9 @@ class BrowserAuthService:
             raise RuntimeError("token source returned an invalid token")
         return token
 
-    def _submitted_digest(self, token: str) -> str:
+    def _submitted_digest(self, token: object) -> str:
         if not isinstance(token, str) or _OPAQUE_TOKEN.fullmatch(token) is None:
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         return _digest(token)
 
     def _now(self) -> datetime:
@@ -389,7 +389,7 @@ def bootstrap_administrator(
             )
             return BootstrapResult("created")
         if len(users) != 1:
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         user = users[0]
         if (
             user.subject != _ADMIN_SUBJECT
@@ -397,5 +397,5 @@ def bootstrap_administrator(
             or user.password_verifier is None
             or not verify_password(user.password_verifier, password).valid
         ):
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         return BootstrapResult("unchanged")

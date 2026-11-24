@@ -3,7 +3,7 @@
 import os
 import subprocess
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .test_profile_jobrun_host_grant import _selected_profile_grant
 from .wire_probes import prebuilt_probe

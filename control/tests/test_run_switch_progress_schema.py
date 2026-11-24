@@ -7,8 +7,12 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_control.fleet_profile_contract.switch_state import (
+    FleetProfileSwitchAdapterResult,
+)
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
@@ -24,6 +28,7 @@ from .run_switch_operations_support import (
     _request,
     _service,
 )
+from .test_run_switch_bookkeeping import _accepted
 
 
 def test_writer_normalizes_a_mutated_measurement_before_persistence() -> None:
@@ -93,7 +98,8 @@ def test_every_phase_writer_round_trips_and_recovers_after_measurement_damage(
         if not injected and current.current_phase == damage_phase:
             with sessions.begin() as session:
                 row = session.get(Job, operation.operation_id)
-                assert row is not None and row.result is not None
+                assert row is not None
+                assert row.result is not None
                 row.result = {
                     **row.result,
                     "completed_bytes": 2,
@@ -125,9 +131,6 @@ def test_production_queue_receipts_share_the_persisted_progress_contract() -> No
     by the API; the final verification belongs to a succeeding Stop at index 2.
     This fixture does not invent the unavailable raw failed document.
     """
-    from vonk_control.fleet_profile_contract.switch_state import (
-        FleetProfileSwitchAdapterResult,
-    )
 
     result = FleetProfileSwitchAdapterResult.model_validate_json(
         (
@@ -148,12 +151,12 @@ def test_replan_replaces_measurements_owned_by_the_previous_transfer_budget(
     tmp_path: Path,
 ) -> None:
     """Catches a refreshed zero-copy plan retaining the old byte high-water mark."""
-    from .test_run_switch_bookkeeping import _accepted
 
     accepted = _accepted(tmp_path)
     with accepted.sessions.begin() as session:
         row = session.get(Job, accepted.operation.operation_id)
-        assert row is not None and row.result is not None
+        assert row is not None
+        assert row.result is not None
         progress = _read_progress(row.result)
         progress.completed_bytes = 1024
         progress.total_bytes = 2048
@@ -171,20 +174,22 @@ def test_replan_replaces_measurements_owned_by_the_previous_transfer_budget(
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_unreadable_checkpoint_replans_from_current_observation(tmp_path: Path) -> None:
     """Catches unreadable checkpoints ending the accepted request instead of replanning."""
-    from .test_run_switch_bookkeeping import _accepted
 
     accepted = _accepted(tmp_path)
     with accepted.sessions.begin() as session:
         row = session.get(Job, accepted.operation.operation_id)
-        assert row is not None and row.result is not None
+        assert row is not None
+        assert row.result is not None
         row.result = ["unreadable checkpoint"]
     accepted.service._advance(accepted.operation.operation_id)
     recovered = accepted.service.get(accepted.operation.operation_id)
-    assert recovered.result is not None and recovered.result.force_replan
+    assert recovered.result is not None
+    assert recovered.result.force_replan
     assert recovered.state != LifecycleState.FAILED
     assert recovered.next_attempt_at is not None
     accepted.service._advance(accepted.operation.operation_id)
     replanned = accepted.service.get(accepted.operation.operation_id)
-    assert replanned.result is not None and not replanned.result.force_replan
+    assert replanned.result is not None
+    assert not replanned.result.force_replan
     assert replanned.request_key == accepted.operation.request_key
     assert replanned.state == LifecycleState.QUEUED

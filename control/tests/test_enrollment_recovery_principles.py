@@ -2,22 +2,36 @@
 
 import json
 import uuid
+from contextlib import contextmanager
 from dataclasses import replace
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
+
+from vonk_agent_protocol.enrollment import (
+    ActivateRequest,
+    IssuedCertificateResponse,
+)
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     SecurityRefusalReason,
 )
+from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
     CertificateRotationState,
     EnrollmentGrantState,
     EnrollmentRecordState,
 )
+from vonk_control.api.application import create_app
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
+from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.enrollment.contract import EnrollmentGrant
+from vonk_control.enrollment.responses import _issued_response
+from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.enrollment.types import EnrollmentDenied
+from vonk_control.jobs.queue import JobService
 from vonk_control.models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -26,8 +40,26 @@ from vonk_control.models.fleet import (
     AgentIssuedCertificateRevocation,
 )
 from vonk_control.pki import IssuedCertificate
+from vonk_control.step_ca import StepCAIssuancePending
+from vonk_control.worker.loop import Worker
 
-from .test_enrollment import NODE_ID, OTHER_NODE_ID, csr, enroll, evidence
+from .agent_api_support import (
+    NODE_A,
+    CurrentAgentClient,
+    Jobs,
+    _csr_for,
+    agent_headers,
+    make_agent_system,
+)
+from .ca_material import NOW
+from .test_enrollment import (
+    NODE_ID,
+    OTHER_NODE_ID,
+    RecordingAuthority,
+    csr,
+    enroll,
+    evidence,
+)
 from .test_enrollment import service as service  # noqa: PLC0414 -- fixture export
 
 
@@ -36,11 +68,6 @@ def test_accepted_generation_round_trips_without_client_or_storage_narrowing(
     service, generation
 ):
     """Catches int32 response limits and float-rounded relational projections."""
-    from vonk_agent_protocol.enrollment import (
-        ActivateRequest,
-        IssuedCertificateResponse,
-    )
-    from vonk_control.enrollment.responses import _issued_response
 
     enrollment, sessions, _, authority = service
     source = enroll(enrollment)
@@ -96,10 +123,14 @@ def test_unverified_identity_never_has_a_persisted_effect(service, monkeypatch):
         return replace(issued, node_id=OTHER_NODE_ID)
 
     monkeypatch.setattr(authority, "renew_node", wrong_identity)
+    failure: RuntimeError | None = None
     try:
         enrollment.renew(NODE_ID, source.serial, csr())
     except RuntimeError as error:
-        assert calls, f"unexpected failure before provider effect: {error}"
+        failure = error
+    assert failure is None or calls, (
+        f"unexpected failure before provider effect: {failure}"
+    )
     with sessions() as session:
         assert session.get(AgentCertificate, calls[0]) is None
         assert session.get(AgentCertificate, source.serial).revoked_at is None
@@ -164,7 +195,6 @@ def test_exhausted_rotation_releases_gate_and_reconciles_late_effect(
         accepted.append(ended.provider_request)
         material = ended.csr_pem
     # A late CA effect belongs only to the ended binding.
-    from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 
     binding = CertificateIssuanceBinding.model_validate_json(json.dumps(accepted[0]))
     original_renew(NODE_ID, material.encode("ascii"), clock.now, request=binding)
@@ -196,9 +226,6 @@ def test_revocation_confirmation_recovers_through_worker_callback(service):
     # Retirement is already complete; repeated requests do not reopen a gate.
     enrollment.revoke_node(NODE_ID, "admin")
     authority.revoke_failures.clear()
-    from vonk_control.coordinator_failures import CoordinatorFailures
-    from vonk_control.jobs.queue import JobService
-    from vonk_control.worker.loop import Worker
 
     worker = Worker(
         JobService(sessions, clock=enrollment._clock),
@@ -318,9 +345,6 @@ def test_grant_admission_sql_conflicts_end_without_poisoning_request_identity(
     service, monkeypatch
 ):
     """Catches an exhausted admission keeping a gate or minting unrelated grants."""
-    from contextlib import contextmanager
-
-    from sqlalchemy.exc import OperationalError
 
     enrollment, sessions, _, authority = service
     transaction = enrollment._transaction
@@ -391,11 +415,6 @@ def test_damage_during_ca_observation_repairs_both_committed_projections(
 
 def test_busy_ca_observation_heals_on_the_next_attempt(service):
     """Catches a busy CA journal stranding an accepted enrollment."""
-    from vonk_control.enrollment.service import EnrollmentService
-    from vonk_control.step_ca import StepCAIssuancePending
-
-    from .ca_material import NOW
-    from .test_enrollment import RecordingAuthority
 
     _, sessions, _, _ = service
 
@@ -424,8 +443,6 @@ def test_controller_restart_after_ca_outage_serves_renewal_and_fresh_rotation(
     service, monkeypatch
 ):
     """Catches a standing renewal gate after an unavailable CA and lost process."""
-    from vonk_agent_protocol.outcome import UnknownError
-    from vonk_control.enrollment.service import EnrollmentService
 
     enrollment, sessions, clock, authority = service
     source = enroll(enrollment)
@@ -457,19 +474,6 @@ def test_authenticated_renewal_route_recovers_across_controller_replacement(
     tmp_path, monkeypatch
 ):
     """Catches persistent HTTP rejection rather than merely provider recovery."""
-    from vonk_agent_protocol.enrollment import IssuedCertificateResponse
-    from vonk_control.api.application import create_app
-    from vonk_control.enrollment.service import EnrollmentService
-
-    from .agent_api_support import (
-        NODE_A,
-        CurrentAgentClient,
-        Jobs,
-        _csr_for,
-        agent_headers,
-        make_agent_system,
-    )
-    from .test_enrollment import RecordingAuthority
 
     client, services, codec, clock = make_agent_system(
         tmp_path, authority=RecordingAuthority()

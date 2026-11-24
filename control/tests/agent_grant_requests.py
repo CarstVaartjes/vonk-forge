@@ -13,8 +13,8 @@ import hashlib
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction, HostRuntimeRequest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
@@ -22,6 +22,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStartPayload,
     RecipeStopPayload,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.recipe_operations.stop_payloads import (
     stop_payload_from_job_run,
     stop_payload_from_start,
@@ -34,7 +35,7 @@ JOB_RUN_GRANT_REQUESTS = "job-run-host-runtime-grant-requests-v1.json"
 GRANT_SECONDS = 10
 
 
-def vector(name: str) -> dict:
+def vector(name: str) -> dict[str, Any]:
     return json.loads((VECTORS / name).read_text(encoding="utf-8"))
 
 

@@ -13,8 +13,7 @@ from vonk_agent_protocol.installer_setup import (
     valid_required_value,
     validate_environment_name,
 )
-
-from .filesystem import read_member
+from vonk_nas_setup.filesystem import read_member
 
 #: The one owner of the profile-selection name in `.env` and in the Compose file.
 SELECTION_ENV = "COMPOSE_PROFILES"

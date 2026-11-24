@@ -181,14 +181,17 @@ def violations(root: Path, files: list[str] | None = None) -> list[str]:
                         continue
                     if isinstance(collection, (set, tuple, list, dict)) and (
                         set(collection) == owned
-                        or bool(set(collection) & owned)
-                        and re.search(
-                            r"(?i)\b\w*float\w*\s*=",
-                            text[
-                                text.rfind("\n", 0, match.start()) + 1 : match.start()
-                            ],
+                        or (
+                            bool(set(collection) & owned)
+                            and re.search(
+                                r"(?i)\b\w*float\w*\s*=",
+                                text[
+                                    text.rfind("\n", 0, match.start())
+                                    + 1 : match.start()
+                                ],
+                            )
+                            is not None
                         )
-                        is not None
                     ):
                         matches.append((match.start(), match.group()))
             elif value.family == Family.MIRROR_INPUT and (

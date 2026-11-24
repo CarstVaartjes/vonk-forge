@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from ..cli_states_generated import (
+from cluster_profiles.cli_states_generated import (
     PHASE_WORDS,
     WAIT_DEPENDENCY_PENDING,
     WAIT_SPARK_BUSY,

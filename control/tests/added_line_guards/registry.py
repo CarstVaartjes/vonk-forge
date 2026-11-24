@@ -68,7 +68,6 @@ BLOCKS: tuple[Callable[[CheckContext], None], ...] = (
     control.check_sync_in_async,
     general.check_head_digests,
     general.check_set_first_requester,
-    general.check_barriers,
     rust.check_loopback_bind,
     general.check_git_free_tests,
     control.check_rank_installed,

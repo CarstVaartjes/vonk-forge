@@ -18,17 +18,16 @@ from typing import TYPE_CHECKING, Protocol, cast
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from ..models.cache import ModelCacheOperation
-from .catalog_helpers import _datetime
-from .contract import (
+from vonk_control.model_cache.catalog_helpers import _datetime
+from vonk_control.model_cache.contract import (
     ModelCacheDownloadPayload,
     ModelCacheOperationPayload,
 )
-from .errors import ProviderNotAsked
+from vonk_control.model_cache.errors import ProviderNotAsked
+from vonk_control.models.cache import ModelCacheOperation
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class _ProviderArtifact(Protocol):

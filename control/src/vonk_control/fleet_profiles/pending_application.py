@@ -11,65 +11,75 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
-
-from ..admission_locking import ConstraintReplay, admitting
-from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract.applications import (
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileIntendedConfiguration,
 )
-from ..fleet_profile_contract.definitions import FleetProfileScope
-from ..fleet_profile_contract.review import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileScope
+from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfilePreview,
 )
-from ..fleet_profile_contract.vocabulary import FleetProfileOperationKind
-from ..lifecycle.evidence import Residue
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..lifecycle.types import State as _LifecycleState
-from ..models.fleet import FleetProfile, FleetProfileApplication
-from ..operations.blockers import OperationBlocker, make_blocker
-from ..persisted_waits import schedule_wait
-from ..settings import PROFILE_STALL_WINDOW_SECONDS, STORAGE_ADMISSION_RETRY_SECONDS
-from ..stall_window import Verdict, progress_verdict
-from ..storage_demands import (
-    STORAGE_EVICTION_TIMED_OUT,
-    STORAGE_INSUFFICIENT,
-    StorageRelief,
-)
-from .assessment_support import (
+from vonk_control.fleet_profile_contract.vocabulary import FleetProfileOperationKind
+from vonk_control.fleet_profiles.assessment_support import (
     _preview_blockers,
     _progress_with_blockers,
     _relief_blocker,
     _storage_wait_of_preview,
 )
-from .contracts import (
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileInvalid,
     FleetProfileStalePlanConflict,
     _SelectedProfileSnapshot,
 )
-from .dependencies import _INSTALLATION_POLICY_ADAPTER, _LOGGER, _STORAGE_CODES
-from .persistence import (
+from vonk_control.fleet_profiles.dependencies import (
+    _INSTALLATION_POLICY_ADAPTER,
+    _LOGGER,
+    _STORAGE_CODES,
+)
+from vonk_control.fleet_profiles.persistence import (
+    _intended_profile,
     _next_profile_acceptance_time,
     _owns_pending_admission,
     _persisted_profile_progress,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _digest,
     _profile_document,
 )
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.models.fleet import FleetProfile, FleetProfileApplication
+from vonk_control.operations.blockers import OperationBlocker, make_blocker
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.settings import (
+    PROFILE_STALL_WINDOW_SECONDS,
+    STORAGE_ADMISSION_RETRY_SECONDS,
+)
+from vonk_control.stall_window import Verdict, progress_verdict
+from vonk_control.storage_demands import (
+    STORAGE_EVICTION_TIMED_OUT,
+    STORAGE_INSUFFICIENT,
+    StorageRelief,
+)
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:
@@ -85,7 +95,7 @@ class FleetProfileService:
     ) -> FleetProfileApplicationView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         progress = _persisted_profile_progress(row)
-        intended = self._intended_profile(row, session=session)
+        intended = _intended_profile(row, session=session)
         if (
             row.profile_id != profile_id
             or row.actor != actor

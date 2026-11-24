@@ -19,11 +19,17 @@ changed:
 
 from __future__ import annotations
 
+import ast
 import json
 import uuid
 from datetime import timedelta
+from pathlib import Path
+from typing import Any
 
 import pytest
+
+import vonk_control.fleet_profiles as module
+from tests.lifecycle_writer_boundaries import scan_lifecycle_writes
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -133,7 +139,8 @@ class _World:
 
     def child_id(self) -> str:
         document = self.service.application(self.id).progress.switch_adapter
-        assert document is not None and document.pending_children
+        assert document is not None
+        assert document.pending_children
         return document.pending_children[0].operation_id
 
     def cancel(self, key: int = 700):
@@ -155,7 +162,7 @@ def _json(value) -> str:
 # ------------------------------------------------------------- state space
 
 
-def _application_row(state: str, progress: dict) -> FleetProfileApplication:
+def _application_row(state: str, progress: dict[str, Any]) -> FleetProfileApplication:
     return FleetProfileApplication(
         id=str(uuid.uuid4()),
         request_key=str(uuid.uuid4()),
@@ -250,7 +257,8 @@ def test_a_cancel_completes_for_a_child_issued_without_a_recorded_intent(
         world.run_switch.tick()
     final = world.service.application(world.id)
     assert final.state == "cancelled"
-    assert final.cancellation is not None and final.cancellation.state == "cancelled"
+    assert final.cancellation is not None
+    assert final.cancellation.state == "cancelled"
     assert final.state != LifecycleState.NEEDS_OPERATOR
 
     world.assert_fresh_admitted()
@@ -284,11 +292,13 @@ def test_a_cancel_completes_when_the_stop_cannot_be_confirmed(tmp_path) -> None:
     assert final.state == "cancelled", states[-5:]
     assert "needs-operator" not in states
     assert world.now[0] - NOW >= timedelta(0)
-    assert final.cancellation is not None and final.cancellation.state == "cancelled"
+    assert final.cancellation is not None
+    assert final.cancellation.state == "cancelled"
     # the child kept running on its own lifecycle: it was never aborted
     with world.sessions() as session:
         child = session.get(Job, world.child_id())
-        assert child is not None and child.state not in {"cancelled", "failed"}
+        assert child is not None
+        assert child.state not in {"cancelled", "failed"}
 
     world.assert_fresh_admitted()
 
@@ -298,7 +308,7 @@ def test_the_cancel_budget_is_the_one_cancellation_authority_of_an_agent_order()
 ):
     """One constant (``agent_operation_facts``), not a copy per kind."""
 
-    assert CANCEL_BUDGET == timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
+    assert timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS) == CANCEL_BUDGET
 
 
 def test_a_cancel_survives_a_restart_in_the_middle(tmp_path) -> None:
@@ -344,7 +354,8 @@ def test_a_repeated_cancel_request_replays_and_a_different_one_is_refused(
     world = _World(tmp_path)
     first = world.cancel(710)
     again = world.cancel(710)
-    assert again.cancellation is not None and first.cancellation is not None
+    assert again.cancellation is not None
+    assert first.cancellation is not None
     assert again.cancellation.request_key == first.cancellation.request_key
     with pytest.raises(InvalidRequestError) as refused:
         world.cancel(711)
@@ -455,8 +466,6 @@ def test_a_restart_in_the_middle_of_a_load_is_safe(tmp_path) -> None:
 def test_an_application_row_is_written_only_through_the_adapter() -> None:
     """The class, guarded: the module no longer writes an application's state."""
 
-    from tests.lifecycle_writer_boundaries import scan_lifecycle_writes
-
     writes = [
         write for write in scan_lifecycle_writes() if "/fleet_profiles/" in write.path
     ]
@@ -471,11 +480,6 @@ def test_profile_stop_selection_never_uses_the_active_run_set() -> None:
     elsewhere may keep the active set; the profile module decides only what to
     stop and what is observed, so it must not name it at all.
     """
-
-    import ast
-    from pathlib import Path
-
-    import vonk_control.fleet_profiles as module
 
     tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
     uses = sorted(
@@ -502,7 +506,8 @@ def test_a_child_that_is_a_legacy_wait_is_mirrored_as_running_not_as_a_wait(
     child_id = world.child_id()
     with world.sessions.begin() as session:
         child = session.get(Job, child_id)
-        assert child is not None and isinstance(child.result, dict)
+        assert child is not None
+        assert isinstance(child.result, dict)
         result = dict(child.result)
         result.pop("observation_due_at", None)
         child.result = result
@@ -518,5 +523,6 @@ def test_a_child_that_is_a_legacy_wait_is_mirrored_as_running_not_as_a_wait(
     world.service.tick()
     with world.sessions() as session:
         healed = session.get(Job, child_id)
-        assert healed is not None and healed.state != LifecycleState.NEEDS_OPERATOR
+        assert healed is not None
+        assert healed.state != LifecycleState.NEEDS_OPERATOR
     assert world.service.application(world.id).state != LifecycleState.NEEDS_OPERATOR

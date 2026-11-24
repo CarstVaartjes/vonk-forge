@@ -15,24 +15,20 @@ from fastapi import (
     status,
 )
 from fastapi import Path as ApiPath
+
 from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 from vonk_agent_protocol.outcome import InvalidRequestError
-
+from vonk_control.agent_jobs.contracts import OperatorRetirementRefused
+from vonk_control.api.common import JobQueue
+from vonk_control.api.roles import require_mutation_role
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import Actor, CursorCodec, CursorError
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from vonk_control.operator_receipt_contract import JobOperatorReceipt, ReceiptPolicy
-
-from ..agent_jobs.contracts import OperatorRetirementRefused
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import (
-    Actor,
-    CursorCodec,
-    CursorError,
-)
-from ..cursor_contract import MAX_CURSOR_LENGTH
-from ..failure_evidence import FailureEvidenceService
-from ..jobs.operator_receipts import read_job_operator_receipt
-from ..model_cache.contract import UUID_PATTERN
-from ..operation_api.contracts import (
+from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
+from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.jobs.operator_receipts import read_job_operator_receipt
+from vonk_control.model_cache.contract import UUID_PATTERN
+from vonk_control.operation_api.contracts import (
     JobDetailResponse,
     JobResumeRequest,
     JobResumeResponse,
@@ -41,20 +37,23 @@ from ..operation_api.contracts import (
     OperationsResponse,
     bounded_error_responses,
 )
-from ..operation_api.providers import _global_get_operation, _global_list_operations
-from ..operation_api.responses import (
+from vonk_control.operation_api.providers import (
+    _global_get_operation,
+    _global_list_operations,
+)
+from vonk_control.operation_api.responses import (
     bounded_operation_detail,
     bounded_operations_response,
     decode_offset,
     job_response,
 )
-from ..operator_acceptance import operator_acceptance
-from ..operator_receipt_contract import ReceiptCode
-from ..strict_json import warn_unreadable_once
-from .common import (
-    JobQueue,
+from vonk_control.operator_acceptance import operator_acceptance
+from vonk_control.operator_receipt_contract import (
+    JobOperatorReceipt,
+    ReceiptCode,
+    ReceiptPolicy,
 )
-from .roles import require_mutation_role
+from vonk_control.strict_json import warn_unreadable_once
 
 
 def register_job_routes(
@@ -75,21 +74,21 @@ def register_job_routes(
         openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def operations_view(
-        cursor: str | None = Query(default=None, max_length=MAX_CURSOR_LENGTH),
-        limit: int = Query(default=20, ge=1, le=100),
-        operation_state: str | None = Query(
-            default=None,
-            alias="state",
-            pattern=r"^[a-z][a-z0-9-]{0,31}$",
-        ),
-        node_id: str | None = Query(default=None, pattern=r"^spk_[0-9a-f]{32}$"),
-        request_id: str | None = Query(
-            default=None,
-            pattern=(
-                r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-                r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH)] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        operation_state: Annotated[
+            str | None, Query(alias="state", pattern=r"^[a-z][a-z0-9-]{0,31}$")
+        ] = None,
+        node_id: Annotated[str | None, Query(pattern=r"^spk_[0-9a-f]{32}$")] = None,
+        request_id: Annotated[
+            str | None,
+            Query(
+                pattern=(
+                    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+                    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                )
             ),
-        ),
+        ] = None,
         _actor: Actor = authenticated_actor,
     ) -> OperationsResponse:
         if operations is None:
@@ -142,7 +141,7 @@ def register_job_routes(
         openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def operation_view(
-        operation_id: str = ApiPath(min_length=1, max_length=128),
+        operation_id: Annotated[str, ApiPath(min_length=1, max_length=128)],
         _actor: Actor = authenticated_actor,
     ) -> OperationDetailResponse:
         if operations is None:
@@ -177,11 +176,13 @@ def register_job_routes(
     )
     def job_view(
         job_id: str,
-        operation_cursor: str | None = Query(
-            default=None, max_length=MAX_CURSOR_LENGTH
-        ),
-        target_cursor: str | None = Query(default=None, max_length=MAX_CURSOR_LENGTH),
-        limit: int = Query(default=20, ge=1, le=100),
+        operation_cursor: Annotated[
+            str | None, Query(max_length=MAX_CURSOR_LENGTH)
+        ] = None,
+        target_cursor: Annotated[
+            str | None, Query(max_length=MAX_CURSOR_LENGTH)
+        ] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
         _actor: Actor = authenticated_actor,
     ) -> JobDetailResponse:
         try:
@@ -284,7 +285,7 @@ def register_job_routes(
             action=disposition,
             content_digest=current_job.payload_digest,
         )
-        if disposition == OperatorActionName.RETIRE:
+        if disposition == OperatorActionName.RETIRE:  # pyright: ignore[reportUnnecessaryComparison]  # a StrEnum member equals its string value at run time
             if operations.retire_job is None:
                 raise HTTPException(
                     status_code=503, detail="job retirement unavailable"

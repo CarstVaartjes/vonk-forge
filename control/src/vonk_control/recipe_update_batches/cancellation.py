@@ -7,30 +7,42 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select, true
 from sqlalchemy.exc import DBAPIError
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
-
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..jobs import states as job_states
-from ..logging import redact_text
-from ..models.jobs import Job
-from ..persisted_waits import schedule_wait
-from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
-from ..strict_json import serialize_json_value
-from .contract import (
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.jobs import states as job_states
+from vonk_control.logging import redact_text
+from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityError,
+)
+from vonk_control.recipe_image_availability.view_contract import (
+    RecipeImageAvailabilityView,
+)
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.recipe_update_batches.contract import (
     UPDATE_KIND,
     RecipeUpdateFailure,
     RecipeUpdateResponse,
     UpdateState,
     read_update_document,
 )
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeUpdateBatches
+    from vonk_control.recipe_update_batches.service import RecipeUpdateBatches
 
-from .helpers import _OBSERVATION_INTERVAL, _SETTLED, _now
+from vonk_control.recipe_update_batches.helpers import (
+    _OBSERVATION_INTERVAL,
+    _SETTLED,
+    _now,
+)
 
 
 class CancellationMixin:
@@ -64,11 +76,6 @@ class CancellationMixin:
     ) -> int:
         """Reconcile accepted child operations without claiming the batch slot."""
         service = cast("RecipeUpdateBatches", self)
-
-        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
-        from ..recipe_image_availability.view_contract import (
-            RecipeImageAvailabilityView,
-        )
 
         if not 1 <= limit <= 100:
             raise InvalidValue(

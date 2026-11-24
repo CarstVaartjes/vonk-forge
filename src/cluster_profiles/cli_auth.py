@@ -15,13 +15,14 @@ import os
 import sys
 import urllib.parse
 import urllib.request
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.message import Message
 from enum import StrEnum
 
-from .control_client.client import ControlClient
-from .control_client.connection import (
+from cluster_profiles.control_client.client import ControlClient
+from cluster_profiles.control_client.connection import (
     TOKEN_FILE_ENV,
     URL_ENV,
     StoredConnection,
@@ -35,7 +36,7 @@ from .control_client.connection import (
     validated_origin,
     write_private,
 )
-from .control_client.errors import (
+from cluster_profiles.control_client.errors import (
     _MAX_TOKEN,
     ControlClientError,
     ControlForbidden,
@@ -43,8 +44,8 @@ from .control_client.errors import (
     ControlUnauthorized,
     LocalInputError,
 )
-from .control_client.transport import _read_control_response
-from .control_transport import open_https
+from cluster_profiles.control_client.transport import _read_control_response
+from cluster_profiles.control_transport import open_https
 
 _TIMEOUT_SECONDS = 15
 _SESSION_COOKIE = "vonk_session"
@@ -153,7 +154,7 @@ def _session_cookies(headers: Message) -> dict[str, str]:
     return cookies
 
 
-def _read_password(from_stdin: bool) -> str:
+def _read_password(*, from_stdin: bool) -> str:
     try:
         if from_stdin:
             password = sys.stdin.readline().rstrip("\r\n")
@@ -232,11 +233,9 @@ def _mint_token(url: str, password: str) -> tuple[str, datetime]:
     except (UnicodeDecodeError, ValueError):
         raise LoginFailed("the Controller sent an unreadable token") from None
     finally:
-        try:
+        # The browser session expires by itself; the token is what we keep.
+        with suppress(ControlClientError, OSError):
             _post(url, "/api/auth/logout", session)
-        except (ControlClientError, OSError):
-            # The browser session expires by itself; the token is what we keep.
-            pass
     return token, expires_at
 
 
@@ -252,7 +251,7 @@ def _login(url_argument: str | None, *, password_stdin: bool) -> LoginResult:
             "give the Controller address: vonkctl auth login https://<controller>"
         )
     url = validated_origin(chosen)
-    token, expires_at = _mint_token(url, _read_password(password_stdin))
+    token, expires_at = _mint_token(url, _read_password(from_stdin=password_stdin))
     write_private(login_token_path(), f"{token}\n".encode())
     write_private(connection_path(), StoredConnection(url, expires_at).document())
     # Prove the stored credential the way every other command will use it.

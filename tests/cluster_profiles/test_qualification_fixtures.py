@@ -12,7 +12,14 @@ from pathlib import Path
 
 import pytest
 
+from cluster_profiles import fleet_qualification, serving_execution
+from cluster_profiles.control_client.errors import ControlTransportError
+from cluster_profiles.control_client.schema import validate_control_document
 from cluster_profiles.fleet_qualification import ArtifactJobSmokeAdapter
+from cluster_profiles.generated_control.models.artifact_job_response import (
+    ArtifactJobResponse,
+)
+from cluster_profiles.qualification_fixtures import media, outputs
 from cluster_profiles.qualification_fixtures.assertions import _parse_assertion
 from cluster_profiles.qualification_fixtures.contracts import (
     Fixture,
@@ -155,7 +162,8 @@ def test_registry_isolates_damaged_member_and_repairs_on_the_same_resolver(tmp_p
     assert registry.resolve("vonk-forge/image", "a" * 64, "image-job")[0] is None
     asset.write_bytes(PNG)
     repaired = registry.resolve("vonk-forge/image", "a" * 64, "image-job")[0]
-    assert repaired is not None and repaired.inputs[0][1].content == PNG
+    assert repaired is not None
+    assert repaired.inputs[0][1].content == PNG
     assert registry.resolve("vonk-forge/bad", "a" * 64, "image-job")[0] is None
     assert registry.resolve("vonk-forge/image", "a" * 64, "image-job")[0] is not None
 
@@ -380,7 +388,8 @@ def test_registry_fails_closed_for_missing_changed_and_special_fixtures() -> Non
     registry = _registry()
 
     recipe, blocker = registry.resolve("vonk-forge/image", "a" * 64, "image-job")
-    assert recipe is not None and blocker is None
+    assert recipe is not None
+    assert blocker is None
     _recipe, digest_blocker = registry.resolve(
         "vonk-forge/image", "c" * 64, "image-job"
     )
@@ -472,10 +481,6 @@ class _ArtifactClient(_DownloadClient):
         self.accepted = {}
 
     def _response(self, job_id, *, state=None, preparation=None):
-        from cluster_profiles.control_client.schema import validate_control_document
-        from cluster_profiles.generated_control.models.artifact_job_response import (
-            ArtifactJobResponse,
-        )
 
         body = self.jobs[job_id]
         declared = [{**item, "media_type": "image/png"} for item in body["inputs"]]
@@ -604,7 +609,6 @@ def test_artifact_adapter_runs_each_digest_bound_case_as_its_own_job(tmp_path) -
 def test_artifact_smoke_reconciles_acceptance_and_missing_output_then_reuses_after_restart(
     tmp_path,
 ):
-    from cluster_profiles.control_client.errors import ControlTransportError
 
     class LostReply(_ArtifactClient):
         lost = False
@@ -648,9 +652,11 @@ def test_artifact_smoke_reconciles_acceptance_and_missing_output_then_reuses_aft
     first = run()
     assert first[0]["output_files"][0]["sha256"] == hashlib.sha256(PNG).hexdigest()
     fresh = run()
-    assert fresh[0]["job_id"] != first[0]["job_id"] and client.created == 2
+    assert fresh[0]["job_id"] != first[0]["job_id"]
+    assert client.created == 2
     independent = run("fresh")
-    assert independent[0]["job_id"] != fresh[0]["job_id"] and client.created == 3
+    assert independent[0]["job_id"] != fresh[0]["job_id"]
+    assert client.created == 3
 
 
 def test_artifact_wait_ends_without_cancelling_the_job_and_admits_fresh_case(
@@ -700,9 +706,11 @@ def test_artifact_wait_ends_without_cancelling_the_job_and_admits_fresh_case(
     waited = run()[0]
     assert waited["state"] == "observing"
     assert client.cancelled is False
-    assert ticks[0] <= 2.1 and client.created == 1
+    assert ticks[0] <= 2.1
+    assert client.created == 1
     fresh = run()[0]
-    assert fresh["job_id"] != waited["job_id"] and client.created == 2
+    assert fresh["job_id"] != waited["job_id"]
+    assert client.created == 2
 
 
 @pytest.mark.parametrize(
@@ -713,9 +721,6 @@ def test_serving_unknown_reobserves_then_quality_is_measured_and_new_case_runs(
     monkeypatch,
     unreadable,
 ):
-    import io
-
-    from cluster_profiles import serving_execution
 
     ticks = [0.0]
     monkeypatch.setattr(serving_execution.time, "monotonic", lambda: ticks[0])
@@ -760,7 +765,8 @@ def test_serving_unknown_reobserves_then_quality_is_measured_and_new_case_runs(
     result = serving_execution.execute_http_check(
         "https://example.invalid", check, timeout_seconds=1, opener=open_reply
     )
-    assert result["choices"] == 1 and requested == [1, 0.5]
+    assert result["choices"] == 1
+    assert requested == [1, 0.5]
     with not_adopted():
         serving_execution.evaluate_http_response(
             serving_execution.HttpObservation(
@@ -780,9 +786,6 @@ def test_serving_unknown_reobserves_then_quality_is_measured_and_new_case_runs(
 
 
 def test_service_quality_failure_is_scoped_and_unknown_reply_reobserves(monkeypatch):
-    import io
-
-    from cluster_profiles import fleet_qualification
 
     ticks = [0.0]
     monkeypatch.setattr(fleet_qualification.time, "monotonic", lambda: ticks[0])
@@ -809,19 +812,14 @@ def test_service_quality_failure_is_scoped_and_unknown_reply_reobserves(monkeypa
         "assertions": [{"kind": "path.equals", "path": "value", "value": 1}],
     }
     measured = adapter._run_service_case("https://example.invalid", case)
-    assert (
-        measured["case_id"] == "one"
-        and "http_status" not in measured
-        and ticks[0] == 0.5
-    )
+    assert measured["case_id"] == "one"
+    assert "http_status" not in measured
+    assert ticks[0] == 0.5
     fresh = adapter._run_service_case("https://example.invalid", case)
     assert fresh["http_status"] == 200
 
 
 def test_service_cases_share_remaining_budget_then_fresh_run_can_observe(monkeypatch):
-    import io
-
-    from cluster_profiles import fleet_qualification
 
     ticks = [0.0]
     monkeypatch.setattr(fleet_qualification.time, "monotonic", lambda: ticks[0])
@@ -853,9 +851,11 @@ def test_service_cases_share_remaining_budget_then_fresh_run_can_observe(monkeyp
     for _ in range(2):
         with not_adopted():
             adapter._run_service_case("https://example.invalid", case, until=0.25)
-    assert ticks[0] == 0.25 and opened == [0.25]
+    assert ticks[0] == 0.25
+    assert opened == [0.25]
     fresh = adapter._run_service_case("https://example.invalid", case)
-    assert fresh["http_status"] == 200 and len(opened) == 2
+    assert fresh["http_status"] == 200
+    assert len(opened) == 2
 
 
 _MP4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 16
@@ -922,11 +922,12 @@ def _show_entries(argv: list[str]) -> dict[str, set[str]]:
 
 
 def _validate_mp4(monkeypatch: pytest.MonkeyPatch, **ranges: float) -> list[list[str]]:
-    from cluster_profiles.qualification_fixtures import media, outputs
 
     calls: list[list[str]] = []
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+    def fake_run(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
         del kwargs
         calls.append(list(argv))
         stdout = json.dumps(_ffprobe_document()).encode()

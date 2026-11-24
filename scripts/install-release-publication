@@ -25,6 +25,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from candidate_payload import PayloadError, payload_digest
+from nas_setup_wheel import validate_wheel
 from spark_lifecycle_contract import GATES as SPARK_GATES
 from spark_lifecycle_contract import ContractError as SparkContractError
 from spark_lifecycle_contract import recompute_publication_graphs, validate_lifecycle
@@ -75,7 +76,7 @@ NAS_GATES = {
 NAS_ACCEPTANCE_LANES = {"docker-29.4.3", "native"}
 
 
-def nas_acceptance_modes(test_mode: bool) -> dict[str, str]:
+def nas_acceptance_modes(*, test_mode: bool) -> dict[str, str]:
     # PR acceptance has no tailnet credentials. This only selects the evidence
     # expected by the run-local signer; release acceptance still requires full.
     return {"docker-29.4.3": "disabled", "native": "disabled" if test_mode else "full"}
@@ -508,7 +509,7 @@ def _install_object(objects: Path, key: str, content: bytes, mode: int = 0o644) 
 
 
 def assemble(arguments: argparse.Namespace) -> str:
-    from vonk_agent_protocol.installer_release import (
+    from vonk_agent_protocol.installer_release import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
         InstallerAcceptanceBaselineRelease,
         InstallerCandidateRelease,
     )
@@ -554,7 +555,6 @@ def assemble(arguments: argparse.Namespace) -> str:
     nas_wheel = _safe_bytes(
         arguments.nas_setup_wheel, "NAS setup wheel", 64 * 1024 * 1024
     )
-    from nas_setup_wheel import validate_wheel
 
     try:
         validate_wheel(arguments.nas_setup_wheel.name, nas_wheel)
@@ -653,7 +653,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         raise PublicationError("CLI wheel filename is invalid")
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-        from cluster_profiles.runtime_identity import (
+        from cluster_profiles.runtime_identity import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
             contract_fingerprint,
             verified_wheel_identity,
         )
@@ -714,7 +714,9 @@ def assemble(arguments: argparse.Namespace) -> str:
             _install_object(objects, key, content, mode)
             entries.append(_object_entry(key, content, "immutable"))
 
-        from agent_package_source_publication import package_source
+        from agent_package_source_publication import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
+            package_source,
+        )
 
         source_entries = [(path, version) for path in packages.values()] + [
             (path, baseline_version) for path in baseline_packages.values()
@@ -960,7 +962,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         }
         _write(temporary / "publication-plan.json", _canonical(plan))
         _write(temporary / "channel-public-key.pem", signing_public_key)
-        os.replace(temporary, output)
+        temporary.replace(output)
     except BaseException:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
@@ -1121,7 +1123,8 @@ def accept(arguments: argparse.Namespace) -> None:
             if (
                 lanes != sorted(NAS_ACCEPTANCE_LANES)
                 or not isinstance(tailscale_modes, dict)
-                or tailscale_modes != nas_acceptance_modes(arguments.test_mode)
+                or tailscale_modes
+                != nas_acceptance_modes(test_mode=arguments.test_mode)
                 or any(gate.startswith("spark_") for gate in gates)
             ):
                 raise PublicationError("behavioral gate report is invalid")
@@ -1154,7 +1157,7 @@ def accept(arguments: argparse.Namespace) -> None:
 
     receipt = {
         "channel": arguments.channel,
-        "gates": {gate: True for gate in sorted(observed)},
+        "gates": dict.fromkeys(sorted(observed), True),
         "generation": arguments.generation,
         "issued_at": int(time.time()),
         "run_id": arguments.run_id,
@@ -1234,7 +1237,7 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
             or lane not in NAS_ACCEPTANCE_LANES
             or lane in lanes
             or report.get("tailscale_mode")
-            != nas_acceptance_modes(arguments.test_mode).get(lane)
+            != nas_acceptance_modes(test_mode=arguments.test_mode).get(lane)
         ):
             raise PublicationError(
                 "NAS acceptance lane report does not match the candidate"
@@ -1260,7 +1263,7 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
         "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
         "source_sha": arguments.source_sha,
         "status": "passed",
-        "tailscale_modes": nas_acceptance_modes(arguments.test_mode),
+        "tailscale_modes": nas_acceptance_modes(test_mode=arguments.test_mode),
         "version": arguments.version,
     }
     with tempfile.TemporaryDirectory(
@@ -1422,7 +1425,7 @@ def _parse_channel_manifest(raw: bytes, public_key: bytes) -> dict[str, str]:
     return values
 
 
-def _atomic_local_copy(source: Path, destination: Path, immutable: bool) -> None:
+def _atomic_local_copy(source: Path, destination: Path, *, immutable: bool) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
     content = _safe_bytes(source, "publication source")
     if immutable and destination.exists():
@@ -1438,10 +1441,10 @@ def _atomic_local_copy(source: Path, destination: Path, immutable: bool) -> None
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(temporary, 0o644)
+        temporary.chmod(0o644)
         if immutable and destination.exists():
             raise PublicationError("refusing to overwrite an immutable object")
-        os.replace(temporary, destination)
+        temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -1623,12 +1626,11 @@ def _rclone_copy(source: Path, remote: str, entry: dict[str, Any]) -> None:
         # object is absent, so the immutable guard still applies.
         if _rclone_upload(source, remote, key, immutable=immutable):
             observed = _await_digest(remote, key, expected)
-    else:
-        # The key holds bytes we did not just write (a partial first attempt).
-        # Our copy is the signed truth for this content-addressed key, so
-        # replace that one object once; verification below stays exact.
-        if _rclone_upload(source, remote, key, immutable=False):
-            observed = _await_digest(remote, key, expected)
+    # The key holds bytes we did not just write (a partial first attempt).
+    # Our copy is the signed truth for this content-addressed key, so
+    # replace that one object once; verification below stays exact.
+    elif _rclone_upload(source, remote, key, immutable=False):
+        observed = _await_digest(remote, key, expected)
     if observed != expected:
         raise PublicationError(f"R2 verification failed for {key}")
 
@@ -1658,7 +1660,7 @@ def _copy_publication_entry(
         _atomic_local_copy(
             source,
             filesystem / entry["key"],
-            entry["phase"] not in {"endpoint", "pointer"},
+            immutable=entry["phase"] not in {"endpoint", "pointer"},
         )
     else:
         assert remote is not None
@@ -2076,7 +2078,9 @@ def refresh(arguments: argparse.Namespace) -> None:
         release_signature,
         "release object",
     )
-    from vonk_agent_protocol.installer_release import InstallerCandidateRelease
+    from vonk_agent_protocol.installer_release import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
+        InstallerCandidateRelease,
+    )
 
     try:
         release = InstallerCandidateRelease.model_validate_json(
@@ -2085,7 +2089,7 @@ def refresh(arguments: argparse.Namespace) -> None:
     except (UnicodeDecodeError, ValueError) as error:
         raise PublicationError("release object is invalid") from error
     if (
-        not isinstance(release, dict)
+        not isinstance(release, dict)  # pyright: ignore[reportUnnecessaryIsInstance]  # the canonical-JSON check also covers the dump
         or verified["release_path"] != _canonical(release)
         or release.get("channel") != manifest["channel"]
         or release.get("generation") != manifest["generation"]
@@ -2106,7 +2110,7 @@ def refresh(arguments: argparse.Namespace) -> None:
         ) as directory:
             source = Path(directory) / "current.manifest"
             source.write_bytes(refreshed)
-            _atomic_local_copy(source, filesystem / pointer_key, False)
+            _atomic_local_copy(source, filesystem / pointer_key, immutable=False)
     else:
         assert remote is not None  # The parser requires exactly one publication target.
         with tempfile.TemporaryDirectory(prefix=".installer-refresh-") as directory:

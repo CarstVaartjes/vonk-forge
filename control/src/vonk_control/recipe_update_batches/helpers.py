@@ -7,9 +7,14 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from ..recipe_image_availability.contracts import RecipeImageAvailabilityUnknown
-from ..strict_json import serialize_json_value
-from .contract import RecipeUpdateBinding, RecipeUpdateDocument
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityUnknown,
+)
+from vonk_control.recipe_update_batches.contract import (
+    RecipeUpdateBinding,
+    RecipeUpdateDocument,
+)
+from vonk_control.strict_json import serialize_json_value
 
 _SETTLED = frozenset({"succeeded", "failed", "cancelled"})
 

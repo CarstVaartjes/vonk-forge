@@ -24,6 +24,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+)
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -37,13 +45,6 @@ from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placem
 from vonk_control.models.mapping import ClusterMappingNode
 from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
 from vonk_control.recipe_operations.start_payloads import start_peer_addresses
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-    read_model,
-    read_recipe,
-)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 INPUTS = Path(__file__).resolve().parent / "fixtures" / "catalog_launch"
@@ -276,10 +277,10 @@ def _dump(document: object) -> str:
 # --- selection from a release catalog (maintenance only) --------------------
 
 
-def _features(recipe: RecipeDefinition) -> set[tuple]:
+def _features(recipe: RecipeDefinition) -> set[tuple[str, ...]]:
     engine = recipe.runtime.engine
     interface = recipe.interfaces[0]
-    features: set[tuple] = {
+    features: set[tuple[str, ...]] = {
         (engine, recipe.topology.name, interface.adapter),
         ("adapter", interface.adapter),
     }
@@ -332,7 +333,7 @@ def select_representatives(index: Mapping[str, Any]) -> list[dict[str, Any]]:
         candidates.append((size, document, _features(recipe)))
     # Smallest recipes first, keeping each one that covers a shape not yet seen.
     candidates.sort(key=lambda item: (item[0], item[1]["identity"]["slug"]))
-    covered: set[tuple] = set()
+    covered: set[tuple[str, ...]] = set()
     chosen: list[dict[str, Any]] = []
     for _size, document, features in candidates:
         if features - covered:

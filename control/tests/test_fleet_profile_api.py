@@ -15,11 +15,21 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
+
+from cluster_profiles import cli
+from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
 from vonk_control.api.application import create_app
+from vonk_control.api.production import production_app
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileInput,
+    FleetProfileList,
+)
+from vonk_control.fleet_profile_contract.endpoints import FleetProfileEndpointsView
 from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 from vonk_control.fleet_profiles.contracts import FleetProfileConflict
 from vonk_control.fleet_profiles.service import FleetProfileService
@@ -32,12 +42,9 @@ from vonk_control.models.fleet import (
     User,
 )
 from vonk_control.strict_json import route_endpoint
-from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
-
-from cluster_profiles import cli
-from cluster_profiles.control_client.transfers import ControlClient
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+from .test_fleet_profiles_canonical import NODE_1, NODE_2, NOW, _seed, _sessions
 
 
 def _client(
@@ -98,7 +105,7 @@ def _headers(codec: TokenCodec, role: str = "viewer") -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-@pytest.mark.parametrize("role", ("viewer", "operator"))
+@pytest.mark.parametrize("role", ["viewer", "operator"])
 def test_profile_preview_requires_administrator_before_reading_profile(role):
     # Break caught: preview skips the mutation-role matrix and exposes the
     # administrator-only decision to a lesser role.
@@ -115,7 +122,7 @@ def test_profile_preview_requires_administrator_before_reading_profile(role):
     )
 
 
-@pytest.mark.parametrize("role", ("viewer", "operator"))
+@pytest.mark.parametrize("role", ["viewer", "operator"])
 def test_non_admin_cannot_change_an_accepted_profile(role: str) -> None:
     client, codec = _client(with_idle_spark=True)
     admin = _headers(codec, "administrator")
@@ -193,7 +200,6 @@ def test_profile_request_lookup_is_authenticated_and_reports_missing_key() -> No
 def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope(
     alias: str,
 ) -> None:
-    from vonk_control.fleet_profile_contract.endpoints import FleetProfileEndpointsView
 
     calls: list[tuple[int, str | None, str]] = []
 
@@ -312,7 +318,6 @@ def test_definition_roundtrip_keeps_metadata_and_enforces_the_observed_revision(
 def test_cli_edits_and_exports_the_persisted_definition_through_real_api(
     tmp_path, capsys
 ):
-    from .test_fleet_profiles_canonical import NODE_1, _seed, _sessions
 
     sessions = _sessions()
     _seed(sessions)
@@ -452,8 +457,6 @@ def test_production_app_composes_fleet_profiles_with_preparation_authority() -> 
     binding and admit a profile whose required assets cannot be attested.
     """
 
-    from vonk_control.api.production import production_app
-
     source = inspect.getsource(production_app)
     assert "build_production_fleet_profile_service(" in source
     assert "FleetProfileService(" not in source
@@ -588,8 +591,6 @@ def test_saving_a_profile_fills_option_defaults_and_replaces_stale_choices() -> 
     save must keep going with the recipe default and say what it replaced.
     """
 
-    from .test_fleet_profiles_canonical import NODE_1, NOW, _seed, _sessions
-
     sessions = _sessions()
     _seed(sessions, options=True)
     client, codec = _client(
@@ -659,8 +660,6 @@ def test_a_rejected_profile_save_names_the_field_and_the_reason(
     assignments: list[dict[str, object]], expected: list[str]
 ) -> None:
     """The refusal itself carries what to fix, not a bare status line."""
-
-    from .test_fleet_profiles_canonical import NODE_1, NODE_2, NOW, _seed, _sessions
 
     sessions = _sessions()
     _seed(sessions)
@@ -888,10 +887,6 @@ def test_profile_listing_continues_portably(count):
 
 
 def _assert_profile_listing_pages(sessions, count):
-    from vonk_control.fleet_profile_contract.definitions import (
-        FleetProfileInput,
-        FleetProfileList,
-    )
 
     profiles = FleetProfileService(
         sessions, clock=lambda: datetime(2026, 10, 20, tzinfo=UTC)

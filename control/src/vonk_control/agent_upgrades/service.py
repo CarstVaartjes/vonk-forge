@@ -7,19 +7,17 @@ from datetime import datetime
 
 import httpx2
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 
-from ..agent_jobs.service import AgentJobService
-from ..categorized_errors import (
-    InvalidValue,
-)
-from ..lifecycle.agent_upgrade import AgentUpgradeAdapter
-from .acceptance import AcceptanceMixin
-from .dispatch import DispatchMixin
-from .eligibility import EligibilityMixin
-from .package import PackageMixin
-from .recovery import RecoveryMixin
-from .resume import ResumeMixin
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.agent_upgrades.acceptance import AcceptanceMixin
+from vonk_control.agent_upgrades.dispatch import DispatchMixin
+from vonk_control.agent_upgrades.eligibility import EligibilityMixin
+from vonk_control.agent_upgrades.package import PackageMixin
+from vonk_control.agent_upgrades.recovery import RecoveryMixin
+from vonk_control.agent_upgrades.resume import ResumeMixin
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.lifecycle.agent_upgrade import AgentUpgradeAdapter
 
 
 class AgentUpgradeService(

@@ -4,6 +4,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import yaml
+
 from scripts.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -49,7 +51,6 @@ def test_build_script_only_builds_the_protocol_wheel(tmp_path: Path) -> None:
 
 def test_every_job_that_builds_the_controller_image_builds_the_wheel_first() -> None:
     """The image copies the wheel from the context; nothing else builds it."""
-    import yaml
 
     checked = set()
     for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")):

@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select, update
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ResourceBlockerCode,
@@ -19,9 +19,25 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import RunState
-from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
+from vonk_agent_protocol.swap import (
+    GIB,
+    SWAP_POLICY,
+    swap_needed_bytes,
+    usable_swap_bytes,
+)
 from vonk_agent_protocol.telemetry import TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.fleet_profile_contract.assessment import (
+    FleetProfileAssignmentAssessment,
+)
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.assessment_support import _preview_blockers
 from vonk_control.fleet_profiles.dependencies import ENDING_BLOCKER_CODES
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.install_admission.contracts import (
+    AdmissionReason,
+    reason_documents,
+)
 from vonk_control.inventory.repository import InventoryRepository, NodeInventoryReport
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
@@ -33,6 +49,7 @@ from vonk_control.models.execution import (
     RunNode,
 )
 from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.operations.blockers import dump_blockers, make_blocker, read_blockers
 from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
 from vonk_control.run_admission import (
     RETRYABLE_PLAN_BLOCKERS,
@@ -40,8 +57,17 @@ from vonk_control.run_admission import (
     RunAdmissionService,
     require_admissible,
 )
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 from vonk_control.telemetry.samples import TelemetryRepository
 
+from .artifact_jobs_support import _configure_artifact_recipe
+from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .run_switch_operations_support import (
+    RecordingArtifactExecutor,
+    SynchronousPhaseExecutor,
+    _request,
+    _service,
+)
 from .test_run_admission import setup
 
 _TOTAL = 120 * GIB
@@ -256,7 +282,8 @@ def test_f_a_swap_backed_load_never_poisons_its_content(
     _telemetry(sessions, now + timedelta(seconds=2), node, int(0.7 * GIB))
     with sessions() as session:
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert rank is not None and rank.observed_memory_bytes == _FREE - int(0.7 * GIB)
+        assert rank is not None
+        assert rank.observed_memory_bytes == _FREE - int(0.7 * GIB)
     _stop(sessions, run_id, now + timedelta(seconds=3))
 
     later = now + timedelta(seconds=4)
@@ -481,13 +508,6 @@ def _set_swap(sessions, *, total_gib, used=0):
 
 def _switch_world(tmp_path, postgres_engine, *, rise, total_gib, used, loading=0):
     """A serving run on one Spark, then a switch to the same content rising ``rise``."""
-    from .recipe_operations_support import installed_recipe, setup_services
-    from .run_switch_operations_support import (
-        RecordingArtifactExecutor,
-        SynchronousPhaseExecutor,
-        _request,
-        _service,
-    )
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine
@@ -518,7 +538,8 @@ def _switch_world(tmp_path, postgres_engine, *, rise, total_gib, used, loading=0
     with sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         run = session.get(RecipeRun, old)
-        assert installation is not None and run is not None
+        assert installation is not None
+        assert run is not None
         installation.state = "partial"
         run.state = "running"
         run.route_state = "published"
@@ -623,8 +644,6 @@ def test_i_a_job_run_holds_its_rise_while_its_ranks_run_jobs(
     each job loads again while they run; two such runs counted on the same
     free swap.
     """
-    from .artifact_jobs_support import _configure_artifact_recipe
-    from .recipe_operations_support import NOW, installed_recipe, setup_services
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, recipe_transform=_configure_artifact_recipe, engine=postgres_engine
@@ -777,7 +796,6 @@ def _swap_reason(plan):
 
 
 def _expected_swap(reason, *, active, desired, used, held, rise):
-    from vonk_agent_protocol.swap import swap_needed_bytes
 
     swap = reason.swap
     assert swap is not None
@@ -841,13 +859,6 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
     Two copies of the severity mapping rebuilt the blocker from ``code`` and
     ``detail`` only; the typed numbers were lost on the way to the wait.
     """
-    from vonk_control.fleet_profile_contract.assessment import (
-        FleetProfileAssignmentAssessment,
-    )
-    from vonk_control.fleet_profile_contract.review import FleetProfilePreview
-    from vonk_control.fleet_profiles.assessment_support import _preview_blockers
-    from vonk_control.operations.blockers import dump_blockers, read_blockers
-    from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 
     _, _, _, _, plan = _switch_world(
         tmp_path, postgres_engine, rise=35 * GIB, total_gib=16, used=0
@@ -868,7 +879,6 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
     assert read_blockers(stored)[0].swap == reason.swap
 
     # Without evidence the key is absent, in a stored wait and in a review reason.
-    from vonk_control.operations.blockers import make_blocker
 
     assert "swap" not in dump_blockers([make_blocker(blocker.code, "no shortfall")])[0]
     assert "swap" not in reason.model_copy(update={"swap": None}).model_dump(
@@ -878,11 +888,11 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
     # A list stored before the evidence existed reads unchanged.
     legacy = [{k: v for k, v in stored[0].items() if k != "swap"}]
     (old,) = read_blockers(legacy)
-    assert old.swap is None and old.code == blocker.code
+    assert old.swap is None
+    assert old.code == blocker.code
 
 
 def _held(sessions, now):
-    from vonk_control.fleet_projection.service import FleetProjection
 
     (spark,) = FleetProjection(sessions, clock=lambda: now).read().nodes
     return {run.run_id: run.load_swap_held_bytes for run in spark.loaded}
@@ -924,10 +934,6 @@ def test_q_a_loading_rank_shows_the_swap_it_holds_until_it_runs(
 
 def test_r_an_admission_reason_without_a_shortfall_stores_no_swap_key() -> None:
     """Catches ``"swap": null`` entering the stored plan and its json.dumps digest."""
-    from vonk_control.install_admission.contracts import (
-        AdmissionReason,
-        reason_documents,
-    )
 
     assert reason_documents([AdmissionReason("c", "d")]) == [
         {"code": "c", "detail": "d"}

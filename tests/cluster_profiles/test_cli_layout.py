@@ -153,7 +153,8 @@ def test_unused_removal_unknown_acceptance_reads_unknown_not_refused(printed):
     }
     lines = printed(render_payload, payload, "model", action="remove")
     labels = [line.split(":")[0].strip() for line in lines]
-    assert "Unknown" in labels and "Refused" in labels
+    assert "Unknown" in labels
+    assert "Refused" in labels
 
 
 def _stopped_fleet(titles: list[str]) -> dict[str, object]:
@@ -289,7 +290,8 @@ def test_activity_blocker_prints_in_order_on_stdout(capsys):
     assert err == ""
     lines = out.splitlines()
     blocker = lines.index("Blocker: x.failed: no room")
-    assert lines[0].startswith("Activity") and blocker > 0
+    assert lines[0].startswith("Activity")
+    assert blocker > 0
 
 
 def test_profile_names_its_sparks(printed):
@@ -468,8 +470,8 @@ def test_a_live_preparation_is_followed_and_cancelled_through_the_model_operatio
     live = {"state": "running", "phase": "downloading", "operation_id": operation}
     item = _model_item("preparing", ["cancel", "follow"], live)
     lines = printed(_library_item, item, noun, detail=False)
-    assert any(f"vonkctl model progress {operation} --follow" in l for l in lines)
-    assert any(f"vonkctl model cancel {operation} --yes" in l for l in lines)
+    assert any(f"vonkctl model progress {operation} --follow" in line for line in lines)
+    assert any(f"vonkctl model cancel {operation} --yes" in line for line in lines)
     assert not any(f"vonkctl {noun} download" in line for line in lines)
 
 

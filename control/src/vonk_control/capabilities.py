@@ -7,6 +7,7 @@ retried: effects of an invoked method remain owned by its existing reconciler.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -20,8 +21,7 @@ from vonk_agent_protocol.capability_reply import (
     ControllerCapability,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-
-from .capability_contract import CapabilityAvailability, CapabilityStatus
+from vonk_control.capability_contract import CapabilityAvailability, CapabilityStatus
 
 
 class CapabilityUnavailableError(Exception):
@@ -123,8 +123,9 @@ class RecoveringService[T]:
             initialized = self._initialized
         try:
             Thread(
-                target=self._construct,
-                args=(generation, value, initialized, done),
+                target=lambda: self._construct(
+                    generation, value, initialized=initialized, done=done
+                ),
                 daemon=True,
             ).start()
         except Exception:  # noqa: BLE001 -- dispatch failure releases this attempt
@@ -155,7 +156,7 @@ class RecoveringService[T]:
         self._delay = min(60.0, self._delay * 2)
 
     def _construct(
-        self, generation: int, value: T | None, initialized: bool, done: Event
+        self, generation: int, value: T | None, *, initialized: bool, done: Event
     ) -> None:
         reason: CapabilityReason | None = None
         existing = value
@@ -345,7 +346,5 @@ class CapabilityRegistry:
             asyncio.TimerHandle.cancel(timer)
         tasks = tuple(self._tasks)
         if tasks:
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(asyncio.gather(*tasks), timeout=5.0)
-            except TimeoutError:
-                pass

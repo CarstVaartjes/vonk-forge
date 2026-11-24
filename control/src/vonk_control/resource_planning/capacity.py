@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
+from vonk_forge_contracts.memory_admission import evaluate_memory_admission
+
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
@@ -15,11 +17,9 @@ from vonk_agent_protocol.swap import (
     swap_reaches,
     usable_swap_bytes,
 )
-from vonk_forge_contracts.memory_admission import evaluate_memory_admission
-
-from ..operations.blockers import SwapShortfallEvidence
-from .reasons import _reason, _same_memory_kind
-from .types import (
+from vonk_control.operations.blockers import SwapShortfallEvidence
+from vonk_control.resource_planning.reasons import _reason, _same_memory_kind
+from vonk_control.resource_planning.types import (
     CapacityPlan,
     CapacitySnapshot,
     NodeCapacityPlan,
@@ -303,7 +303,8 @@ def plan_capacity(
     by_node = {item.node_id: item for item in capacities}
     nodes: list[NodeCapacityPlan] = []
     swap_reasons: list[ResourceReason] = []
-    for node in memory.nodes:
+    for planned in memory.nodes:
+        node = planned
         found = _load_swap_reason(
             node.node_id, requirements[node.node_id], by_node.get(node.node_id)
         )

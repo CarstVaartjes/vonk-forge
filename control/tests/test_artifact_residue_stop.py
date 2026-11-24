@@ -8,7 +8,8 @@ from datetime import datetime
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select, text
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -23,6 +24,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
@@ -38,11 +40,18 @@ from vonk_control.models.operations import AgentOperation
 
 from .artifact_jobs_support import cancellation_result, submitted_artifact_job
 from .runtime_identity_support import claim_agent
-from .test_artifact_job_lifecycle import CANCEL_KEY, _drive, _issued_job
+from .test_artifact_job_lifecycle import CANCEL_KEY, _drive
+from .test_artifact_job_recovery import _issued_job
 
 
 @pytest.mark.parametrize("damaged_evidence", [False, True, "omitted"])
 def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
+    tmp_path, damaged_evidence
+):
+    retain_run_claims_until_exact_stop_receipt(tmp_path, damaged_evidence)
+
+
+def retain_run_claims_until_exact_stop_receipt(
     tmp_path,
     damaged_evidence,
     grant_observer: Callable[[SignedHostHelperGrant, datetime], None] | None = None,
@@ -124,7 +133,8 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     assert stopping.state != "succeeded"
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state != "stopped"
+        assert run is not None
+        assert run.state != "stopped"
         assert (
             tuple(
                 session.scalars(
@@ -161,9 +171,11 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     assert replay.id == stopping.id
     with sessions() as session:
         accepted = session.get(Job, replay.id)
-        assert accepted is not None and canonical_message(accepted.payload) == manifest
+        assert accepted is not None
+        assert canonical_message(accepted.payload) == manifest
     exact = claim_agent(restarted, node_id, "serial-0")
-    assert exact is not None and exact.fence != claim.fence
+    assert exact is not None
+    assert exact.fence != claim.fence
     with sessions() as session:
         child = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == stopping.id)
@@ -172,7 +184,8 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
         payload = RecipeStopPayload.model_validate_json(
             canonical_message(child.payload)
         )
-    assert payload.target_runtime_id == job.id and payload.run_id == run_id
+    assert payload.target_runtime_id == job.id
+    assert payload.run_id == run_id
     request = HostRuntimeRequest(
         action="stop",
         fence=exact.fence,
@@ -221,7 +234,8 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
         actor="operator",
         request_id=stop_key,
     )
-    assert stopped.id == stopping.id and stopped.state == "succeeded"
+    assert stopped.id == stopping.id
+    assert stopped.state == "succeeded"
     # A new key on the stopped run is that Stop too, never a refusal.
     again = operations.stop(
         run_id,
@@ -285,7 +299,8 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     assert fresh_run.owner_id != run_id
     fresh = submitted_artifact_job(artifacts, fresh_run.owner_id, request_suffix=884)
     fresh_claim = claim_agent(restarted, node_id, "serial-0")
-    assert fresh_claim is not None and fresh_claim.fence not in {
+    assert fresh_claim is not None
+    assert fresh_claim.fence not in {
         claim.fence,
         exact.fence,
     }
@@ -295,7 +310,8 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
                 AgentOperation.parent_job_id == fresh.operation_id
             )
         )
-        assert current is not None and current.state == "running"
+        assert current is not None
+        assert current.state == "running"
 
     if grant_observer is not None:
         grant_observer(grant, grant_observed_at)

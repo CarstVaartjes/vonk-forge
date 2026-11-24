@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from datetime import timedelta
 
-from ..agent_operation_facts import AGENT_UPGRADE_RECOVERY_FENCE
-from ..jobs import states as job_states
+from vonk_control.agent_operation_facts import AGENT_UPGRADE_RECOVERY_FENCE
+from vonk_control.jobs import states as job_states
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 

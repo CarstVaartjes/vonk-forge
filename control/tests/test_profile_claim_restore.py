@@ -7,20 +7,36 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
+
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.admission_locking import (
     PATIENT_AFTER_RETRIES,
     acquire_admission_keys,
     node_admission_key,
     patient_admission,
 )
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.claim_restore import (
     ProfileClaimCapacityShort,
     restore_released_profile_claims,
 )
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.model_primitives import Base
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 
+from .fleet_profiles_support import NOW as START
+from .fleet_profiles_support import (
+    _assessment,
+    _exact_preparation,
+    _node_id,
+    _seed,
+    _SwitchAdapter,
+    _uuid,
+)
 from .test_profile_port_claims import _ready_profile
 
 GIB = 1024**3
@@ -239,17 +255,6 @@ def seed_idle_spark(sessions, node_id, now, *, pool="shared", size=10**12):
 def _backing_off_load(postgres_engine, pool, *, hold):
     """A load whose child is live but whose claims were released when it backed
     off; ``hold`` is memory another workload took meanwhile (None: none)."""
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
-    from vonk_control.fleet_profiles.service import FleetProfileService
-    from vonk_control.model_primitives import Base
-
-    from .fleet_profiles_support import NOW as START
-    from .fleet_profiles_support import _node_id, _seed, _uuid
-    from .test_profile_continuity_postgres import (
-        _assessment_with_promises,
-        _SQLCancellationAdapter,
-    )
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -296,7 +301,6 @@ def _backing_off_load(postgres_engine, pool, *, hold):
 def test_a_retry_resumes_the_live_child_when_the_released_memory_is_free(
     postgres_engine, pool
 ) -> None:
-    from .fleet_profiles_support import _uuid
 
     sessions, profiles, original_id = _backing_off_load(
         postgres_engine, pool, hold=None
@@ -312,7 +316,6 @@ def test_a_retry_resumes_the_live_child_when_the_released_memory_is_free(
 def test_a_retry_plans_again_when_another_workload_took_the_released_memory(
     postgres_engine, pool
 ) -> None:
-    from .fleet_profiles_support import _uuid
 
     # Almost the whole Spark is promised elsewhere: the load's own 100 bytes do
     # not fit any more, so resuming its plan would overcommit.
@@ -331,3 +334,19 @@ def test_a_retry_plans_again_when_another_workload_took_the_released_memory(
         for claim in _live_claims(sessions, original_id)
         if claim.kind == "unified-memory"
     ]
+
+
+class _SQLCancellationAdapter(_SwitchAdapter):
+    def request_superseded_workload_cancellation_in_session(
+        self, session, targets, ordinal, now
+    ):
+        AgentJobService.request_superseded_workload_cancellation_in_session(
+            session, targets, ordinal, now
+        )
+
+
+def _assessment_with_promises(_session, _assignment, expected_nodes, **_kwargs):
+    assessment = _assessment(_exact_preparation(tuple(expected_nodes)))
+    assessment.fit_current.nodes[0].ports_required = [HOST_ENDPOINT_PORT]
+    assessment.fit_current.nodes[0].disk_required_bytes = 100
+    return assessment

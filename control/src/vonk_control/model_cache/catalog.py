@@ -6,34 +6,34 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
-from ..catalog.queries import WITHOUT_DOCUMENT
-from ..catalog.revision_contract import (
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.catalog.queries import WITHOUT_DOCUMENT
+from vonk_control.catalog.revision_contract import (
     catalog_document_readable,
     read_shared_catalog_document,
 )
-from ..categorized_errors import InvalidType
-from ..models.catalog import CatalogDocumentRevision
-from .artifacts import (
+from vonk_control.categorized_errors import InvalidType
+from vonk_control.model_cache.artifacts import (
     ArtifactPart,
     ArtifactSpec,
     _is_hex,
     _validate_artifact,
 )
-from .catalog_helpers import _source_for_catalog_artifact
-from .errors import (
+from vonk_control.model_cache.catalog_helpers import _source_for_catalog_artifact
+from vonk_control.model_cache.errors import (
     ModelCacheResolutionInvalid,
     ModelCacheResolutionRefused,
     ModelCacheStorageUnknown,
 )
-from .input_contracts import CatalogArtifact, FixtureArtifact
-from .providers import PROVIDERS, source_is_repository
+from vonk_control.model_cache.input_contracts import CatalogArtifact, FixtureArtifact
+from vonk_control.model_cache.providers import PROVIDERS, source_is_repository
+from vonk_control.models.catalog import CatalogDocumentRevision
 
 if TYPE_CHECKING:
-    from .service import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
 
 class CatalogMixin:
@@ -44,11 +44,7 @@ class CatalogMixin:
         session: Session, row: CatalogDocumentRevision
     ) -> CatalogDocumentRevision | None:
         """Recover exact content from another provenance record, never a head."""
-        if (
-            not isinstance(row.content_digest, str)
-            or not _is_hex(row.content_digest)
-            or len(row.content_digest) != 64
-        ):
+        if not _is_hex(row.content_digest) or len(row.content_digest) != 64:
             return None
         for candidate in session.scalars(
             select(CatalogDocumentRevision).where(
@@ -106,7 +102,7 @@ class CatalogMixin:
     def _collect_model_definitions(
         self,
         session: Session,
-        digest: str,
+        digest: object,
         rows: dict[str, CatalogDocumentRevision],
         *,
         visiting: set[str] | None = None,
@@ -180,18 +176,18 @@ class CatalogMixin:
         raw_bytes = value.download_bytes
         roles = value.roles
         if (
-            not isinstance(raw_id, str)
-            or not isinstance(raw_path, str)
-            or not isinstance(raw_kind, str)
+            not isinstance(raw_id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not isinstance(raw_path, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not isinstance(raw_kind, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         ):
             raise ModelCacheResolutionInvalid(
                 ModelCacheCode.ARTIFACT_INVALID,
                 "catalog artifact identity is incomplete",
             )
         if (
-            not isinstance(raw_digest, str)
-            or not isinstance(raw_bytes, int)
-            or not isinstance(roles, list)
+            not isinstance(raw_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not isinstance(raw_bytes, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            or not isinstance(roles, list)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         ):
             raise ModelCacheResolutionInvalid(
                 ModelCacheCode.ARTIFACT_INVALID,
@@ -212,7 +208,7 @@ class CatalogMixin:
             artifact_id=raw_id,
             path=raw_path,
             kind=raw_kind,
-            repository=(None if value.repository is None else str(value.repository)),
+            repository=(None if value.repository is None else str(value.repository)),  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
             source=source,
             revision=revision,
             sha256=raw_digest,

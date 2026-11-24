@@ -10,9 +10,9 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -23,54 +23,56 @@ from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
-
-from .. import agent_operation_states
-from ..agent_jobs.retry import superseded_cancellation_deadline
-from ..agent_operation_facts import attempt_is_live
-from ..artifact_jobs import states as artifact_job_states
-from ..artifact_jobs.evidence import ArtifactJobResultEvidence
-from ..categorized_errors import (
-    InvalidValue,
-)
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopAuthorization,
-    ProfileJobRunStopJob,
-    ProfileJobRunStopTarget,
-    ProfileStopAuthorityError,
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
+from vonk_control.agent_operation_facts import attempt_is_live
+from vonk_control.artifact_jobs import states as artifact_job_states
+from vonk_control.artifact_jobs.evidence import ArtifactJobResultEvidence
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
+from vonk_control.fleet_profiles.stop_authority import (
     issued_order_link,
     validate_profile_jobrun_stop_target,
     validate_profile_stop_owner,
 )
-from ..jobs.documents import RunSwitchJobPayload, controller_recipe_document
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.evidence import (
+from vonk_control.fleet_profiles.stop_contract import (
+    ProfileJobRunStopAuthorization,
+    ProfileJobRunStopJob,
+    ProfileJobRunStopTarget,
+    ProfileStopAuthorityError,
+)
+from vonk_control.jobs.documents import RunSwitchJobPayload, controller_recipe_document
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     retire_as_unknown,
 )
-from ..lifecycle.types import CancelRequested, Effect, Outcome, Reported
-from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
-from ..models.fleet import FleetProfileApplication
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..stored.json_values import read_row_column
-from ..strict_json import read_stored_model
-from .errors import (
+from vonk_control.lifecycle.types import CancelRequested, Effect, Outcome, Reported
+from vonk_control.models.execution import (
+    ArtifactJob,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
     RecipeRetryLater,
 )
-from .progress import (
-    _parent_identity,
-)
-from .stop_payloads import (
-    stop_payload_from_job_run,
-)
+from vonk_control.recipe_operations.progress import _parent_identity
+from vonk_control.recipe_operations.stop_payloads import stop_payload_from_job_run
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 def _jobrun_effect_may_remain(
@@ -240,8 +242,8 @@ def _switch_stops_run_now(operation: Job | None, run_id: str) -> bool:
         return False
     phase_index, item_index = current.phase_index, current.item_index
     return (
-        phase_index is not None
-        and item_index is not None
+        phase_index is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
+        and item_index is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
         and phase_index < len(plan.phases)
         and item_index < len(plan.stops)
         and plan.phases[phase_index].kind == ProfileChildPhase.STOP.value
@@ -275,7 +277,6 @@ class ProfileJobRunStopMixin:
         the run is refused as a security edge, never stopped.
         """
         service = typing_cast("RecipeOperationService", self)
-        from ..fleet_profiles.persistence import _persisted_profile_progress
 
         application = session.get(FleetProfileApplication, profile_application_id)
         try:

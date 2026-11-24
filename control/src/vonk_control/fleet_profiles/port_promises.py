@@ -18,13 +18,13 @@ from datetime import datetime
 from sqlalchemy import or_, select, tuple_
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
-from vonk_agent_protocol.state_machines import ReservationState
 
-from ..admission_locking import ConstraintReplan
-from ..models.execution import ResourceReservation
-from ..models.fleet import FleetProfileApplication
-from ..owner_liveness import profile_claim_consumable
-from . import states as fleet_profile_states
+from vonk_agent_protocol.state_machines import ReservationState
+from vonk_control.admission_locking import ConstraintReplan
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.owner_liveness import profile_claim_consumable
 
 #: The unique index behind "one live promise per Spark port".
 PORT_PROMISE_CONSTRAINT = "uq_promised_node_port"

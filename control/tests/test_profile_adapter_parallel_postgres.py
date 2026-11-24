@@ -7,8 +7,9 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
@@ -16,6 +17,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import OutcomeDone
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.switch_state import (
@@ -49,6 +51,7 @@ from .fleet_profiles_support import (
     _uuid,
 )
 from .node_contacts import contact_row
+from .profile_stop_readmission_support import start_on_released_gang
 from .recipe_operations_support import (
     _issue_exact_stop_grant,
     installed_recipe,
@@ -58,7 +61,7 @@ from .recipe_operations_support import (
 from .run_switch_operations_support import RecordingArtifactExecutor, _service
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_adapter_continuity import _running_child
-from .test_profile_continuity_postgres import (
+from .test_profile_claim_restore import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
 )
@@ -192,9 +195,7 @@ def test_postgres_pending_lane_does_not_serialize_disjoint_work_after_restart(
     observed = {}
     issued = []
 
-    def dispatch(
-        application_id, item, _assignments, scope, _actor, _request, index, _ordinal
-    ):
+    def dispatch(application_id, item, _assignments, scope, _actor, index, _ordinal):
         request_key = profile_switch_child_request_key(
             application_id, index, item.kind, item.id
         )
@@ -263,9 +264,7 @@ def test_postgres_pending_gang_blocks_overlap_but_not_an_independent_lane(
     issued = []
     observed = {}
 
-    def dispatch(
-        _application_id, item, _assignments, scope, _actor, _request, index, _ordinal
-    ):
+    def dispatch(_application_id, item, _assignments, scope, _actor, index, _ordinal):
         issued.append((index, item.id, tuple(scope)))
         child = _running_child(_uuid(18710 + index), scope[0])
         child.node_ids = list(scope)
@@ -357,14 +356,12 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
     native_start = adapter._start_child
     native_observe = adapter._observed_child
 
-    def dispatch(
-        application_id, item, assignments, scope, actor, request, index, ordinal
-    ):
+    def dispatch(application_id, item, assignments, scope, actor, index, ordinal):
         if item.kind == "stop":
             # The exact Stop is created by the real Run/Switch producer and
             # lifecycle; only the healthy node's physical load is intercepted.
             return native_start(
-                application_id, item, assignments, scope, actor, request, index, ordinal
+                application_id, item, assignments, scope, actor, index, ordinal
             )
         assert item.kind == "run"
         assert tuple(scope) == (_node_id(2),)
@@ -397,14 +394,16 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
     )
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.request_id == stop_key))
-        assert stop is not None and stop.kind == "recipe.stop.v2"
+        assert stop is not None
+        assert stop.kind == "recipe.stop.v2"
         stop_id = stop.id
         exact = tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.kind == "recipe.stop")
             )
         )
-        assert exact and {item.node_id for item in exact} == {nodes[0]}
+        assert exact
+        assert {item.node_id for item in exact} == {nodes[0]}
         assert all(item.payload["run_id"] == run.owner_id for item in exact)
         exact_ids = {item.id for item in exact}
         exact_parents = {item.parent_job_id for item in exact}
@@ -479,7 +478,8 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
     )
     assert stop_plan.run_id == run.owner_id
     issued = fenced_operation(sessions, claim)
-    assert issued.id in exact_ids and issued.parent_job_id in exact_parents
+    assert issued.id in exact_ids
+    assert issued.parent_job_id in exact_parents
     restarted_jobs = AgentJobService(sessions, clock=lambda: NOW)
     restarted_jobs.set_result_consumer(lifecycle.consume_agent_result)
     restarted_jobs.record_result(
@@ -505,7 +505,6 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
 
     # The old physical gang is free even while the disjoint load stays pending.
     # Exercise normal admission and a fenced native Start on that exact gang.
-    from .profile_stop_readmission_support import start_on_released_gang
 
     fresh_run_id = start_on_released_gang(
         sessions,

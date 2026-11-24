@@ -12,8 +12,10 @@ from typing import Any
 
 import pytest
 from sqlalchemy import event, select
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.admission_locking import AdmissionLockBusy as NodeLocksHeld
 from vonk_control.bounded_json import require_mapping
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
@@ -32,6 +34,8 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.models.routes import RoutePublicationOwner
+from vonk_control.owner_liveness import OWNER_SETTLE_GRACE
+from vonk_control.recipe_operations import start_cleanup
 from vonk_control.recipe_operations.errors import (
     RecipeRequestInvalid,
 )
@@ -128,9 +132,6 @@ def test_failed_start_result_commits_when_cleanup_admission_refuses(
 ) -> None:
     """A refused admission never rolls the failed Start's result back: the run is
     left ``stopping`` and the orphaned-run reaper queues its Stop after the grace."""
-    from vonk_control.admission_locking import AdmissionLockBusy as NodeLocksHeld
-    from vonk_control.owner_liveness import OWNER_SETTLE_GRACE
-    from vonk_control.recipe_operations import start_cleanup
 
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,
@@ -368,7 +369,7 @@ def test_start_orders_carry_the_saved_runs_plan_digest_when_admission_replans(
             )
         return fresh
 
-    service._run_admission.plan_run = replanning  # type: ignore[method-assign]
+    service._run_admission.plan_run = replanning
     started = service.start(
         plan,
         plan_digest=plan.plan_digest,
@@ -428,7 +429,8 @@ def test_start_uses_current_alias_and_replays_by_request_identity(
     assert queue.available == 2
     with sessions() as session:
         run = _required(session.get(RecipeRun, started.owner_id))
-        assert run is not None and run.alias == alternate.alias
+        assert run is not None
+        assert run.alias == alternate.alias
 
     with sessions() as session:
         runs = tuple(session.scalars(select(RecipeRun)))
@@ -677,7 +679,8 @@ def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> Non
     with sessions() as session:
         assert _required(session.get(RecipeRun, start.owner_id)).state == "running"
         accepted = session.scalar(select(Job).where(Job.request_id == "1" * 35 + "c"))
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         assert accepted.payload["plan_digest"] == plan.plan_digest
         stop_parent = RecipeStopParent.model_validate_json(
             canonical_message(accepted.payload), strict=True
@@ -752,7 +755,8 @@ def test_stop_withdrawal_failure_retains_accepted_job_and_run_state(
         assert stored is not None
         assert (stored.state, stored.route_state) == ("running", "published")
         accepted = session.scalar(select(Job).where(Job.request_id == "1" * 35 + "f"))
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         assert accepted.payload["plan_digest"] == plan.plan_digest
         stop_parent = RecipeStopParent.model_validate_json(
             canonical_message(accepted.payload), strict=True
@@ -886,7 +890,7 @@ def test_stop_preview_is_not_blocked_by_its_reservations(tmp_path: Path) -> None
     assert fresh.state == "running"
 
 
-@pytest.mark.parametrize("changed_identity", ("run_id", "plan_digest"))
+@pytest.mark.parametrize("changed_identity", ["run_id", "plan_digest"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_stop_uses_run_ownership_when_start_history_has_changed(
     tmp_path: Path, changed_identity: str

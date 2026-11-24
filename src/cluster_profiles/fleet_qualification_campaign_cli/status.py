@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from cluster_profiles.fleet_qualification_campaign_cli.contracts import (
+    _PASSED,
+    FAILURE_MODES,
+    Batch,
+    Campaign,
+    ResultsLog,
+    Row,
+)
 from cluster_profiles.fleet_qualification_observation import QualificationError
-
-from .contracts import _PASSED, FAILURE_MODES, Batch, Campaign, ResultsLog, Row
 
 
 def _modes(row: Row) -> list[str]:

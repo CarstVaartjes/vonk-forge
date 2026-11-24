@@ -19,6 +19,12 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from cluster_profiles.cli_artifact_jobs import (
+    _create_with_reconcile,
+    _declared_files,
+    _job,
+)
+from cluster_profiles.cli_states import ENDED_STATES, preparation
 from cluster_profiles.cli_states_generated import (
     DRAFT,
     FAILED,
@@ -26,11 +32,9 @@ from cluster_profiles.cli_states_generated import (
     READY,
     SUCCEEDED,
 )
-
-from .cli_artifact_jobs import _create_with_reconcile, _declared_files, _job
-from .cli_states import ENDED_STATES, preparation
-from .control_client.errors import ControlClientError
-from .fleet_qualification_observation import (
+from cluster_profiles.control_client.errors import ControlClientError
+from cluster_profiles.control_transport import open_https
+from cluster_profiles.fleet_qualification_observation import (
     QualificationError,
     QualificationObservationUnknown,
     QualificationQualityFailure,
@@ -40,9 +44,12 @@ from .fleet_qualification_observation import (
     _forget_key,
     _observe,
 )
-from .qualification_fixtures.contracts import FixtureError, RecipeFixture
-from .qualification_fixtures.outputs import validate_outputs
-from .qualification_fixtures.registry import FixtureRegistry
+from cluster_profiles.qualification_fixtures.contracts import (
+    FixtureError,
+    RecipeFixture,
+)
+from cluster_profiles.qualification_fixtures.outputs import validate_outputs
+from cluster_profiles.qualification_fixtures.registry import FixtureRegistry
 
 
 def _canonical(value: object) -> bytes:
@@ -520,7 +527,6 @@ class ServiceSmokeAdapter:
             )
         self.fixtures = fixtures
         self.timeout_seconds = timeout_seconds
-        from .control_transport import open_https
 
         self.opener = opener or open_https
 

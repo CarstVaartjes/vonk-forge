@@ -9,26 +9,29 @@ from typing import Literal
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
-
-from ..artifact_jobs.lifecycle import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnsettled,
     lock_reference_gates,
 )
-from ..categorized_errors import InvalidValue
-from ..content_identity import (
+from vonk_control.artifact_reference_scan.types import (
+    ArtifactReferenceFinding,
+    _finding,
+)
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.content_identity import (
     active_recipe_revisions,
     catalog_selector_membership,
 )
-from ..model_cache.contract import CacheManifest
-from ..models.cache import ModelCacheSet, ModelCacheSetArtifact
-from ..models.catalog import CatalogDocumentRevision
-from ..models.fleet import FleetProfile
-from .types import ArtifactReferenceFinding, _finding
+from vonk_control.model_cache.contract import CacheManifest
+from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import FleetProfile
 
 
 def require_model_sets_open(

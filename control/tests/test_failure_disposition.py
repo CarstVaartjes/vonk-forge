@@ -9,13 +9,20 @@ schedule it keeps), not by which helper decided it.
 from __future__ import annotations
 
 import errno
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx2
 import pytest
+from sqlalchemy.orm.exc import StaleDataError
+
+from cluster_profiles import cli_states_generated as cli_words
+from cluster_profiles.control_client.common import observation_disposition
+from cluster_profiles.control_client.errors import ControlHTTPError
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentFailureKind
 from vonk_agent_protocol.disposition import (
     FAILURE_KIND_DISPOSITION,
     HTTP_STATUS_DISPOSITIONS,
@@ -32,8 +39,13 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.admission_locking import AdmissionLockBusy
+from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError
+from vonk_control.distribution.types import DistributionError, DistributionUnknown
 from vonk_control.failure_classification import disposition, is_definite
 from vonk_control.lifecycle.core import transition
 from vonk_control.lifecycle.types import (
@@ -48,19 +60,33 @@ from vonk_control.lifecycle.types import (
 )
 from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
+    ModelCacheDeletionFenceLost,
     ModelCacheNotFoundInvalid,
+    ModelCacheRemovalOwnerInvalid,
     ModelCacheResolutionInvalid,
     ModelCacheResolutionRefused,
     ModelCacheStorageInvalid,
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
+    _reference_error_type,
 )
-from vonk_control.recovery_policy import RECOVERY, RecoveryPolicy, schedule
+from vonk_control.models.execution import RecipeRun
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recovery_policy import (
+    RECOVERY,
+    ROUTE_RECOVERY,
+    RecoveryPolicy,
+    schedule,
+)
 
-from cluster_profiles import cli_states_generated as cli_words
-from cluster_profiles.control_client.common import observation_disposition
-from cluster_profiles.control_client.errors import ControlHTTPError
-
+from .added_line_guards.scans import rust_test_lines
+from .deterministic_retries import (
+    DISPOSITION_OWNERS,
+    scan_dispositions,
+    scan_rust_dispositions,
+)
+from .recipe_routes_support import NOW as ROUTE_NOW
+from .recipe_routes_support import setup
 from .test_lifecycle_core import FakeAdapter
 
 NOW = datetime(2026, 10, 13, 12, tzinfo=UTC)
@@ -97,8 +123,12 @@ def test_one_http_status_table_for_controller_and_cli(
     assert http_status_disposition(status) is verdict
     # The CLI ships without the contract package; its generated copy of the
     # table must give the same verdict.
-    assert cli_words.HTTP_STATUS_DISPOSITIONS == tuple(
-        (first, last, value.value) for first, last, value in HTTP_STATUS_DISPOSITIONS
+    assert (
+        tuple(
+            (first, last, value.value)
+            for first, last, value in HTTP_STATUS_DISPOSITIONS
+        )
+        == cli_words.HTTP_STATUS_DISPOSITIONS
     )
     if status >= 400:
         error = ControlHTTPError(status, "refused")
@@ -259,7 +289,8 @@ def test_a_deterministic_failure_ends_on_its_first_occurrence_with_its_cause() -
     ended = transition(row, Reported.failed(cause, fence=row.fence), adapter, now).row
     assert ended.state is State.FAILED
     assert ended.retry_count == 0
-    assert ended.reason is not None and "power of two" in ended.reason
+    assert ended.reason is not None
+    assert "power of two" in ended.reason
     # The end is the request's, not the queue's: a fresh request runs at once.
     fresh = Lifecycle(id="fresh", kind="fake", effect=Effect.NONE)
     assert transition(fresh, Tick(), adapter, now).commands == (Execute(),)
@@ -284,25 +315,28 @@ def test_only_a_recurring_uncertain_effect_spends_the_retry_count() -> None:
         assert row.next_action_at is not None
     row, now = _run(adapter, row, now)
     done = transition(row, Reported(Outcome.DONE, fence=row.fence), adapter, now).row
-    assert done.id == "order" and done.state is State.SUCCEEDED
+    assert done.id == "order"
+    assert done.state is State.SUCCEEDED
 
 
 def test_an_owner_outside_the_core_schedules_on_the_same_rule() -> None:
     policy = RecoveryPolicy(max_failures=3, base_delay_seconds=5, max_delay_seconds=60)
     failures = 0
+    step = None
     for _ in range(policy.max_failures * 4):
         step = schedule(policy, "route", failures, Disposition.WAIT, NOW)
         assert step.failures == failures == 0
-        assert step.next_at is not None and step.next_at > NOW
+        assert step.next_at is not None
+        assert step.next_at > NOW
     assert schedule(policy, "route", 0, Disposition.FAIL, NOW).next_at is None
     assert schedule(policy, "route", 0, Disposition.SECURITY, NOW).next_at is None
     for spent in range(1, policy.max_failures * 2 + 1):
         step = schedule(policy, "route", failures, Disposition.OBSERVE, NOW)
         failures = step.failures
         assert failures == spent
-    assert step.next_at is not None and NOW < step.next_at <= NOW + timedelta(
-        seconds=policy.max_delay_seconds
-    )
+    assert step is not None
+    assert step.next_at is not None
+    assert NOW < step.next_at <= NOW + timedelta(seconds=policy.max_delay_seconds)
 
 
 # ------------------------------------------------------------------ the guard
@@ -330,7 +364,6 @@ _GUARD_PATH = "control/src/vonk_control/example.py"
     ],
 )
 def test_the_guard_finds_a_hand_classified_retry(source: str) -> None:
-    from .deterministic_retries import scan_dispositions
 
     assert scan_dispositions(source, path=_GUARD_PATH)
 
@@ -352,13 +385,11 @@ def test_the_guard_finds_a_hand_classified_retry(source: str) -> None:
     ],
 )
 def test_the_guard_leaves_the_one_disposition_alone(source: str) -> None:
-    from .deterministic_retries import scan_dispositions
 
     assert not scan_dispositions(source, path=_GUARD_PATH)
 
 
 def test_the_owners_of_the_primitive_may_build_it() -> None:
-    from .deterministic_retries import DISPOSITION_OWNERS, scan_dispositions
 
     for owner in DISPOSITION_OWNERS:
         assert not scan_dispositions(
@@ -369,9 +400,6 @@ def test_the_owners_of_the_primitive_may_build_it() -> None:
 def test_no_failure_is_classified_outside_the_one_disposition() -> None:
     # Whole tree: every Controller and CLI site reports, counts and limits a
     # failure through ``disposition``/``Reported.failed``/``recovery_policy``.
-    from pathlib import Path
-
-    from .deterministic_retries import scan_dispositions
 
     root = Path(__file__).resolve().parents[2]
     found = [
@@ -392,8 +420,6 @@ def test_a_distribution_identity_mismatch_is_definite_and_unavailability_observe
     # manifest" was a transient unknown, so the same mismatch was re-planned
     # every minute forever.  A mismatch is definite (#1476 names it); a
     # manifest that cannot be read stays an observed unknown.
-    from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-    from vonk_control.distribution.types import DistributionError, DistributionUnknown
 
     mismatch = DistributionError(
         DistributionCode.MODEL_SET_MISMATCH, "assignment model objects differ"
@@ -410,8 +436,6 @@ def test_a_distribution_identity_mismatch_is_definite_and_unavailability_observe
 def test_the_agent_reads_the_exported_status_table() -> None:
     # The Rust agent holds its status match to this export
     # (rust/crates/vonk-agent/tests/failure_disposition.rs).
-    import json
-    from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
     exported = json.loads(
@@ -436,7 +460,6 @@ def test_the_agent_reads_the_exported_status_table() -> None:
     ],
 )
 def test_the_agent_guard_finds_a_hand_read_status(line: str) -> None:
-    from .deterministic_retries import scan_rust_dispositions
 
     path = "rust/crates/vonk-agent/src/executor/heartbeat.rs"
     assert scan_rust_dispositions(line, path=path)
@@ -455,7 +478,6 @@ def test_the_agent_guard_finds_a_hand_read_status(line: str) -> None:
     ],
 )
 def test_the_agent_guard_finds_a_refusal_classified_outside_refusal(line: str) -> None:
-    from .deterministic_retries import scan_rust_dispositions
 
     path = "rust/crates/vonk-agent/src/executor/agent_loop.rs"
     assert scan_rust_dispositions(line, path=path)
@@ -469,10 +491,6 @@ def test_the_agent_guard_finds_a_refusal_classified_outside_refusal(line: str) -
 
 
 def test_no_agent_lane_reads_an_http_status_by_hand() -> None:
-    from pathlib import Path
-
-    from .added_line_guards.scans import rust_test_lines
-    from .deterministic_retries import scan_rust_dispositions
 
     root = Path(__file__).resolve().parents[2]
     found = [
@@ -489,7 +507,7 @@ def test_no_agent_lane_reads_an_http_status_by_hand() -> None:
 
 
 @pytest.mark.parametrize(
-    "error_type,code",
+    ("error_type", "code"),
     [
         (ModelCacheConflictInvalid, ModelCacheCode.STALE_PLAN),
         (ModelCacheResolutionInvalid, ModelCacheCode.MODEL_PIN_INVALID),
@@ -506,7 +524,7 @@ def test_invalid_cache_errors_end_instead_of_spending_observation_attempts(
 
 
 @pytest.mark.parametrize(
-    "error_type,code",
+    ("error_type", "code"),
     [
         (ModelCacheStorageRefused, ModelCacheCode.LOCK_UNAVAILABLE),
         (ModelCacheStorageRefused, ModelCacheCode.REMOVAL_PATH_UNSAFE),
@@ -532,7 +550,7 @@ def test_discarded_unverified_bytes_can_be_fetched_again_under_the_same_pin(code
 
 
 @pytest.mark.parametrize(
-    "condition,expected",
+    ("condition", "expected"),
     [
         ("invalid", Disposition.FAIL),
         ("busy", Disposition.OBSERVE),
@@ -544,13 +562,6 @@ def test_cache_reference_adapter_preserves_typed_unknowns_and_refusals(
     condition, expected
 ):
     """A non-retryable effect is not necessarily known; lost authority remains a refusal."""
-    from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
-    from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError
-    from vonk_control.model_cache.errors import (
-        ModelCacheDeletionFenceLost,
-        ModelCacheRemovalOwnerInvalid,
-        _reference_error_type,
-    )
 
     if condition == "unknown_owner":
         error = ModelCacheRemovalOwnerInvalid(
@@ -576,16 +587,9 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
     tmp_path, monkeypatch
 ) -> None:
     """Catches a mapper conflict becoming terminal after six publication passes."""
-    from sqlalchemy.orm.exc import StaleDataError
-    from vonk_agent_protocol.state_machines import RouteState
-    from vonk_control.models.execution import RecipeRun
-    from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
-    from vonk_control.recovery_policy import ROUTE_RECOVERY
-
-    from .recipe_routes_support import NOW, setup
 
     routes, _runtime, applied, run_id = setup(tmp_path)
-    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: NOW)
+    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: ROUTE_NOW)
     with routes.sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
@@ -600,11 +604,13 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
             worker._publish_runs((run_id,))
             with routes.sessions() as session:
                 run = session.get(RecipeRun, run_id)
-                assert run is not None and run.route_state == RouteState.PENDING
+                assert run is not None
+                assert run.route_state == RouteState.PENDING
                 assert run.route_attempts == 0
                 assert run.next_action_at is not None
     worker._publish_runs((run_id,))
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == RouteState.PUBLISHED
+        assert run is not None
+        assert run.route_state == RouteState.PUBLISHED
     assert len(applied) == 1

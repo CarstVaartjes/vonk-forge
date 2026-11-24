@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import io
 import json
@@ -9,9 +10,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
@@ -19,24 +21,23 @@ from typing import Self, cast
 
 import httpx2
 import pytest
-from vonk_control.fleet_projection.common import FleetSnapshot as OwnedFleetSnapshot
-from vonk_control.observation.transfer import (
-    OBSERVATION_MEDIA_TYPE,
-    ObservationTransferChunk,
-    ObservationTransferComplete,
-    ObservationTransferStart,
-    _record,
-    observation_response,
-)
 
 from cluster_profiles import cli
+from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
+from cluster_profiles.control_client import client as client_module
+from cluster_profiles.control_client import common, schema, transfers
 from cluster_profiles.control_client.errors import (
     ControlClientError,
+    ControlHTTPError,
     ControlTimeout,
     LocalFilesystemError,
 )
 from cluster_profiles.control_client.transfers import ControlClient
 from cluster_profiles.control_client.transport import _RecordingTransport
+from cluster_profiles.controller_cli.observation import _poll_path
+from cluster_profiles.controller_cli.profile_load import (
+    _review_and_submit_profile_load,
+)
 from cluster_profiles.generated_control.models.fleet_profile_definition import (
     FleetProfileDefinition,
 )
@@ -52,7 +53,39 @@ from cluster_profiles.generated_control.models.fleet_profile_preview_response im
 from cluster_profiles.generated_control.models.fleet_profile_scope_preview import (
     FleetProfileScopePreview,
 )
+from cluster_profiles.generated_control.models.fleet_snapshot import FleetSnapshot
+from cluster_profiles.generated_control.models.job_detail_response import (
+    JobDetailResponse,
+)
 from control.tests.observation_transfer_peer import ObservationHTTPPeer
+from vonk_agent_protocol.agent_words import AgentClientDecision
+from vonk_agent_protocol.error_response import (
+    BoundedErrorResponse,
+    ErrorContextResponse,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    SecurityRefusalReason,
+)
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+    FleetProfileApplicationResult,
+)
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_projection.common import FleetSnapshot as OwnedFleetSnapshot
+from vonk_control.observation.transfer import (
+    OBSERVATION_MEDIA_TYPE,
+    ObservationTransferChunk,
+    ObservationTransferComplete,
+    ObservationTransferError,
+    ObservationTransferStart,
+    _record,
+    observation_response,
+)
+from vonk_control.strict_json import serialize_json_value
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +97,7 @@ def observation_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
 
 @contextmanager
-def _not_adopted() -> Iterator[list[Exception]]:
+def _not_adopted() -> Generator[list[Exception]]:
     failures: list[Exception] = []
     try:
         yield failures
@@ -658,9 +691,10 @@ def _fleet_transfer_peer(payload: dict[str, object]) -> ObservationHTTPPeer:
     )
 
     async def collect() -> bytes:
-        parts: list[bytes] = []
-        async for part in response.body_iterator:
-            parts.append(part.encode() if isinstance(part, str) else bytes(part))
+        parts: list[bytes] = [
+            part.encode() if isinstance(part, str) else bytes(part)
+            async for part in response.body_iterator
+        ]
         return b"".join(parts)
 
     body = asyncio.run(collect())
@@ -742,7 +776,6 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
 def test_generated_transport_rejects_malformed_raw_response(
     tmp_path: Path, payload: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cluster_profiles.generated_control.models.fleet_snapshot import FleetSnapshot
 
     peers: list[ObservationHTTPPeer] = []
     requests: list[urllib.request.Request] = []
@@ -751,7 +784,8 @@ def test_generated_transport_rejects_malformed_raw_response(
     def opener(
         request: urllib.request.Request, *, timeout: float
     ) -> ObservationHTTPPeer:
-        assert timeout > 0 and request.get_method() == "GET"
+        assert timeout > 0
+        assert request.get_method() == "GET"
         requests.append(request)
         peer = _fleet_transfer_peer(payload)
         peer.headers["X-Request-ID"] = "canonical-schema-fixture"
@@ -770,7 +804,8 @@ def test_generated_transport_rejects_malformed_raw_response(
     with _not_adopted() as failed:
         client.fleet()
     assert "schema-private-fixture-value" not in str(failed[0])
-    assert len(requests) > 1 and not attrs_calls
+    assert len(requests) > 1
+    assert not attrs_calls
     assert all(peer._body.closed for peer in peers)
     monkeypatch.undo()
     valid = {
@@ -786,8 +821,6 @@ def test_generated_transport_rejects_malformed_raw_response(
 def test_observation_callback_hides_arbitrary_validation_exception_text(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cluster_profiles.control_client import client as control_client
-
     valid = {
         "authority_revision": "a" * 64,
         "event_cursor": 0,
@@ -801,15 +834,16 @@ def test_observation_callback_hides_arbitrary_validation_exception_text(
     def opener(
         request: urllib.request.Request, *, timeout: float
     ) -> ObservationHTTPPeer:
-        assert timeout > 0 and request.get_method() == "GET"
+        assert timeout > 0
+        assert request.get_method() == "GET"
         requests.append(request)
         return _fleet_transfer_peer(valid)
 
     def unsafe_validator(_component: str, _document: object) -> dict[str, object]:
         raise ValueError("private arbitrary parser value must not be exported")
 
-    original_validator = control_client.validate_control_document
-    monkeypatch.setattr(control_client, "validate_control_document", unsafe_validator)
+    original_validator = client_module.validate_control_document
+    monkeypatch.setattr(client_module, "validate_control_document", unsafe_validator)
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
@@ -817,7 +851,7 @@ def test_observation_callback_hides_arbitrary_validation_exception_text(
         client.fleet()
     assert "private arbitrary parser value" not in str(failed[0])
     assert len(requests) > 1
-    monkeypatch.setattr(control_client, "validate_control_document", original_validator)
+    monkeypatch.setattr(client_module, "validate_control_document", original_validator)
     assert client.fleet().to_dict()["nodes"] == []
 
 
@@ -825,7 +859,7 @@ def test_generated_transport_rejects_malformed_request_before_network() -> None:
     class _CountingTransport(httpx2.BaseTransport):
         calls = 0
 
-        def handle_request(self, _request: httpx2.Request) -> httpx2.Response:
+        def handle_request(self, request: httpx2.Request) -> httpx2.Response:
             self.calls += 1
             raise AssertionError("malformed request reached the network")
 
@@ -1054,8 +1088,6 @@ def test_artifact_output_download_preserves_an_existing_destination(
 def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cluster_profiles.control_client import transfers as control_client
-
     content = b"verified output"
     digest = hashlib.sha256(content).hexdigest()
     client = ControlClient(
@@ -1067,12 +1099,12 @@ def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
     )
     destination = tmp_path / "result.png"
 
-    original_link = control_client.os.link
+    original_link = transfers.os.link
 
     def disk_full(*_args, **_kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(control_client.os, "link", disk_full)
+    monkeypatch.setattr(transfers.os, "link", disk_full)
 
     with _not_adopted():
         client.download_file(
@@ -1086,7 +1118,7 @@ def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
 
     assert not destination.exists()
     assert list(tmp_path.glob(".result.png.*.download")) == []
-    control_client.os.link = original_link
+    transfers.os.link = original_link
     client.download_file(
         f"/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/results/result.png/{digest}",
         destination,
@@ -1100,9 +1132,6 @@ def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
 
 
 def _job_receipt(job_id: str, state: str):
-    from cluster_profiles.generated_control.models.job_detail_response import (
-        JobDetailResponse,
-    )
 
     return JobDetailResponse(
         authority_revision="a" * 64,
@@ -1130,7 +1159,6 @@ def test_wait_initial_and_later_unknown_share_budget_and_fresh_job_is_admitted(
     fault: str,
     verified_first: bool,
 ) -> None:
-    from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
 
     job_id = "12345678-1234-4123-8123-123456789abc"
     calls: list[tuple[str, float]] = []
@@ -1150,8 +1178,6 @@ def test_wait_initial_and_later_unknown_share_budget_and_fresh_job_is_admitted(
                 200, _job_receipt("22345678-1234-4123-8123-123456789abc", SUCCEEDED)
             )
         if fault == "oversized":
-            from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-
             return _Response(200, {"padding": "x" * MAX_CONTROL_DOCUMENT_BYTES})
         return _Response(503 if fault == "unavailable" else 200, {"broken": True})
 
@@ -1219,7 +1245,6 @@ def test_real_denial_never_reads_untrusted_body_or_replays_mutation(
 ) -> None:
     calls: list[urllib.request.Request] = []
     denied = [True]
-    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 
     code = (
         SecurityRefusalReason.CONTROLLER_AUTHENTICATION_REQUIRED
@@ -1276,7 +1301,6 @@ def test_wait_invalid_options_have_no_effect_and_valid_fresh_read_works(
     invalid: float,
     option: str,
 ) -> None:
-    from cluster_profiles.cli_states_generated import SUCCEEDED
 
     calls: list[urllib.request.Request] = []
     job_id = "12345678-1234-4123-8123-123456789abc"
@@ -1303,7 +1327,6 @@ def test_unreadable_bundled_schema_recovers_before_network(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cluster_profiles.control_client import schema
 
     original = schema.files
     reads = []
@@ -1350,8 +1373,6 @@ def test_generated_request_validation_cannot_spend_the_budget_then_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     observation_clock: list[float],
 ) -> None:
-    from cluster_profiles.cli_states_generated import SUCCEEDED
-    from cluster_profiles.control_client import schema
 
     original = schema._request_contract
     calls = []
@@ -1381,9 +1402,6 @@ def test_damaged_cached_response_schema_is_discarded_before_adoption(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from copy import deepcopy
-
-    from cluster_profiles.control_client import schema
 
     schema._control_openapi.cache_clear()
     good = json.loads(json.dumps(schema._control_openapi()))
@@ -1430,17 +1448,6 @@ def test_damaged_cached_response_schema_is_discarded_before_adoption(
 def test_preview_recovery_uses_canonical_transport_before_any_load(
     tmp_path, binding, fault_count
 ):
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.fleet_profile_contract.applications import (
-        FleetProfileApplicationProgress,
-        FleetProfileApplicationResult,
-    )
-    from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
-    from vonk_control.strict_json import serialize_json_value
-
-    from cluster_profiles.controller_cli.profile_load import (
-        _review_and_submit_profile_load,
-    )
 
     key = "11111111-1111-4111-8111-111111111111"
     application = FleetProfileApplicationView(
@@ -1515,10 +1522,6 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
 def test_whole_observation_unavailable_keeps_bytes_unconsumed_and_recovers(
     tmp_path, observation_clock, exhaust_budget
 ):
-    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-    from vonk_control.observation.transfer import ObservationTransferError
-
-    from cluster_profiles.controller_cli.observation import _poll_path
 
     snapshot = {
         "authority_revision": "a" * 64,
@@ -1575,7 +1578,6 @@ def test_whole_observation_unavailable_keeps_bytes_unconsumed_and_recovers(
         assert observation_clock[0] > started
         repaired[0] = True
         result = observe()
-    from vonk_control.strict_json import serialize_json_value
 
     assert result == serialize_json_value(
         OwnedFleetSnapshot.model_validate_json(json.dumps(snapshot))
@@ -1600,11 +1602,15 @@ def test_status_without_envelope_never_authorizes_retry(tmp_path, status, genera
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
+    request = (
+        functools.partial(client.job, "12345678-1234-4123-8123-123456789abc")
+        if generated
+        else functools.partial(
+            client.get, "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
+        )
+    )
     with pytest.raises(ControlClientError):
-        if generated:
-            client.job("12345678-1234-4123-8123-123456789abc")
-        else:
-            client.get("/api/artifact-jobs/12345678-1234-4123-8123-123456789abc")
+        request()
 
 
 @pytest.mark.parametrize("fault", [500, 503, 429, "timeout", "body_timeout"])
@@ -1613,7 +1619,6 @@ def test_retry_waits_for_hint_or_full_jitter(
     tmp_path, monkeypatch, observation_clock, fault, generated
 ):
     """Catch deterministic backoff, ignored Retry-After, and dropped transient reasons."""
-    from cluster_profiles.control_client import common
 
     monkeypatch.setattr(common.random, "uniform", lambda low, high: high / 2)
     started = observation_clock[0]
@@ -1660,7 +1665,6 @@ def test_persistent_timeout_backoff_stays_jittered_and_capped(
     tmp_path, monkeypatch, observation_clock
 ):
     """Catch deterministic delays and a retry ceiling that keeps growing."""
-    from cluster_profiles.control_client import common
 
     ceilings = []
     started = observation_clock[0]
@@ -1689,12 +1693,6 @@ def test_persistent_timeout_backoff_stays_jittered_and_capped(
 @pytest.mark.parametrize("generated", [False, True])
 def test_typed_internal_error_is_not_retried(tmp_path, generated):
     """A typed deterministic 500 must not be replayed until the request deadline."""
-    from vonk_agent_protocol.agent_words import AgentClientDecision
-    from vonk_agent_protocol.error_response import (
-        BoundedErrorResponse,
-        ErrorContextResponse,
-    )
-    from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 
     calls = []
     request_id = "47057540-fc9b-494e-ad37-152c0fb154cb"
@@ -1720,13 +1718,14 @@ def test_typed_internal_error_is_not_retried(tmp_path, generated):
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    from cluster_profiles.control_client.errors import ControlHTTPError
 
+    request = (
+        functools.partial(client.job, "12345678-1234-4123-8123-123456789abc")
+        if generated
+        else functools.partial(client.get, "/api/model/model/remove-review")
+    )
     with pytest.raises(ControlHTTPError) as caught:
-        if generated:
-            client.job("12345678-1234-4123-8123-123456789abc")
-        else:
-            client.get("/api/model/model/remove-review")
+        request()
     assert len(calls) == 1
     assert caught.value.retryable is False
     assert caught.value.context is not None

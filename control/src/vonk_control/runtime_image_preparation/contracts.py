@@ -8,13 +8,13 @@ import os
 import re
 import uuid
 from collections.abc import Mapping, Sequence
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import Field, ValidationError
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -27,9 +27,8 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-from vonk_agent_protocol.wire_model import Digest, WireModel
-
-from ..categorized_faults import security_reason
+from vonk_agent_protocol.wire_model import Digest, WireModel, canonical_message
+from vonk_control.categorized_faults import security_reason
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -414,7 +413,7 @@ def _atomic_json_replace(path: Path, value: Mapping[str, object]) -> None:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        temporary.replace(path)
         directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
         try:
             os.fsync(directory)
@@ -432,7 +431,5 @@ def _atomic_json_replace(path: Path, value: Mapping[str, object]) -> None:
 
 
 def _unlink_quietly(path: Path) -> None:
-    try:
+    with suppress(OSError):
         path.unlink(missing_ok=True)
-    except OSError:
-        pass

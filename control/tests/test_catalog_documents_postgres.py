@@ -12,6 +12,8 @@ from alembic.config import Config
 from sqlalchemy import Table, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256
+
 from vonk_control.catalog.entities import (
     CatalogConflict,
     CatalogEntityService,
@@ -23,7 +25,6 @@ from vonk_control.models.catalog import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import create_draft, reword
 

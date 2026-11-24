@@ -19,7 +19,7 @@ import re
 import secrets
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -32,6 +32,8 @@ import httpx2
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi import Path as PathParameter
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from vonk_forge_contracts import EndpointAlias
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     InvalidRequestReason,
@@ -39,17 +41,23 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
-from vonk_forge_contracts import EndpointAlias
-
+from vonk_control.auth import MUTATION_ROLES, Actor
+from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.gateway.keys_contract import (
+    GatewayKeyCreated,
+    GatewayKeyRevoked,
+    GatewayKeyView,
+)
+from vonk_control.gateway.route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operator_acceptance import (
+    OperatorReceiptResolver,
+    operator_acceptance,
+)
 from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..auth import MUTATION_ROLES, Actor
-from ..capabilities import CapabilityUnavailableError
-from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
-from ..runtime_init import GATEWAY_MASTER_KEY_PATH
-from ..strict_json import StrictJSONModel
-from .route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
+from vonk_control.runtime_init import GATEWAY_MASTER_KEY_PATH
+from vonk_control.strict_json import StrictJSONModel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -126,36 +134,10 @@ class GatewayKeyCreateRequest(StrictJSONModel):
     expires: str | None = Field(default=None, pattern=_DURATION_PATTERN)
 
 
-class GatewayKeyView(StrictJSONModel):
-    """One gateway client key without its secret. Empty `models` means all."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    name: str = Field(min_length=1, max_length=256)
-    models: list[str]
-    created_at: str | None = None
-    expires_at: str | None = None
-    last_used_at: str | None = None
-
-
-class GatewayKeyCreated(GatewayKeyView):
-    """The retained key for this mutation; the exact receipt can be replayed."""
-
-    key: str = Field(min_length=1, max_length=512)
-    request_id: str | None = Field(default=None, min_length=1, max_length=128)
-
-
 class GatewayKeyList(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     keys: list[GatewayKeyView]
-
-
-class GatewayKeyRevoked(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    name: str = Field(min_length=1, max_length=63)
-    request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class _LiteLlmRequest(BaseModel):
@@ -956,7 +938,7 @@ class GatewayKeyService:
         return GatewayKeyRevoked(name=name)
 
     @contextmanager
-    def _mutation_claim(self, name: str) -> Iterator[bool]:
+    def _mutation_claim(self, name: str) -> Generator[bool]:
         descriptor: int | None = None
         acquired = False
         try:
@@ -1217,7 +1199,7 @@ def _write_private(path: Path, content: str) -> None:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        Path(temporary).replace(path)
         directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)
@@ -1241,7 +1223,6 @@ def install_gateway_key_routes(
     actor_dependency: Any,
     service: GatewayKeyService | None,
 ) -> None:
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS[("get", _KEY_PATH)] = "listGatewayKeys"
     _ADMIN_OPERATION_IDS[("post", _KEY_PATH)] = "createGatewayKey"
@@ -1261,8 +1242,8 @@ def install_gateway_key_routes(
         operation_id="getGatewayKeyReceipt",
     )
     def key_receipt(
-        name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
-        request_id: str = Query(min_length=1, max_length=128),
+        name: Annotated[str, PathParameter(pattern=_NAME_PATTERN, max_length=63)],
+        request_id: Annotated[str, Query(min_length=1, max_length=128)],
         actor: Actor = actor_dependency,
     ) -> GatewayMutationStatus:
         authorize(actor, _KEY_PATH)
@@ -1277,7 +1258,7 @@ def install_gateway_key_routes(
         operation_id="listGatewayKeys",
     )
     def list_gateway_keys(
-        actor: Actor = actor_dependency,
+        _actor: Actor = actor_dependency,
     ) -> GatewayKeyList | UnknownError:
         if service is None:
             return UnknownError(
@@ -1321,8 +1302,9 @@ def install_gateway_key_routes(
     )
     @operator_acceptance(ReceiptPolicy.KEY)
     def revoke_gateway_key(
+        *,
         request_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
+        name: Annotated[str, PathParameter(pattern=_NAME_PATTERN, max_length=63)],
         actor: Actor = actor_dependency,
     ) -> GatewayKeyRevoked:
         authorize(actor, _REVOKE_PATH)
@@ -1345,7 +1327,7 @@ def install_gateway_key_routes(
     )
     @operator_acceptance(ReceiptPolicy.KEY)
     def roll_gateway_key(
-        name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
+        name: Annotated[str, PathParameter(pattern=_NAME_PATTERN, max_length=63)],
         request_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         actor: Actor = actor_dependency,
     ) -> GatewayKeyCreated:

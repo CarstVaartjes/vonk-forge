@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import shutil
 import uuid
-from datetime import timedelta
+from concurrent.futures import Future, wait
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,10 +16,13 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.auth import Actor
 from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.model_cache import removal_execution as _removal_execution
 from vonk_control.model_cache.api import (
     install_model_operator_routes,
 )
@@ -39,9 +44,9 @@ from vonk_control.models.cache import (
 from vonk_control.models.catalog import (
     CatalogDocumentHead,
 )
-from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import create_draft
+from .insert_collision_support import Rendezvous
 from .model_cache_support import (
     NOW,
     _admit_fresh_download,
@@ -74,7 +79,6 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
     assert downloaded.state == "succeeded"
     set_digest = str(downloaded.artifact_set_sha256)
     owners = {set_digest: ("installation 1",)}
-    from vonk_control.model_cache import removal_execution as _removal_execution
 
     real_reasons = _removal_execution._reason_projection
 
@@ -100,7 +104,8 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
             row.next_action_at = None  # the one retry clock: due now
     waiting = service.get_operation(removal.id)
     assert waiting.state in {"queued", LifecycleState.BACKOFF}
-    assert waiting.failure is not None and waiting.failure["retryable"] is True
+    assert waiting.failure is not None
+    assert waiting.failure["retryable"] is True
     with sessions() as session:
         assert session.get(ModelCacheSet, set_digest) is not None
 
@@ -134,7 +139,7 @@ def _seed_removal(service, tmp_path: Path, model: str, key: str):
 
 
 def _advance_on_fake_clock(
-    service, sessions, removal_id: str, clock: list, rounds: int
+    service, sessions, removal_id: str, clock: list[datetime], rounds: int
 ):
     for _ in range(rounds):
         clock[0] += timedelta(hours=1)
@@ -155,7 +160,6 @@ def test_removal_waiting_past_the_old_lifetime_cap_still_succeeds(
         service, tmp_path, "f" * 64, "00000000-0000-4000-8000-000000001050"
     )
     owners = {set_digest: ("installation 1",)}
-    from vonk_control.model_cache import removal_execution as _removal_execution
 
     real_reasons = _removal_execution._reason_projection
     monkeypatch.setattr(
@@ -391,14 +395,13 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
 def test_model_cache_parallel_ranges_publish_or_fall_back(
     cache, tmp_path, monkeypatch, range_supported
 ):
-    import threading
 
     _existing, sessions = cache
     payload = bytes(range(256)) * 256
     monkeypatch.setattr(
         "vonk_control.model_cache.constants._PARALLEL_RANGE_MIN_BYTES", 1
     )
-    barrier = threading.Barrier(4)
+    barrier = Rendezvous(4)
     requests = []
 
     class AfterPeers(httpx2.SyncByteStream):
@@ -408,7 +411,7 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(
             self.content = content
 
         def __iter__(self):
-            barrier.wait(timeout=30)  # fails if the range transfers serialize
+            barrier.wait()  # fails if the range transfers serialize
             yield self.content
 
     def handler(request):
@@ -489,7 +492,6 @@ def test_cancel_during_verification_does_not_publish(cache, tmp_path, monkeypatc
 def test_range_disk_reservation_falls_back_without_source_io(
     cache, tmp_path, monkeypatch
 ):
-    import shutil
 
     service, _sessions = cache
     spec = ArtifactSpec.from_manifest(
@@ -539,7 +541,8 @@ def test_permanent_missing_source_ends_and_admits_a_fresh_download(
         assert f"HTTP {status}" in detail
         assert served["count"] == 5
         # Nothing waits any more: no blocker, no retry clock.
-        assert gone.blockers == () and gone.next_attempt_at is None
+        assert gone.blockers == ()
+        assert gone.next_attempt_at is None
         assert service.run_pending() == 0
         fresh = _download(
             service,
@@ -757,7 +760,6 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
 def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
     threaded_cache, tmp_path, monkeypatch
 ):
-    from concurrent.futures import Future, wait
 
     _existing, sessions = threaded_cache
     handler, payload, served = _gone_handler([404] * 5)
@@ -788,7 +790,7 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
         service.tick(limit=1)
         futures = service._background_operations[operation.id].futures
         assert isinstance(futures, list)
-        running = [future for future in futures if isinstance(future, Future)]
+        running = [future for future in futures if isinstance(future, Future)]  # pyright: ignore[reportUnnecessaryIsInstance]  # the isinstance is the test's runtime assertion
         assert len(running) == len(futures) == 1
         assert not wait(running, timeout=30).not_done
         with observe_unknown():

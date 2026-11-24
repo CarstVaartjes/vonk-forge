@@ -10,38 +10,42 @@ from fastapi import FastAPI, HTTPException, Path, Query, status
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import Response
+
 from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
-
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..agent_upgrades.contract import AgentUpgradeRequestIntent
-from ..api_availability import AVAILABILITY_ERRORS
-from ..auth import Actor
-from ..enrollment.contract import (
+from vonk_control.admission_locking import report_admission_locks
+from vonk_control.agent_upgrades.contract import AgentUpgradeRequestIntent
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.auth import Actor
+from vonk_control.enrollment.contract import (
     ENROLLMENT_ID_PATTERN,
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
     EnrollmentRevocationStatus,
 )
-from ..fleet_projection.common import FleetNode, FleetNodeIdentity, FleetSnapshot
-from ..metrics.prometheus_api import PrometheusReader, install_metrics_routes
-from ..models.execution import RecipeRun, RunNode
-from ..observation.platform_errors import (
+from vonk_control.fleet_projection.common import (
+    FleetNode,
+    FleetNodeIdentity,
+    FleetSnapshot,
+)
+from vonk_control.library.api import install_library_routes
+from vonk_control.metrics.prometheus_api import PrometheusReader, install_metrics_routes
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.observation.platform_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )
-from ..observation.transfer import (
+from vonk_control.observation.transfer import (
     ObservationTransferRecord,
     ObservationTransferResponse,
     observation_openapi,
     observation_response,
 )
-from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import operator_acceptance
-from ..run_states import ENDED_RUN_STATES
-from .contracts import (
+from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
+from vonk_control.operation_api.contracts import bounded_error_responses
+from vonk_control.operator_acceptance import operator_acceptance
+from vonk_control.operator_projection_api.contracts import (
     _SELECTOR_PATTERN,
     FLEET_OPERATION_IDS,
     FleetActionResponse,
@@ -53,8 +57,14 @@ from .contracts import (
     FleetUpgradeRequest,
     _fleet_work_state,
 )
-from .errors import _node, _operator_error, _require_mutation
-from .services import FleetOperatorServices
+from vonk_control.operator_projection_api.errors import (
+    _node,
+    _operator_error,
+    _require_mutation,
+)
+from vonk_control.operator_projection_api.services import FleetOperatorServices
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.run_states import ENDED_RUN_STATES
 
 
 def install_operator_projection_routes(
@@ -72,9 +82,6 @@ def install_operator_projection_routes(
     it to enrollment, signed upgrades and retained authenticated evidence; this
     module never falls back to SSH or synthetic values.
     """
-
-    from ..library.api import install_library_routes
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(FLEET_OPERATION_IDS)
     install_library_routes(
@@ -165,7 +172,6 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=403, detail="insufficient role")
         if fleet_services is None or fleet_services.sessions is None:
             raise HTTPException(status_code=503, detail="fleet locks unavailable")
-        from ..admission_locking import report_admission_locks
 
         try:
             with fleet_services.sessions() as session:
@@ -196,6 +202,7 @@ def install_operator_projection_routes(
         source: Annotated[
             Literal["client", "monitor", "runtime", "job"] | None, Query()
         ] = None,
+        *,
         follow: Annotated[bool, Query()] = False,
         _actor: Actor = authenticated,
     ) -> FleetLogResponse:
@@ -205,7 +212,7 @@ def install_operator_projection_routes(
                 status_code=503, detail="fleet log evidence unavailable"
             )
         try:
-            value = fleet_services.logs.list(
+            return fleet_services.logs.list(
                 node.id,
                 since=since,
                 lines=lines,
@@ -213,7 +220,6 @@ def install_operator_projection_routes(
                 source=source,
                 follow=follow,
             )
-            return value
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
 
@@ -283,12 +289,11 @@ def install_operator_projection_routes(
         if fleet_services is None or fleet_services.enrollment is None:
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
         try:
-            value = fleet_services.enrollment.create_named(
+            return fleet_services.enrollment.create_named(
                 name=body.name,
                 actor=actor.subject,
                 request_id=body.request_key,
             )
-            return value
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
 
@@ -309,10 +314,9 @@ def install_operator_projection_routes(
         if fleet_services is None or fleet_services.enrollment is None:
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
         try:
-            value = fleet_services.enrollment.create_reenrollment(
+            return fleet_services.enrollment.create_reenrollment(
                 node.id, actor.subject, body.request_key
             )
-            return value
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
 
@@ -357,10 +361,7 @@ def install_operator_projection_routes(
         if fleet_services is None or fleet_services.enrollment is None:
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
         try:
-            result = fleet_services.enrollment.revoke_grant(
-                grant_id, actor=actor.subject
-            )
-            return result
+            return fleet_services.enrollment.revoke_grant(grant_id, actor=actor.subject)
         except (
             KeyError,
             OSError,
@@ -389,13 +390,12 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet removal unavailable")
         try:
             revocation = fleet_services.enrollment.revoke_node(node.id, actor.subject)
-            result = FleetActionResponse(
+            return FleetActionResponse(
                 action="remove",
                 state=ModelCacheOperatorStatus.ACCEPTED,
                 node_id=node.id,
                 revocation=revocation,
             )
-            return result
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
 
@@ -426,7 +426,7 @@ def install_operator_projection_routes(
                 request_intent=request_intent,
             )
             if existing is not None:
-                result = FleetActionResponse(
+                return FleetActionResponse(
                     action="upgrade",
                     state=_fleet_work_state(existing.state),
                     operation_id=str(getattr(existing, "id", "")) or None,
@@ -434,7 +434,6 @@ def install_operator_projection_routes(
                     request_key=body.request_key,
                     targets=list(getattr(existing, "targets", ())),
                 )
-                return result
             fleet_snapshot = snapshot()
             nodes = (
                 list(fleet_snapshot.nodes)
@@ -456,7 +455,7 @@ def install_operator_projection_routes(
                 request_id=body.request_key,
                 request_intent=request_intent,
             )
-            result = FleetActionResponse(
+            return FleetActionResponse(
                 action="upgrade",
                 state=_fleet_work_state(job.state),
                 operation_id=str(getattr(job, "id", "")) or None,
@@ -464,7 +463,6 @@ def install_operator_projection_routes(
                 request_key=body.request_key,
                 targets=list(getattr(job, "targets", node_ids)),
             )
-            return result
         except ObservationCaptureUnavailable:
             raise
         except (OSError, RuntimeError, TypeError, ValueError) as error:

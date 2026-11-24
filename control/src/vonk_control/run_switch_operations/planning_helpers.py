@@ -12,7 +12,7 @@ from typing import (
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, defer
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
 from vonk_agent_protocol.reason_codes.admission import (
     AdmissionCode,
@@ -21,22 +21,22 @@ from vonk_agent_protocol.reason_codes.admission import (
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode, ReconcileCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
-
-from ..categorized_errors import (
-    InvalidValue,
-)
-from ..jobs.documents import RecipeStartParent, RunSwitchJobPayload
-from ..memory_reservations import (
+from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.categorized_errors import InvalidValue
+from vonk_control.jobs.documents import RecipeStartParent, RunSwitchJobPayload
+from vonk_control.memory_reservations import (
     MEMORY_RESERVATION_KINDS,
     reviewed_run_memory_reservations,
 )
-from ..models.jobs import Job
-from ..models.telemetry import NodeInventorySnapshot
-from ..operations.blockers import SwapShortfallEvidence
-from ..resource_planning.memory_kinds import memory_reservation_kinds
-from ..resource_planning.settings import resolve_effective_settings
-from ..resource_planning.types import ResourceReason
-from ..run_switch_contract.evidence import (
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.operations.blockers import SwapShortfallEvidence
+from vonk_control.resource_planning.memory_kinds import memory_reservation_kinds
+from vonk_control.resource_planning.settings import resolve_effective_settings
+from vonk_control.resource_planning.types import ResourceReason
+from vonk_control.run_switch_contract.evidence import (
     ConditionalPostStopMemoryCheck,
     EffectiveParallelism,
     EffectiveSettingsSelection,
@@ -45,20 +45,21 @@ from ..run_switch_contract.evidence import (
     SparkFit,
     StopImpact,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.vocabulary import (
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.vocabulary import (
     RunSwitchReasonScope,
     RunSwitchReasonSeverity,
 )
-from ..stored.json_values import read_row_column
-from .constants import (
+from vonk_control.run_switch_operations.constants import (
     _CHANGE_EFFECTS_ADAPTER,
     _KNOBS_ADAPTER,
     _MEMORY_STOP_CONDITIONAL_REFUSALS,
     _SWAP_COMPONENT,
 )
-from .interfaces import ArtifactInspection
+from vonk_control.run_switch_operations.contracts import ScopeIntentStatus
+from vonk_control.run_switch_operations.interfaces import ArtifactInspection
+from vonk_control.stored.rows import read_row_column
 
 #: The lock-contention word of every admission owner a phase can wait on.
 _CAPACITY_BUSY = frozenset(
@@ -87,7 +88,7 @@ def _refused_retries(progress: RunSwitchOperationResult) -> int:
 def _now(clock: Callable[[], datetime]) -> datetime:
     value = clock()
     if (
-        not isinstance(value, datetime)
+        not isinstance(value, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         or value.tzinfo is None
         or value.utcoffset() is None
     ):
@@ -375,7 +376,7 @@ def _latest_inventory(
         maximum_age_seconds=maximum_age_seconds,
         evidence_digest=(
             snapshot.evidence_digest
-            if isinstance(snapshot.evidence_digest, str)
+            if isinstance(snapshot.evidence_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             and len(snapshot.evidence_digest) == 64
             else None
         ),
@@ -402,3 +403,23 @@ def _inspection_unavailable(detail: str) -> ArtifactInspection:
             ),
         ),
     )
+
+
+def _scope_intent_status(session: Session, job: Job) -> ScopeIntentStatus:
+    """Distinguish malformed authority from a later authorized node head."""
+
+    parent = _run_switch_payload(job)
+    ordinal = parent.workload_intent_ordinal if parent is not None else None
+    if type(ordinal) is not int or ordinal < 1:
+        return ScopeIntentStatus.INVALID
+    nodes = session.scalars(select(AgentNode).where(AgentNode.node_id.in_(job.targets)))
+    current = list(nodes)
+    if any(node.revoked_at is not None for node in current):
+        return ScopeIntentStatus.INVALID
+    if len(current) != len(job.targets):
+        return ScopeIntentStatus.MISSING_TARGET
+    if any(node.state != NodeIdentityState.ACTIVE for node in current):
+        return ScopeIntentStatus.WAITING
+    if any(node.workload_intent_ordinal != ordinal for node in current):
+        return ScopeIntentStatus.SUPERSEDED
+    return ScopeIntentStatus.CURRENT

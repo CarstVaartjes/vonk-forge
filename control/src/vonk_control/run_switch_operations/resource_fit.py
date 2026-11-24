@@ -11,76 +11,78 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import ModelDefinition
+
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState, ReservationState
-from vonk_forge_contracts import ModelDefinition
-
-from ..attempt_residues import unowned_never_installed
-from ..catalog.revision_contract import published_steady_peaks
-from ..disk_reservations import (
+from vonk_control.attempt_residues import unowned_never_installed
+from vonk_control.catalog.revision_contract import published_steady_peaks
+from vonk_control.disk_reservations import (
     describe_disk_charges,
     model_sets_stored_on_node,
     outstanding_disk_charges,
 )
-from ..fleet_profiles.capacity import (
-    reservation_visible,
-)
-from ..gpu.health import gpu_health_reason
-from ..install_admission.contracts import (
+from vonk_control.fleet_profiles.capacity import reservation_visible
+from vonk_control.gpu.health import gpu_health_reason
+from vonk_control.install_admission.contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
     IMAGE_PULL_CAPABILITY,
 )
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    retire_as_unknown,
-)
-from ..load_swap import swap_capacity
-from ..memory_reservations import (
-    memory_reservations,
-)
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import ResourceReservation
-from ..models.fleet import AgentNode
-from ..observed_run_memory import observed_role_peaks, recent_best_available
-from ..recipe_operations.runtime_specs import (
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.load_swap import swap_capacity
+from vonk_control.memory_reservations import memory_reservations
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.observed_run_memory import observed_role_peaks, recent_best_available
+from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
 )
-from ..resource_planning.capacity import plan_capacity, stop_can_clear_swap
-from ..resource_planning.memory import memory_capacity_snapshot, memory_requirement
-from ..resource_planning.types import ResourceDemand, installation_disk_requirement
-from ..run_admission import (
+from vonk_control.resource_planning.capacity import plan_capacity, stop_can_clear_swap
+from vonk_control.resource_planning.memory import (
+    memory_capacity_snapshot,
+    memory_requirement,
+)
+from vonk_control.resource_planning.types import (
+    ResourceDemand,
+    installation_disk_requirement,
+)
+from vonk_control.run_admission import (
     allocate_service_port,
     run_port_blockers,
     run_port_demand,
 )
-from ..run_switch_contract.evidence import (
+from vonk_control.run_switch_contract.evidence import (
     FreshnessEvidence,
     ResourceDemandEvidence,
     RunSwitchReason,
     SparkFit,
     SparkFitNode,
 )
-from ..run_switch_contract.requests import (
+from vonk_control.run_switch_contract.requests import (
     MemoryUsageUncertainty,
     RunMemoryResidualRange,
     SparkGroup,
 )
-from ..spark_disk import spark_free_bytes
-from ..unused_storage_collection.common import spark_eviction_capacity
-from .constants import _SWAP_BEYOND_STOP_COMPONENT, _SWAP_COMPONENT
-from .planning_helpers import (
+from vonk_control.run_switch_operations.constants import (
+    _SWAP_BEYOND_STOP_COMPONENT,
+    _SWAP_COMPONENT,
+)
+from vonk_control.run_switch_operations.planning_helpers import (
     PlanInventory,
     _as_reason,
     _is_memory_reservation_kind,
     _resource_evidence_digest,
     _resource_reason,
 )
+from vonk_control.spark_disk import spark_free_bytes
+from vonk_control.unused_storage_collection.service import spark_eviction_capacity
 
 if TYPE_CHECKING:
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class ResourceFitMixin:
@@ -474,7 +476,7 @@ class ResourceFitMixin:
                         else disk.artifact_bytes
                     )
                     # An unstated payload size leaves the envelope incomplete.
-                    if image_size is not None and artifact_size is not None:
+                    if image_size is not None and artifact_size is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
                         set_bytes = artifact_size
                         if (
                             artifact_set_sha256 is not None

@@ -9,28 +9,30 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import AgentClaim, AgentOperation, canonical_payload
+
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.contracts import AgentClaim, canonical_payload
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
-
-from ..admission_locking import acquire_admission_keys, node_admission_key
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..own_cleanup import CLEANUP_KINDS
-from .contracts import (
+from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
+from vonk_control.agent_jobs.contracts import (
     _CONTROL_OPERATIONS,
     _RECIPE_CAPABILITIES,
     _TERMINAL_PARENT_STATES,
-    _WORKLOAD_INTENT_OPERATIONS,
 )
-from .predicates import _document
-from .stored import column_field, column_value
+from vonk_control.agent_jobs.predicates import _document
+from vonk_control.agent_jobs.stored import column_field, column_value
+from vonk_control.agent_jobs.waits import record_queue_waits
+from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.own_cleanup import CLEANUP_KINDS
 
 if TYPE_CHECKING:
-    from .service import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
 
 
 def enqueue(
@@ -183,7 +185,6 @@ def enqueue_in_session(
         updated_at=now,
     )
     session.add(stored)
-    from .waits import record_queue_waits
 
     record_queue_waits(session, [stored], now)
     session.flush()

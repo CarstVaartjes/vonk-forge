@@ -9,6 +9,8 @@ from datetime import UTC, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import update
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -16,32 +18,21 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_forge_contracts import RecipeDefinition
-
-from vonk_control.lifecycle.evidence import Residue
-
-from ..artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     require_reference_open,
 )
-from ..content_identity import same_image
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
-from ..models.cache import RecipeBuild
-from ..models.jobs import Job
-from ..operations.blockers import OperationBlocker, bound_blockers
-from ..runtime_image_preparation.contracts import (
-    RuntimeImageReceipt,
-    RuntimeImageReferenceIntent,
-)
-from ..runtime_image_preparation.preparation import prepare_runtime_image
-from ..stall_window import last_progress_at, latest_progress
-from ..stored.states import RecipeBuildState
-from ..strict_json import serialize_json_value
-from .availability_contract import (
+from vonk_control.content_identity import same_image
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import OperationBlocker, bound_blockers
+from vonk_control.recipe_image_availability.availability_contract import (
     AvailabilityBuildReceipt,
 )
-from .contracts import (
+from vonk_control.recipe_image_availability.contracts import (
     _LOGGER,
     SCHEMA_VERSION,
     BuildUnsettled,
@@ -52,9 +43,19 @@ from .contracts import (
     _progress,
     _read,
 )
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImageReceipt,
+    RuntimeImageReferenceIntent,
+)
+from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
+from vonk_control.stall_window import last_progress_at, latest_progress
+from vonk_control.stored.states import RecipeBuildState
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def _prepare_claimed_image(
@@ -210,7 +211,7 @@ def _persist_receipt(
             return
         reference = self._image_reference_intent_for_claim(operation_payload, claim)
         if operation_payload.image_reference_intent is not None and reference is None:
-            raise _AvailabilityClaimLost()
+            raise _AvailabilityClaimLost
         require_reference_open(
             session,
             (ArtifactIdentity("runtime-image", receipt.oci_archive_sha256),),
@@ -356,7 +357,6 @@ def _set_progress(
     bytes_per_second: float | None = None,
     smoothed_bytes_per_second: float | None = None,
     eta_seconds: float | None = None,
-    detail: OperationProgress | None = None,
 ) -> None:
     progress = _progress(
         phase,

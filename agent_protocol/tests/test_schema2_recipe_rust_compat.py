@@ -11,11 +11,12 @@ from typing import Any
 
 import pytest
 from pydantic import BaseModel
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledJob,
     CompiledSecurityMount,
 )
-from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
     RecipeStartPayload,
@@ -42,17 +43,17 @@ def _install(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def _start(plan: dict[str, Any] | None = None) -> dict[str, Any]:
-    plan = copy.deepcopy(plan or PLAN)
-    if plan["runtime"]["placement"]["world_size"] == 1:
-        plan["runtime"]["placement"]["endpoint_address"] = "100.100.20.30"
-        plan["security"]["network_mode"] = "bridge"
+    started: dict[str, Any] = copy.deepcopy(plan or PLAN)
+    if started["runtime"]["placement"]["world_size"] == 1:
+        started["runtime"]["placement"]["endpoint_address"] = "100.100.20.30"
+        started["security"]["network_mode"] = "bridge"
     return {
         "run_id": RUN_ID,
         "installation_id": INSTALLATION_ID,
         "recipe_revision_id": REVISION_ID,
         "mapping_id": MAPPING_ID,
         "plan_digest": "c" * 64,
-        "compiled_execution_plan": plan,
+        "compiled_execution_plan": started,
         "run_generation": 1,
     }
 
@@ -528,7 +529,9 @@ def test_required_and_exact_type_fields_are_rejected_by_both_models(
             labels.append((operation.value, *path))
             checked_array_items.add(path)
     for (label, expected), accepted in zip(
-        zip(labels, expectations), _rust_accepts_many(wire_probe, cases)
+        zip(labels, expectations, strict=False),
+        _rust_accepts_many(wire_probe, cases),
+        strict=False,
     ):
         assert accepted == expected, (label, expected)
     assert ("compiled_execution_plan", "runtime", "argv", 0) in checked_array_items
@@ -610,7 +613,7 @@ def test_every_canonical_enum_value_is_accepted_by_both_models(
                     cases.append((operation, changed))
                     labels.append((operation.value, (*path, name), str(candidate)))
     for (operation_name, path, candidate), accepted in zip(
-        labels, _rust_accepts_many(wire_probe, cases)
+        labels, _rust_accepts_many(wire_probe, cases), strict=False
     ):
         assert accepted, (path, candidate)
         checked.add((operation_name, path, candidate))

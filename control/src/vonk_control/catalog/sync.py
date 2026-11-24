@@ -21,33 +21,20 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay
+
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_agent_protocol.state_machines import CatalogSyncState
-from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay
-
-from ..admission_locking import ConstraintReplan, ConstraintReplay, admitting
-from ..capabilities import CapabilityUnavailableError
-from ..models.cache import RecipeLibrarySyncRun
-from ..models.catalog import CatalogDocumentRevision
-from ..owner_liveness import OwnerKind, OwnerRef, owner
-from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
-from ..recipe_library_types import (
-    RecipeLibraryError,
-    RecipeLibraryItem,
-    RecipeLibrarySnapshot,
-)
-from ..recipe_packages.contracts import has_newer_major_note
-from ..source_bundles import SourceBundleUnknown
-from ..stored.states import LibrarySyncRunState
-from ..wait_contract import QueueWait
-from .queries import active_head_revision
-from .revision_contract import catalog_document_readable
-from .service import CatalogService
-from .sync_contract import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.admission_locking import ConstraintReplan, ConstraintReplay, admitting
+from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.catalog.revision_contract import catalog_document_readable
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync_contract import (
     SEMVER_PATTERN,
     CatalogSyncTrigger,
     ManagedCatalogStaleRecipe,
@@ -57,6 +44,19 @@ from .sync_contract import (
     ManagedCatalogWithdrawnRecipe,
     reviewed_catalog_content,
 )
+from vonk_control.models.cache import RecipeLibrarySyncRun
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
+from vonk_control.persisted_waits import read_wait, schedule_wait
+from vonk_control.recipe_library_types import (
+    RecipeLibraryError,
+    RecipeLibraryItem,
+    RecipeLibrarySnapshot,
+)
+from vonk_control.recipe_packages.contracts import has_newer_major_note
+from vonk_control.source_bundles import SourceBundleUnknown
+from vonk_control.stored.states import LibrarySyncRunState
+from vonk_control.wait_contract import QueueWait, typed_wait_reason
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_RESULT_ITEMS = 256

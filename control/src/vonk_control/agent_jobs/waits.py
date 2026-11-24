@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ProgressAlarmCode,
@@ -18,20 +19,19 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
     WaitResumeCondition,
 )
-
-from .. import agent_operation_states
-from ..agent_operation_facts import attempt_is_live, aware
-from ..gpu.health import GPU_HEALTH_CODES
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.blockers import BlockingOperation, make_blocker
-from ..operations.progress import stored_progress
-from ..persisted_waits import read_wait, write_wait
-from ..settings import PROFILE_STALL_WINDOW_SECONDS
-from ..stall_window import last_progress_at
-from ..wait_contract import QueueWait
-from .contracts import CLAIM_LEASE_SECONDS, holds_claim
-from .retry import agent_upgrade_in_flight
-from .stored import column_field
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS, holds_claim
+from vonk_control.agent_jobs.retry import agent_upgrade_in_flight
+from vonk_control.agent_jobs.stored import column_field
+from vonk_control.agent_operation_facts import attempt_is_live, aware
+from vonk_control.gpu.health import GPU_HEALTH_CODES
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operations.blockers import BlockingOperation, make_blocker
+from vonk_control.operations.progress import stored_progress
+from vonk_control.persisted_waits import read_wait, write_wait
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.stall_window import last_progress_at
+from vonk_control.wait_contract import QueueWait
 
 
 def record_queue_waits(
@@ -73,7 +73,7 @@ def record_queue_waits(
         .order_by(AgentOperation.created_at, AgentOperation.id)
     ):
         unconfirmed = running.state == agent_operation_states.OBSERVING or (
-            attempt is not None and agent_operation_states.attempt_is_observing(attempt)
+            attempt is not None and agent_operation_states.attempt_is_observing(attempt)  # pyright: ignore[reportUnnecessaryComparison]  # outer-joined attempt rows can be missing
         )
         if (
             running.state != agent_operation_states.RUNNING

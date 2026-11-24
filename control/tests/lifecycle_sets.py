@@ -148,7 +148,7 @@ def scan_source(source: str) -> list[int]:
         else:
             continue
         members = _states(members)
-        if len(members) >= 2 and members != _ALL:
+        if len(members) >= 2 and frozenset(members) != _ALL:
             hits.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
     return sorted(hits)
 

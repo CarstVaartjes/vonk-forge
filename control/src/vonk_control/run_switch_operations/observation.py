@@ -9,33 +9,40 @@ from typing import (
 from typing import cast as typing_cast
 
 from sqlalchemy import String, and_, cast, func, literal, or_, select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from vonk_control.run_switch_operations.results import _persisted_result
-
-from ..bounded_json import require_integer
-from ..failure_classification import error_code, error_detail, is_definite
-from ..jobs import states as job_states
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    retire_as_unknown,
+from vonk_control.bounded_json import require_integer
+from vonk_control.failure_classification import error_code, error_detail, is_definite
+from vonk_control.jobs import states as job_states
+from vonk_control.journal_models import RunSwitchJournalRepairPending
+from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from vonk_control.logging import log_event, redact_text
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import bound_blockers
+from vonk_control.run_switch_journal_repair.discovery import (
+    is_zero_transfer_journal_fault,
 )
-from ..logging import log_event, redact_text
-from ..model_cache.service import ModelCacheService
-from ..models.jobs import Job
-from ..operations.blockers import bound_blockers
-from ..stored.json_values import read_row_column
-from .constants import _LOGGER, _OPERATION_KINDS
-from .errors import RunSwitchOperationConflict
-from .evidence_waits import wake_evidence_waits
-from .planning_helpers import _now
-from .provider import _ADAPTER
-from .result_helpers import _progress_damaged, _read_progress, _wait_blockers
+from vonk_control.run_switch_operations.child_wake import ChildEndWake
+from vonk_control.run_switch_operations.constants import _LOGGER, _OPERATION_KINDS
+from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.run_switch_operations.evidence_waits import wake_evidence_waits
+from vonk_control.run_switch_operations.planning_helpers import _now
+from vonk_control.run_switch_operations.provider import (
+    _ADAPTER,
+    RunSwitchOperationProvider,
+)
+from vonk_control.run_switch_operations.result_helpers import (
+    _progress_damaged,
+    _read_progress,
+    _wait_blockers,
+)
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .provider import RunSwitchOperationProvider
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 def _definite(error: Exception) -> bool:
@@ -60,8 +67,6 @@ class ObservationMixin:
         high-level job payload directly).
         """
         service = typing_cast("RunSwitchOperationService", self)
-
-        from .provider import RunSwitchOperationProvider
 
         return RunSwitchOperationProvider(service)
 
@@ -104,7 +109,6 @@ class ObservationMixin:
         recovery_deadline_at = func.replace(
             Job.result["recovery_deadline_at"].as_string(), "Z", "+00:00"
         )
-        from ..journal_models import RunSwitchJournalRepairPending
 
         with service._sessions() as session:
             active = (
@@ -180,7 +184,6 @@ class ObservationMixin:
         wake only falls back to the ``recipes`` turn.
         """
         service = typing_cast("RunSwitchOperationService", self)
-        from .child_wake import ChildEndWake
 
         ChildEndWake.install(service._sessions, lambda: _now(service._clock))
 
@@ -286,8 +289,6 @@ class ObservationMixin:
         """
         service = typing_cast("RunSwitchOperationService", self)
 
-        from ..run_switch_journal_repair.discovery import is_zero_transfer_journal_fault
-
         with service._sessions() as session:
             snapshot = session.get(Job, operation_id)
             if snapshot is not None and is_zero_transfer_journal_fault(snapshot):
@@ -301,7 +302,7 @@ class ObservationMixin:
             if _progress_damaged(read_row_column(job, "result")):
                 return
             progress = _read_progress(read_row_column(job, "result"))
-            wanted = bound_blockers(_wait_blockers(job, progress))
+            wanted = bound_blockers(_wait_blockers(job))
             stored = wanted
             if stored == (progress.blockers or []):
                 return

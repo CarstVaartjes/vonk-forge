@@ -8,6 +8,8 @@ from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ValidationError
 from sqlalchemy import select
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,
@@ -21,11 +23,11 @@ from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     ObservedAssignmentState,
 )
-from vonk_forge_contracts import RecipeDefinition
-
-from ..categorized_errors import BookkeepingUnknown, MissingRecord
-from ..fleet_profile_contract.applications import FleetProfileIntendedConfiguration
-from ..fleet_profile_contract.assessment import (
+from vonk_control.categorized_errors import BookkeepingUnknown, MissingRecord
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileIntendedConfiguration,
+)
+from vonk_control.fleet_profile_contract.assessment import (
     FleetProfileAdmissionDecision,
     FleetProfileAssignmentAssessment,
     FleetProfileAssignmentPreparation,
@@ -36,48 +38,55 @@ from ..fleet_profile_contract.assessment import (
     FleetProfileReason,
     FleetProfileScopePreview,
 )
-from ..fleet_profile_contract.definitions import (
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
     FleetProfileDefinition,
 )
-from ..fleet_profile_contract.review import (
+from vonk_control.fleet_profile_contract.review import (
     FleetProfilePreview,
     FleetProfileReviewedDecision,
 )
-from ..fleet_profile_contract.vocabulary import FleetProfileAction
-from ..lifecycle.evidence import Residue
-from ..models.catalog import CatalogDocumentRevision
-from ..models.fleet import AgentNode, FleetProfile, FleetProfileApplication
-from ..preparation_contract import RolloutPreparation, RuntimeImageIdentity
-from ..recipe_operations.runtime_specs import recipe_topology
-from ..run_switch_contract.plans import RunSwitchAssessment
-from .assessment_support import (
+from vonk_control.fleet_profile_contract.vocabulary import FleetProfileAction
+from vonk_control.fleet_profiles.assessment_support import (
     _assignments_needing_preparation,
 )
-from .capacity import plan_kept_runs, sibling_runs
-from .colocation import colocated_memory_overcommit
-from .contracts import (
+from vonk_control.fleet_profiles.capacity import plan_kept_runs, sibling_runs
+from vonk_control.fleet_profiles.colocation import colocated_memory_overcommit
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileInvalid,
     planner_contract_defect,
 )
-from .dependencies import _DISK_REFUSALS, _PREPARATION_RESOLVABLE_CODES
-from .persistence import (
+from vonk_control.fleet_profiles.control_effects import _control_effects
+from vonk_control.fleet_profiles.dependencies import (
+    _DISK_REFUSALS,
+    _PREPARATION_RESOLVABLE_CODES,
+)
+from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_plan,
+    _reviewed_profile_plan,
     _stored_recipe,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _choice_id,
     _digest,
     _profile_document,
     _review_effects_digest,
 )
-from .read_observation import profile_read
+from vonk_control.fleet_profiles.read_observation import profile_read
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode, FleetProfile, FleetProfileApplication
+from vonk_control.preparation_contract import RolloutPreparation, RuntimeImageIdentity
+from vonk_control.recipe_operations.runtime_specs import recipe_topology
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:
@@ -126,7 +135,7 @@ class FleetProfileService:
                         "Recovery review owner is unavailable",
                         reason=InvalidRequestReason.NOT_FOUND,
                     )
-                reviewed = self._reviewed_profile_plan(recovery, session=session)
+                reviewed = _reviewed_profile_plan(recovery, session=session)
                 # An accepted plan that cannot be read names no exact images to
                 # hold the review to: it is planned against what is observed now.
                 recovery_images = (
@@ -252,7 +261,7 @@ class FleetProfileService:
             # member has no assignment and must still participate in the plan.
             target_nodes = {node.node_id for node in roster}
 
-            control = self._control_effects(
+            control = _control_effects(
                 session,
                 resolved_assignments,
                 target_nodes,
@@ -420,7 +429,7 @@ class FleetProfileService:
                         if not isinstance(assessment, RunSwitchAssessment):
                             raise BookkeepingUnknown(
                                 assessment.note
-                                if isinstance(assessment, Residue)
+                                if isinstance(assessment, Residue)  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
                                 else "The planner returned an invalid assessment.",
                                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
                             )
@@ -518,7 +527,7 @@ class FleetProfileService:
                                 ),
                             )
                         )
-                    if preparation is not None and not isinstance(
+                    if preparation is not None and not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                         preparation, RolloutPreparation
                     ):
                         reasons.append(

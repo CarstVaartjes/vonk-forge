@@ -1,6 +1,6 @@
 """Model cache reason codes."""
 
-from ..wire_model import WireEnum
+from vonk_agent_protocol.wire_model import WireEnum
 
 
 class CacheReferenceReason(WireEnum):

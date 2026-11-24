@@ -6,12 +6,19 @@ contract it returns is proven to be the one ``create`` validates against.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from vonk_forge_contracts import read_recipe
+
+from cluster_profiles.control_client.schema import validate_control_document
+from cluster_profiles.generated_control.models.artifact_job_contract_response import (
+    ArtifactJobContractResponse as ClientArtifactJobContractResponse,
+)
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.api.application import create_app
 from vonk_control.artifact_jobs.api import install_artifact_job_routes
@@ -19,6 +26,7 @@ from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.contracts import (
     ArtifactJobInvalid,
     _effective_parameters,
+    slot_input_media_type,
 )
 from vonk_control.artifact_jobs.job_contract import (
     ArtifactJobContractResponse,
@@ -30,14 +38,8 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.compiled_artifact_contract import CompiledArtifactContract
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.operator_acceptance import ControllerAPIRoute
 from vonk_control.recipe_operations.runtime_specs import _compiled_arguments
-from vonk_control.strict_json import ControllerAPIRoute
-from vonk_forge_contracts import read_recipe
-
-from cluster_profiles.control_client.schema import validate_control_document
-from cluster_profiles.generated_control.models.artifact_job_contract_response import (
-    ArtifactJobContractResponse as ClientArtifactJobContractResponse,
-)
 
 from .agent_api_support import Jobs
 from .artifact_jobs_support import (
@@ -314,7 +316,8 @@ def test_typed_knobs_compile_enforce_and_show_display_wording(tmp_path) -> None:
     before = service.job_contract(run_id=run_id)
     _show_wording(sessions, run_id)
     after = service.job_contract(run_id=run_id)
-    assert before.contract is not None and after.contract is not None
+    assert before.contract is not None
+    assert after.contract is not None
 
     # Wording is joined from the display row and is not execution identity.
     assert after.contract_sha256 == before.contract_sha256
@@ -326,7 +329,8 @@ def test_typed_knobs_compile_enforce_and_show_display_wording(tmp_path) -> None:
 
     definitions = after.contract.parameters
     flow = {item.name: item for item in definitions}["flow-shift"]
-    assert flow.type == "float" and isinstance(flow.default, float)
+    assert flow.type == "float"
+    assert isinstance(flow.default, float)
     assert _effective_parameters(definitions, {"num-frames": 141})["num-frames"] == 141
     assert (
         _effective_parameters(definitions, {"flow-shift": 12.5})["flow-shift"] == 12.5
@@ -374,7 +378,6 @@ def test_a_supplied_knob_reaches_the_adapter_argument(tmp_path) -> None:
 
 
 def _slot(media_types: list[str], extensions: list[str]) -> Any:
-    from types import SimpleNamespace
 
     return SimpleNamespace(
         id="in", media_types=media_types, extensions=extensions, max_files=1
@@ -399,6 +402,5 @@ def _slot(media_types: list[str], extensions: list[str]) -> Any:
 def test_an_input_media_type_comes_from_its_name_and_the_slot(
     name, media_types, extensions, expected
 ) -> None:
-    from vonk_control.artifact_jobs.contracts import slot_input_media_type
 
     assert slot_input_media_type(_slot(media_types, extensions), name) == expected

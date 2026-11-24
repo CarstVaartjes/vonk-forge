@@ -16,6 +16,8 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_json import require_mapping
 from vonk_control.model_cache.service import ModelCacheService
@@ -24,7 +26,6 @@ from vonk_control.models.catalog import CatalogDocument
 from vonk_control.models.fleet import User
 from vonk_control.models.jobs import Job
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition
 
 from .recipe_image_availability_support import (
     _add_revision,

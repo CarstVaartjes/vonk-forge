@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from vonk_agent_protocol.package_source import AgentPackageSource
-
-from .contract import AgentUpgradePackage, AgentUpgradeRequestIntent
+from vonk_control.agent_upgrades.contract import (
+    AgentUpgradePackage,
+    AgentUpgradeRequestIntent,
+)
 
 
 @dataclass(frozen=True, slots=True)

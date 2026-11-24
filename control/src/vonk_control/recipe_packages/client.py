@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import json
@@ -18,7 +19,6 @@ from urllib.parse import urlsplit
 
 import httpx2
 from pydantic import ValidationError
-from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_forge_contracts import (
     CONTRACT_MAJOR,
     PACKAGE_SCHEMA_VERSION,
@@ -35,35 +35,26 @@ from vonk_forge_contracts import (
 from vonk_forge_contracts.catalog_reader import CatalogSection, RefusalReason
 from vonk_forge_contracts.resolver import validate_recipe_models
 
-from ..catalog.sync_contract import ManagedCatalogSyncProblem
-from ..recipe_library_types import (
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
+from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
+from vonk_control.recipe_library_types import (
     CatalogModel,
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibraryRelease,
     RecipeLibrarySnapshot,
     RecipePackageEntry,
+    _snapshot_content,
 )
-from ..recipe_release import (
-    MAX_BUNDLE_BYTES,
-    MAX_CHECKSUMS_BYTES,
-    RELEASE_BUNDLE,
-    RELEASE_CHECKSUMS,
-    RELEASE_INDEX,
-    RELEASE_LIBRARY,
-    parse_release_checksums,
-    verify_release_checksums,
-)
-from ..source_bundles import SourceBundleError, generate_source_bundle
-from . import catalog_read
-from .archive import (
+from vonk_control.recipe_packages import catalog_read
+from vonk_control.recipe_packages.archive import (
     _BoundedTarInfo,
     _json,
     _safe_path,
     _sha256,
     _validate_package_paths,
 )
-from .contracts import (
+from vonk_control.recipe_packages.contracts import (
     _RELEASE_LIST,
     _RELEASE_TAG,
     RecipePackageError,
@@ -73,9 +64,19 @@ from .contracts import (
     _newest_major,
     _ReleaseResponse,
     _select_release,
-    _snapshot_content,
     _VerifiedRelease,
 )
+from vonk_control.recipe_release import (
+    MAX_BUNDLE_BYTES,
+    MAX_CHECKSUMS_BYTES,
+    RELEASE_BUNDLE,
+    RELEASE_CHECKSUMS,
+    RELEASE_INDEX,
+    RELEASE_LIBRARY,
+    parse_release_checksums,
+    verify_release_checksums,
+)
+from vonk_control.source_bundles import SourceBundleError, generate_source_bundle
 
 PACKAGE_REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
 
@@ -638,7 +639,7 @@ class RecipePackageClient:
                 os.fsync(output.fileno())
             if hasher.hexdigest() != digest:
                 return False
-            os.replace(temporary, target)
+            temporary.replace(target)
             return True
         finally:
             temporary.unlink(missing_ok=True)
@@ -830,7 +831,7 @@ class RecipePackageClient:
             temporary = Path(name)
             with os.fdopen(fd, "wb") as output:
                 output.write(candidate)
-            os.replace(temporary, self._snapshot_path)
+            temporary.replace(self._snapshot_path)
             temporary = None
         except OSError as error:
             # The candidate stays in memory, so the next prepare writes it
@@ -1167,7 +1168,7 @@ class RecipePackageClient:
             archive_path = (
                 Path(getattr(self, "_archive_path", ""))
                 if getattr(self, "_archive_path", None)
-                else Path(".")
+                else Path()
             )
         closure_path = self._materialize_closure(files, package_digest, archive_path)
         source_bundle: bytes | None = None
@@ -1248,10 +1249,8 @@ class RecipePackageClient:
                 destination.write_bytes(content)
             marker_path = temporary / ".complete"
             marker_path.write_text(digest, encoding="ascii")
-            try:
-                os.replace(temporary, target)
-            except FileExistsError:
-                pass
+            with contextlib.suppress(FileExistsError):
+                temporary.replace(target)
         finally:
             if temporary.exists():
                 for path in sorted(temporary.rglob("*"), reverse=True):

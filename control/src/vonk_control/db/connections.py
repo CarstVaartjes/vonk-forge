@@ -14,17 +14,26 @@ from sqlalchemy.exc import (
     InterfaceError,
     OperationalError,
     SQLAlchemyError,
-    TimeoutError,
+)
+from sqlalchemy.exc import (
+    TimeoutError as SQLAlchemyTimeoutError,
 )
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..logging import redact_text
-from ..settings import DATABASE_WAIT_BUDGETS
-from .constants import (
+from vonk_control import (
+    models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+)
+from vonk_control.db.constants import (
     _ALEMBIC_CONFIG,
     _DATABASE_RETRYABLE_ERRORS,
     _DATABASE_STARTUP_TIMEOUT_SECONDS,
 )
+from vonk_control.exact_integer_adoption import reconcile_exact_integer_schema
+from vonk_control.fleet_events import FleetEventRecorder
+from vonk_control.logging import redact_text
+from vonk_control.model_primitives import Base
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
+from vonk_control.stored.rows import install_write_guard
 
 
 class _DatabaseStartupContention(RuntimeError):
@@ -61,7 +70,7 @@ def _driver_detail(error: BaseException) -> str:
 
 
 def _startup_retryable(error: BaseException) -> bool:
-    if isinstance(error, (_DatabaseStartupContention, TimeoutError)):
+    if isinstance(error, (_DatabaseStartupContention, SQLAlchemyTimeoutError)):
         return True
     if not isinstance(error, (InterfaceError, OperationalError)):
         return False
@@ -124,7 +133,6 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
     budgets = DATABASE_WAIT_BUDGETS
     # Every JSON column write is checked against its contract (stored_columns);
     # a document no contract describes is reported once, never refused.
-    from ..stored.json_values import install_write_guard
 
     install_write_guard()
     if "postgres" in database_url:
@@ -142,7 +150,6 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
     if engine.dialect.name == "sqlite":
         # The engine has not escaped to a service or worker. Adopt historical
         # owning projections on one exclusive checkout before any mapped read.
-        from ..exact_integer_adoption import reconcile_exact_integer_schema
 
         try:
             reconcile_exact_integer_schema(engine)
@@ -153,7 +160,6 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:
-    from ..fleet_events import FleetEventRecorder
 
     sessions = sessionmaker(engine, expire_on_commit=False)
     FleetEventRecorder.install(sessions)
@@ -251,10 +257,6 @@ def wait_for_database(
     worker, not before it: while the owner is still at work startup waits
     within the same bounded deadline. Any other refusal stays fatal.
     """
-    from .. import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from ..model_primitives import Base
 
     def connect_once() -> None:
         engine = build_engine(database_url)

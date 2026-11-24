@@ -5,20 +5,23 @@ from datetime import datetime
 from typing import Any
 
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.wire_model import (
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
+    canonical_message,
 )
-
-from ..operations.progress import STALE_AFTER_SECONDS, project_progress, sample_progress
-from ..strict_json import read_stored_model
-from .contract import (
+from vonk_control.model_cache.contract import (
     ModelCacheCounters,
     ModelCacheOperationPhase,
     ModelCacheOperationProgress,
 )
+from vonk_control.operations.progress import (
+    STALE_AFTER_SECONDS,
+    project_progress,
+    sample_progress,
+)
+from vonk_control.strict_json import read_stored_model
 
 #: The measured phase of each operation phase.  Both are words of the contract's
 #: ``ProgressPhase``; the measurement used to say ``download``, ``verify`` and

@@ -7,7 +7,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
 from vonk_control.agent_jobs.service import AgentJobService
@@ -106,7 +108,7 @@ def test_session_enqueue_uses_caller_operation_id_and_caller_transaction(queue) 
     service = AgentJobService(sessions, clock=clock)
     operation_id = str(uuid.uuid4())
 
-    with pytest.raises(RuntimeError), sessions.begin() as session:
+    def expected_failure(session):
         stored = service.enqueue_in_session(
             session,
             _parent_id(sessions),
@@ -119,6 +121,9 @@ def test_session_enqueue_uses_caller_operation_id_and_caller_transaction(queue) 
         assert stored.id == operation_id
         assert session.get(AgentOperation, operation_id) is stored
         raise RuntimeError("rollback")
+
+    with pytest.raises(RuntimeError), sessions.begin() as session:
+        expected_failure(session)
 
     with sessions() as session:
         assert session.get(AgentOperation, operation_id) is None
@@ -155,7 +160,7 @@ def test_result_consumer_can_be_late_bound_exactly_once_before_activity(queue) -
     assert received == [message]
 
 
-@pytest.mark.parametrize("consumer", (None, object()))
+@pytest.mark.parametrize("consumer", [None, object()])
 def test_result_consumer_late_binding_rejects_noncallable(queue, consumer) -> None:
     """Accepting an unusable hook defers a configuration error into result commit."""
     sessions, clock = queue
@@ -173,7 +178,7 @@ def test_result_consumer_constructor_rejects_noncallable(queue) -> None:
         AgentJobService(sessions, clock=clock, result_consumer=object())  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("activity", ("enqueue", "claim", "result"))
+@pytest.mark.parametrize("activity", ["enqueue", "claim", "result"])
 def test_result_consumer_cannot_be_bound_after_queue_activity(
     queue, activity: str
 ) -> None:
@@ -214,7 +219,7 @@ def test_result_consumer_cannot_be_bound_after_queue_activity(
 
 @pytest.mark.parametrize(
     ("state", "result"),
-    (
+    [
         (
             "succeeded",
             {},
@@ -224,7 +229,7 @@ def test_result_consumer_cannot_be_bound_after_queue_activity(
             "waiting-for-operator",
             {"reason": "inspect_console", "uncertain": True},
         ),
-    ),
+    ],
 )
 def test_result_consumer_receives_exact_canonical_message_in_finish_transaction(
     queue, state: str, result: dict[str, object]
@@ -278,7 +283,8 @@ def test_result_consumer_receives_exact_canonical_message_in_finish_transaction(
             )
         )
         parent = session.get(Job, fenced_operation(sessions, claim).parent_job_id)
-        assert attempt is not None and attempt.result == result
+        assert attempt is not None
+        assert attempt.result == result
         assert parent is not None
         assert parent.result == {"consumed_fence": claim.fence}
 
@@ -328,10 +334,13 @@ def test_consumer_rejection_rolls_back_agent_result_and_parent_projection(
             )
         )
         parent = session.get(Job, fenced_operation(sessions, claim).parent_job_id)
-        assert operation is not None and operation.state == "running"
-        assert attempt is not None and attempt.state == "running"
+        assert operation is not None
+        assert operation.state == "running"
+        assert attempt is not None
+        assert attempt.state == "running"
         assert attempt.result is None
-        assert parent is not None and parent.result is None
+        assert parent is not None
+        assert parent.result is None
 
 
 def test_generic_worker_claim_skips_current_agent_operation_parent(queue) -> None:
@@ -351,13 +360,15 @@ def test_generic_worker_claim_skips_current_agent_operation_parent(queue) -> Non
 
     claim = jobs.claim("generic-worker", 30, kinds=("probe", linked_kind))
 
-    assert claim is not None and claim.job_id == ordinary.id
+    assert claim is not None
+    assert claim.job_id == ordinary.id
     with sessions() as session:
         linked = session.get(Job, linked_id)
-        assert linked is not None and linked.state == "queued"
+        assert linked is not None
+        assert linked.state == "queued"
 
 
-@pytest.mark.parametrize("invalidity", ("stale", "revoked", "bad-fence"))
+@pytest.mark.parametrize("invalidity", ["stale", "revoked", "bad-fence"])
 def test_invalid_result_is_no_write_and_never_reaches_consumer(
     queue, invalidity: str
 ) -> None:
@@ -405,6 +416,8 @@ def test_invalid_result_is_no_write_and_never_reaches_consumer(
                 == fenced_operation(sessions, claim).id
             )
         )
-        assert operation is not None and operation.state == "running"
-        assert attempt is not None and attempt.state == "running"
+        assert operation is not None
+        assert operation.state == "running"
+        assert attempt is not None
+        assert attempt.state == "running"
         assert attempt.result is None

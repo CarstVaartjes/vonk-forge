@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import (
     Disposition,
     ProfileAction,
@@ -25,49 +26,35 @@ from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     ObservedAssignmentState,
 )
-
-from ..admission_locking import AdmissionRowLock, lock_admission_rows
-from ..categorized_errors import MissingRecord
-from ..failure_classification import disposition
-from ..fleet_profile_contract.applications import (
+from vonk_control.admission_locking import AdmissionRowLock, lock_admission_rows
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.failure_classification import disposition
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
     FleetProfileIntendedConfiguration,
 )
-from ..fleet_profile_contract.definitions import FleetProfileScope
-from ..fleet_profile_contract.review import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileScope
+from vonk_control.fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfilePreview,
 )
-from ..fleet_profile_contract.vocabulary import FleetProfileOperationKind
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..lifecycle.types import Effect as _LifecycleEffect
-from ..models.execution import RecipeRun, RunNode
-from ..models.fleet import (
-    AgentNode,
-    FleetProfile,
-    FleetProfileApplication,
-    FleetProfileSelection,
-)
-from ..preparation_contract import RuntimeImageIdentity
-from ..recipe_builds.cancellation import (
-    BuildConsumerError,
-    lock_profile_build_dependencies,
-)
-from ..run_route_name import rename_run
-from ..workload_intent import allocate_workload_intent, raise_workload_intent
-from . import states as fleet_profile_states
-from .assessment_support import (
+from vonk_control.fleet_profile_contract.vocabulary import FleetProfileOperationKind
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assessment_support import (
     _require_recovery_preparations,
 )
-from .capacity import (
+from vonk_control.fleet_profiles.capacity import (
     release_replaced_profile_claims,
     reserve_profile_disk,
     reserve_profile_memory,
     reserve_profile_ports,
 )
-from .contracts import (
+from vonk_control.fleet_profiles.continuing_effects import (
+    _application_is_current_selection,
+    _superseding_intent,
+)
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileConflict,
     FleetProfileInvalid,
@@ -75,9 +62,11 @@ from .contracts import (
     FleetProfileStalePlanConflict,
     _FleetProfileSupersededIntentConflict,
 )
-from .dependencies import _INSTALLATION_POLICY_ADAPTER
-from .persistence import (
+from vonk_control.fleet_profiles.control_effects import _control_effects
+from vonk_control.fleet_profiles.dependencies import _INSTALLATION_POLICY_ADAPTER
+from vonk_control.fleet_profiles.persistence import (
     _application_order_key,
+    _intended_profile,
     _intent_scope,
     _kept_fence_ordinal,
     _newer_pending_profile_load,
@@ -88,7 +77,7 @@ from .persistence import (
     _remaining_reviewed_effects,
     _workload_fence_nodes,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _digest,
     _replace_selected_profile_application,
@@ -96,10 +85,33 @@ from .projection_support import (
     _set_selected_profile,
     _validate_remaining_effects,
 )
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.lifecycle.types import Effect as _LifecycleEffect
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.fleet import (
+    AgentNode,
+    FleetProfile,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from vonk_control.preparation_contract import RuntimeImageIdentity
+from vonk_control.recipe_builds.cancellation import (
+    BuildConsumerError,
+    lock_profile_build_dependencies,
+)
+from vonk_control.run_route_name import rename_run
+from vonk_control.workload_intent import allocate_workload_intent, raise_workload_intent
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:
@@ -185,7 +197,7 @@ class FleetProfileService:
                 retry_parent_progress = _persisted_profile_progress(retry_parent)
                 selected_application = selected_application or (
                     retry_parent_progress.intended_profile is not None
-                    and self._application_is_current_selection(
+                    and _application_is_current_selection(
                         session, retry_parent, retry_parent_progress
                     )
                 )
@@ -252,7 +264,7 @@ class FleetProfileService:
                         and existing is not None
                         and existing.selection_generation != selection.generation
                     )
-                    or not self._application_is_current_selection(
+                    or not _application_is_current_selection(
                         session, selection_source, selection_source_progress
                     )
                 ):
@@ -420,13 +432,13 @@ class FleetProfileService:
                         ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
                         "the receipt carries no accepted intent to recover",
                     )
-                if self._superseding_intent(session, parent, prior):
+                if _superseding_intent(session, parent, prior):
                     return self._decline_retry(
                         parent,
                         ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
                         "A newer accepted workload intent owns the effects",
                     )
-                parent_intent = self._intended_profile(parent, session=session)
+                parent_intent = _intended_profile(parent, session=session)
                 if isinstance(parent_intent, Residue):
                     return self._decline_retry(
                         parent,
@@ -459,7 +471,7 @@ class FleetProfileService:
                     # A receipt that recorded no workload intent takes a fresh one
                     # from the node fence below, like any other admission.
                     recovery_ordinal = prior.workload_intent_ordinal
-            control = self._control_effects(
+            control = _control_effects(
                 session,
                 frozen_assignments,
                 set(frozen_nodes),

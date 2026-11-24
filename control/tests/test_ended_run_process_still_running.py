@@ -10,10 +10,12 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from sqlalchemy import select
-from vonk_control.agent_api import ended_runs
+
+from vonk_control.agent_api import ended_runs, observations
 from vonk_control.models.execution import RecipeRun, RunNode
 
 from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
@@ -100,7 +102,8 @@ def _state(services, run_id: str) -> tuple[str, str]:
     with services.sessions() as session:
         run = session.get(RecipeRun, run_id)
         node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert run is not None and node is not None
+        assert run is not None
+        assert node is not None
         return run.state, node.state
 
 
@@ -118,7 +121,8 @@ def test_running_process_of_ended_run_reopens_it_as_lost(
     with services.sessions() as session:
         run = session.get(RecipeRun, run_id)
         node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert run is not None and node is not None
+        assert run is not None
+        assert node is not None
         assert run.state == "lost"
         assert run.stopped_at is None
         assert run.route_error is not None
@@ -173,7 +177,9 @@ def test_ended_run_without_an_exact_stop_is_not_reopened(
     assert _state(services, run_id) == before
 
 
-def _body(clock, run_id: str, *, ahead: int = 0, running: bool = True) -> dict:
+def _body(
+    clock, run_id: str, *, ahead: int = 0, running: bool = True
+) -> dict[str, Any]:
     return {
         "observed_at": (clock.now + timedelta(seconds=ahead)).isoformat(),
         "runs": [
@@ -187,7 +193,7 @@ def _body(clock, run_id: str, *, ahead: int = 0, running: bool = True) -> dict:
     }
 
 
-def _post(client, path: str, body: dict):
+def _post(client, path: str, body: dict[str, Any]):
     return client.post(path, headers=agent_headers(NODE_A, "serial-a"), json=body)
 
 
@@ -241,7 +247,6 @@ def test_run_leaving_the_stoppable_states_between_the_reads_is_a_wait(
     agent_system,  # noqa: F811
     monkeypatch,
 ) -> None:
-    from vonk_control.agent_api import observations
 
     client, services, _, clock = agent_system
     run_id = _ended_run(services, clock, state="lost")

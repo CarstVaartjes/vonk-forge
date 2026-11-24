@@ -13,27 +13,27 @@ from typing import Literal
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only, sessionmaker
-from vonk_agent_protocol.reason_codes.fleet import ClusterMappingCode
-from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_forge_contracts import RecipeDefinition, RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology, Scalar
 
-from .inventory.items import runtime_value
-from .inventory.repository import newest_snapshot_ids
-from .mapping_parameters import MappingParameters
-from .models.catalog import CatalogDocumentRevision
-from .models.fleet import AgentNode
-from .models.mapping import ClusterMapping, ClusterMappingNode
-from .models.telemetry import NodeInventorySnapshot
-from .recipe_operations.runtime_specs import (
+from vonk_agent_protocol.reason_codes.fleet import ClusterMappingCode
+from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_control.inventory.items import runtime_value
+from vonk_control.inventory.repository import newest_snapshot_ids
+from vonk_control.mapping_parameters import MappingParameters
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_operations.runtime_specs import (
     OPTION_CHOICES_KEY,
     RecipeRuntimeSpecError,
     recipe_topology,
     split_option_choices,
 )
-from .stored.states import CatalogRevisionState, ClusterMappingState
-from .strict_json import StrictModel
-from .topology import Placement, TopologyError, validate_topology
+from vonk_control.stored.states import CatalogRevisionState, ClusterMappingState
+from vonk_control.strict_json import StrictModel
+from vonk_control.topology import Placement, TopologyError, validate_topology
 
 
 class ClusterMappingError(ValueError):
@@ -138,10 +138,7 @@ class ClusterMappingService:
             revision = _active_recipe_revision(session, recipe_revision_id)
             if revision is None:
                 raise KeyError(recipe_revision_id)
-            if (
-                revision.state != CatalogRevisionState.ACTIVE
-                or revision.content_digest is None
-            ):
+            if revision.state != CatalogRevisionState.ACTIVE:
                 raise ClusterMappingError(
                     ClusterMappingCode.RECIPE_UNRESOLVED,
                     "only a resolved recipe can be mapped",
@@ -286,8 +283,7 @@ class ClusterMappingService:
                 )
                 for item in plan.nodes
             )
-            mapping_id = mapping.id
-        return mapping_id
+            return mapping.id
 
 
 def _active_nodes(
@@ -346,7 +342,7 @@ def _topology_capabilities(
     return result
 
 
-def _mapping_actor(actor: str) -> str:
+def _mapping_actor(actor: object) -> str:
     if not isinstance(actor, str):
         raise ClusterMappingError(ClusterMappingCode.ACTOR, "mapping actor is invalid")
     actor = actor.strip()

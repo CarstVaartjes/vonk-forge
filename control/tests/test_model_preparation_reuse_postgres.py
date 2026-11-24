@@ -8,13 +8,14 @@ from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.catalog import CatalogDocument
 from vonk_control.models.fleet import User
-from vonk_forge_contracts import document_sha256
 
 from .recipe_image_availability_support import _add_revision, _recipe
 from .test_cache_removal_cancellation_postgres import (
@@ -173,4 +174,5 @@ def test_older_active_operation_is_reused_behind_many_newer_unrelated_ones(
     )
     availability.run_pending()
     fresh_child = availability.get(third.id).model_child
-    assert fresh_child is not None and fresh_child["id"] != child_id
+    assert fresh_child is not None
+    assert fresh_child["id"] != child_id

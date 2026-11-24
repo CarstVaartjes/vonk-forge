@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -10,7 +11,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from vonk_control.catalog.entities import recipe_document_projection
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from vonk_control.catalog.revision_contract import recipe_document_projection
 from vonk_control.execution_plan_service import _runtime_image_receipt
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
@@ -25,7 +28,6 @@ from vonk_control.runtime_image_preparation.contracts import (
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .runtime_image_fixtures import place_test_image, remove_test_image
 
@@ -323,7 +325,7 @@ def test_stale_receipt_that_cannot_be_discarded_is_reported_once_with_its_cause(
     assert receipt_path.exists()
 
     # Once the lock is usable again the next scan removes it.
-    storage.publication_lock = original_lock  # type: ignore[method-assign]
+    storage.publication_lock = original_lock
     scan()
     assert not receipt_path.exists()
 
@@ -1073,7 +1075,6 @@ def test_temporary_unreadable_receipt_does_not_block_verified_reuse(
     tmp_path: Path, monkeypatch, lookup: str
 ) -> None:
     """A transient sibling I/O fault must not rebuild or wedge an eligible image."""
-    import errno
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     transport = TinyTransport()

@@ -5,8 +5,9 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
@@ -88,7 +89,10 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         lifecycle.record_node_result(stop_id, node_id, succeeded=True, evidence={})
     with sessions() as session:
         run = session.get(RecipeRun, old.owner_id)
-        assert run is not None and run.state == "stopped" and run.stopped_at is not None
+        assert run is not None
+        assert run.state == "stopped"
+        assert run.stopped_at is not None
+    current = None
     for _ in range(20):
         planner.tick()
         current = planner.get(accepted.operation_id)
@@ -101,6 +105,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         assert initial_starts == (old.id,), (
             "pre-stop inventory authorized a replacement start"
         )
+    assert current is not None
     assert current.state == LifecycleState.RUNNING
     assert current.result is not None
 
@@ -138,11 +143,13 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     waiting_result = planner.get(accepted.operation_id).result
     assert waiting_result is not None
     first_due = planner.get(accepted.operation_id).next_attempt_at
-    assert first_due is not None and first_due > now[0]
+    assert first_due is not None
+    assert first_due > now[0]
     restarted = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
     restarted.tick()
     waiting = restarted.get(accepted.operation_id)
-    assert waiting.state == LifecycleState.RUNNING and waiting.result is not None
+    assert waiting.state == LifecycleState.RUNNING
+    assert waiting.result is not None
     assert waiting.next_attempt_at == first_due
     assert waiting.result.retry_attempt == waiting_result.retry_attempt
     now[0] += timedelta(seconds=6)
@@ -189,6 +196,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     assert pending.result is not None
     assert pending.result.awaited_inventory is not None
     resumed = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
+    starts = None
     for _ in range(10):
         resumed.tick()
         with sessions() as session:
@@ -197,11 +205,13 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
             )
         if len(starts) == 2:
             break
+    assert starts is not None
     assert len(starts) == 2
     replacement = next(job for job in starts if job.id != old.id)
     assert replacement.state == LifecycleState.RUNNING
     current = resumed.get(accepted.operation_id)
-    assert current.result is not None and current.result.retry_reason is None
+    assert current.result is not None
+    assert current.result.retry_reason is None
     # A later observer adopts the committed child, even if physical telemetry
     # subsequently goes stale: it must not acquire another start identity.
     again = _service(

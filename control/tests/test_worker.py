@@ -1,3 +1,5 @@
+import ast
+import inspect
 import logging
 import threading
 from collections.abc import Callable
@@ -7,15 +9,46 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    WaitOwnerKind,
+    WaitReason,
+    WaitResumeCondition,
+)
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.coordinator_contract import CoordinatorFailureEvidence
 from vonk_control.coordinator_failures import CoordinatorFailures
+from vonk_control.due_waits import DueWaitBackstop, WaitSource
+from vonk_control.failure_classification import disposition
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import JobService
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
+from vonk_control.models.coordinator import CoordinatorFailure
+from vonk_control.observation.platform import PlatformObserver
+from vonk_control.persisted_waits import read_wait
+from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.telemetry import maintenance as telemetry_maintenance
-from vonk_control.worker.liveness import WorkerWatchdog
-from vonk_control.worker.loop import HandlerRequest, Worker
+from vonk_control.worker import __main__ as worker_main
+from vonk_control.worker import loop as worker_loop
+from vonk_control.worker.assembly import assemble_production_worker
+from vonk_control.worker.liveness import (
+    _READINESS_BEAT_SECONDS,
+    WorkerWatchdog,
+    watch_worker,
+)
+from vonk_control.worker.loop import (
+    _STEP_BUDGET_SECONDS,
+    HandlerRequest,
+    Worker,
+    _background_source_name,
+)
+from vonk_control.worker_healthcheck import WORKER_READINESS_WINDOW_SECONDS
 
 
 def _service(
@@ -48,10 +81,6 @@ def test_shutdown_retries_unknown_closer_and_continues_other_services(
     tmp_path, monkeypatch
 ):
     """Catches abandoning remaining executors after one checkpoint is busy."""
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
-    from vonk_control.worker import loop as module
-
     calls = []
 
     def busy():
@@ -60,7 +89,7 @@ def test_shutdown_retries_unknown_closer_and_continues_other_services(
             "checkpoint unavailable", reason=WaitReason.OBSERVATION_UNAVAILABLE
         )
 
-    monkeypatch.setattr(module, "bounded_attempts", lambda: iter(range(3)))
+    monkeypatch.setattr(worker_loop, "bounded_attempts", lambda: iter(range(3)))
     worker = Worker(
         _service(tmp_path),
         "worker",
@@ -598,7 +627,8 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
     """Runtime net: no source or housekeeping key may stay off after a fault."""
     now = [datetime(2026, 8, 3, tzinfo=UTC)]
     monkeypatch.setattr(
-        "vonk_control.worker.loop.time.monotonic", lambda: now[0].timestamp()
+        "vonk_control.worker.loop.time.monotonic",
+        lambda: now[0].timestamp(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
     )
     broken = True
     calls: list[str] = []
@@ -657,7 +687,6 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
     fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
     worker.run_once()
     assert set(calls) == labels
-    from vonk_control.models.coordinator import CoordinatorFailure
 
     with failures._sessions() as session:
         assert session.scalar(select(CoordinatorFailure)) is None
@@ -666,7 +695,6 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
 
 def _persisting_fault(tmp_path, now, verdict_error):
     failures = _failures(tmp_path, clock=lambda: now[0])
-    from vonk_control.failure_classification import disposition
 
     def fail() -> None:
         failures.failed("source", verdict_error, disposition(verdict_error))
@@ -674,10 +702,9 @@ def _persisting_fault(tmp_path, now, verdict_error):
     def due_in() -> float:
         engine = create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}")
         with sessionmaker(engine)() as session:
-            from vonk_control.models.coordinator import CoordinatorFailure
-
             row = session.get(CoordinatorFailure, "source")
-            assert row is not None and row.next_action_at is not None
+            assert row is not None
+            assert row.next_action_at is not None
             return (row.next_action_at.replace(tzinfo=UTC) - now[0]).total_seconds()
 
     return failures, fail, due_in
@@ -713,11 +740,11 @@ def test_a_wait_keeps_its_five_second_cadence(tmp_path):
 
 
 def test_a_security_refusal_stays_refused_until_its_cause_clears(tmp_path, monkeypatch):
-    from vonk_agent_protocol.outcome import SecurityRefusalError
 
     now = [datetime(2026, 8, 3, tzinfo=UTC)]
     monkeypatch.setattr(
-        "vonk_control.worker.loop.time.monotonic", lambda: now[0].timestamp()
+        "vonk_control.worker.loop.time.monotonic",
+        lambda: now[0].timestamp(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
     )
     refused = True
     calls = []
@@ -823,15 +850,13 @@ def test_shutdown_fault_is_bounded_and_other_owners_and_fresh_work_continue(
     tmp_path, monkeypatch, fault
 ):
     """Catches unexpected closer errors suppressing every later shutdown owner."""
-    from vonk_control.worker import loop as module
-
     calls = []
 
     def broken():
         calls.append("broken")
         raise fault
 
-    monkeypatch.setattr(module, "bounded_attempts", lambda: iter(range(3)))
+    monkeypatch.setattr(worker_loop, "bounded_attempts", lambda: iter(range(3)))
     jobs = _service(tmp_path)
     Worker(
         jobs,
@@ -859,16 +884,6 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
     postgres_engine, fault
 ):
     """Catches JobService-coupled custody, volatile waits and unchanged retries."""
-    from vonk_agent_protocol.agent_words import Disposition
-    from vonk_agent_protocol.lifecycle_vocabulary import (
-        WaitOwnerKind,
-        WaitResumeCondition,
-    )
-    from vonk_control.coordinator_contract import CoordinatorFailureEvidence
-    from vonk_control.due_waits import DueWaitBackstop, WaitSource
-    from vonk_control.models.coordinator import CoordinatorFailure
-    from vonk_control.observation.platform import PlatformObserver
-    from vonk_control.persisted_waits import read_wait
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -902,9 +917,8 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
     assert not worker.run_once()
     with sessions() as session:
         stored = session.scalar(select(CoordinatorFailure))
-        assert stored is not None and isinstance(
-            stored.failure, CoordinatorFailureEvidence
-        )
+        assert stored is not None
+        assert isinstance(stored.failure, CoordinatorFailureEvidence)
         wait = read_wait(stored)
         assert wait is not None
         assert wait.resume_condition == WaitResumeCondition.RETRY_DUE
@@ -961,7 +975,7 @@ def test_jobs_lane_resumes_in_a_restarted_worker_process_with_the_same_digest(
             raise ValueError("malformed persisted row")
         return claim(*args, **kwargs)
 
-    jobs.claim = faulty_claim  # type: ignore[method-assign]
+    jobs.claim = faulty_claim
 
     def worker(name: str) -> Worker:
         return Worker(
@@ -1030,7 +1044,7 @@ def test_a_long_pass_of_short_steps_never_trips_the_watchdog(tmp_path) -> None:
         _service(tmp_path),
         "worker-1",
         {},
-        background_services=(step, lambda: step(), lambda: step()),
+        background_services=(step, lambda: step(), lambda: step()),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         coordinator_failures=_failures(tmp_path),
         step_heartbeat=watchdog.beat,
     )
@@ -1045,8 +1059,6 @@ def test_hung_step_restarts_the_worker_and_a_fresh_request_is_served(
 ) -> None:
     """Catches a hang that nothing bounds: one step longer than the watchdog
     timeout must restart the worker, naming the step."""
-    from vonk_control.worker.liveness import watch_worker
-    from vonk_control.worker.loop import _background_source_name
 
     now = [0.0]
     watchdog = WorkerWatchdog(timeout_seconds=180, clock=lambda: now[0])
@@ -1105,8 +1117,6 @@ def test_a_hang_after_a_readiness_write_is_named_by_its_own_step(
 ) -> None:
     """Catches the watchdog naming the readiness heartbeat (written between
     steps) instead of the step that then hangs."""
-    from vonk_control.worker.liveness import watch_worker
-    from vonk_control.worker.loop import _background_source_name
 
     now = [0.0]
     monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: now[0])
@@ -1184,8 +1194,6 @@ def test_slow_step_is_named_but_scheduled_like_any_other(
     """Catches the over-budget alarm changing scheduling: a slow success that
     parks its source (or creates a due-wait row) delays the very work it
     names."""
-    from vonk_control.models.coordinator import CoordinatorFailure
-    from vonk_control.worker.loop import _STEP_BUDGET_SECONDS, _background_source_name
 
     monotonic = [1000.0]
     monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: monotonic[0])
@@ -1213,7 +1221,8 @@ def test_slow_step_is_named_but_scheduled_like_any_other(
         if "worker.step_over_budget" in record.getMessage()
     )
     assert name in alarm
-    assert '"budget_seconds":' in alarm and '"elapsed_seconds":' in alarm
+    assert '"budget_seconds":' in alarm
+    assert '"elapsed_seconds":' in alarm
     assert failures.ready(name)
     sessions = sessionmaker(create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}"))
     with sessions() as session:
@@ -1225,8 +1234,6 @@ def test_slow_step_is_named_but_scheduled_like_any_other(
 def test_a_long_pass_writes_readiness_between_its_steps(tmp_path, monkeypatch) -> None:
     """Catches readiness written only at the end of a pass: a pass of several
     slow steps would look unavailable (``workers: null``) while it turns."""
-    from vonk_control.worker.liveness import _READINESS_BEAT_SECONDS
-    from vonk_control.worker_healthcheck import WORKER_READINESS_WINDOW_SECONDS
 
     now = [0.0]
     monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: now[0])
@@ -1241,7 +1248,7 @@ def test_a_long_pass_writes_readiness_between_its_steps(tmp_path, monkeypatch) -
         _service(tmp_path),
         "worker-1",
         {},
-        background_services=(step, lambda: step(), lambda: step(), lambda: step()),
+        background_services=(step, lambda: step(), lambda: step(), lambda: step()),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         coordinator_failures=_failures(tmp_path),
         loop_heartbeat=lambda: events.append(("readiness", now[0])),
     )
@@ -1250,7 +1257,10 @@ def test_a_long_pass_writes_readiness_between_its_steps(tmp_path, monkeypatch) -
 
     written = [at for kind, at in events if kind == "readiness"]
     assert written == [12.0, 24.0, 24.0]  # two between steps, one at the end
-    gaps = [later - earlier for earlier, later in zip([0.0, *written], written)]
+    gaps = [
+        later - earlier
+        for earlier, later in zip([0.0, *written], written, strict=False)
+    ]
     assert max(gaps) < WORKER_READINESS_WINDOW_SECONDS
     assert _READINESS_BEAT_SECONDS < WORKER_READINESS_WINDOW_SECONDS
 
@@ -1258,12 +1268,8 @@ def test_a_long_pass_writes_readiness_between_its_steps(tmp_path, monkeypatch) -
 def test_production_worker_beats_the_watchdog_it_is_watched_by() -> None:
     """Catches the production loop not handing the watchdog's beat to the
     worker (the watchdog would again bound a whole pass)."""
-    import ast
-    import inspect
 
-    from vonk_control.worker import __main__ as module
-
-    tree = ast.parse(inspect.getsource(module))
+    tree = ast.parse(inspect.getsource(worker_main))
     main = next(
         node
         for node in tree.body
@@ -1294,16 +1300,14 @@ def test_production_assembly_hands_the_step_heartbeat_to_the_worker(
     tmp_path, request
 ) -> None:
     """Catches assemble_production_worker dropping the step heartbeat."""
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
-    from vonk_control.model_cache.service import ModelCacheService
-    from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.worker.assembly import assemble_production_worker
 
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 8, 6, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 8, 6, tzinfo=UTC)
+
     model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
     request.addfinalizer(model_cache.close)
     beats: list[str] = []
@@ -1335,10 +1339,6 @@ def test_production_assembly_hands_the_step_heartbeat_to_the_worker(
 def test_every_worker_step_runs_through_the_one_timing_wrapper() -> None:
     """Catches a new step that bypasses the step timing: it would hide from the
     over-budget alarm and from the watchdog's per-step bound."""
-    import ast
-    import inspect
-
-    from vonk_control.worker import loop as module
 
     # Everything the pass methods may call outside a lambda (a lambda builds a
     # step that _timed runs later): the timing wrapper, failure custody,
@@ -1367,7 +1367,7 @@ def test_every_worker_step_runs_through_the_one_timing_wrapper() -> None:
         "len",
         "range",
     }
-    tree = ast.parse(inspect.getsource(module))
+    tree = ast.parse(inspect.getsource(worker_loop))
     methods = [
         node
         for node in ast.walk(tree)
@@ -1419,7 +1419,7 @@ def test_due_run_switch_wait_is_redriven_within_one_step_of_any_number_of_slow_s
         _service(tmp_path),
         "worker-1",
         {},
-        background_services=tuple((lambda: slow_source()) for _ in range(sources)),
+        background_services=tuple((lambda: slow_source()) for _ in range(sources)),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         coordinator_failures=_failures(tmp_path),
         due_waits=due_waits,
     )
@@ -1443,10 +1443,6 @@ def test_slow_recipe_subtask_is_named_in_the_over_budget_alarm(
     tmp_path, caplog, monkeypatch
 ) -> None:
     """Catches the coarse `recipes` step hiding which sub-task is slow."""
-    from datetime import UTC, datetime
-
-    from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
-    from vonk_control.worker.loop import _STEP_BUDGET_SECONDS
 
     monotonic = [1000.0]
     monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: monotonic[0])

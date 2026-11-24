@@ -12,16 +12,6 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import update
-from vonk_control.fleet_projection.service import FleetProjection
-from vonk_control.fleet_stream import FleetStream
-from vonk_control.models.fleet import AgentNode, AgentNodeContact
-from vonk_control.models.telemetry import FleetStreamEvent
-from vonk_control.observation.transfer import (
-    ObservationTransferResponse,
-    observation_response,
-)
-from vonk_control.strict_json import serialize_json_value
-from vonk_control.telemetry.samples import TelemetryRepository
 
 from tests.test_fleet_stream import (
     NODE_ID,
@@ -31,12 +21,27 @@ from tests.test_fleet_stream import (
     _production_stream_store,
 )
 from tests.test_observation_transfer import _app_peer, _large_snapshot
+from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.fleet_stream import FleetStream
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.models.telemetry import FleetStreamEvent
+from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
+from vonk_control.observation.transfer import (
+    ObservationTransferResponse,
+    observation_response,
+)
+from vonk_control.strict_json import serialize_json_value
+from vonk_control.telemetry.samples import TelemetryRepository
 
 
 async def _collect(response: ObservationTransferResponse) -> str:
     pieces: list[bytes] = []
-    async for part in response.body_iterator:
-        pieces.append(part.encode() if isinstance(part, str) else bytes(part))
+    pieces.extend(
+        [
+            part.encode() if isinstance(part, str) else bytes(part)
+            async for part in response.body_iterator
+        ]
+    )
     return b"".join(pieces).decode("utf-8", errors="strict")
 
 
@@ -128,7 +133,6 @@ def _export_response_errors(output: Path) -> None:
 def _export_peer_response_errors(
     app: FastAPI, peer: TestClient, records: list[dict[str, object]]
 ) -> None:
-    from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
 
     for path in ("/api/fleet", "/api/platform", "/api/fleet/stream"):
         response = peer.get(path, headers={"Authorization": "Bearer invalid"})

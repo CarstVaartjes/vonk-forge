@@ -13,8 +13,9 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.claims import ClaimRequest
-from vonk_agent_protocol.contracts import AgentClaim, canonical_message
+from vonk_agent_protocol.contracts import AgentClaim
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.inventory import InventoryRequest, InventoryVerdict
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
@@ -23,45 +24,9 @@ from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_agent_protocol.telemetry import TelemetryRequest
-
-from vonk_control.enrollment.responses import _now
-from vonk_control.operator_receipt_contract import ReceiptPolicy
-
-from ..agent_acceptance import InventoryAcceptance, ObservationAcceptance
-from ..agent_jobs.contracts import StaleAgentAttempt
-from ..auth import AgentIdentity
-from ..download_contract import download_responses
-from ..http_errors import temporary_http_answer
-from ..inventory.repository import (
-    MAX_INVENTORY_FUTURE_SKEW,
-    InventoryRepository,
-    NodeInventoryReport,
-    _validated_inventory,
-)
-from ..library.contract import UuidId
-from ..logging import log_event
-from ..models.cache import RecipeBuild
-from ..models.execution import STOPPABLE_NOT_RUNNING_RUN_STATES, RecipeRun, RunNode
-from ..models.mapping import ClusterMapping
-from ..operator_acceptance import operator_acceptance
-from ..optimistic import Stale, transition
-from ..owner_liveness import builds_in_flight, run_has_live_operation
-from ..persisted_waits import schedule_wait
-from ..presence import PresenceError
-from ..recipe_operations.observation_helpers import (
-    prepare_exact_recipe_run_observation_nodes,
-)
-from ..run_switch_operations.evidence_waits import wake_evidence_waits
-from ..source_bundles import SourceBundleError
-from ..spark_store_retention import store_retention_request
-from ..telemetry.samples import TelemetryRepository
-from ..untracked_installations import (
-    run_wanted_here,
-    untracked_installations,
-    untracked_runs,
-    wanted_run_ids,
-)
-from .common import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_acceptance import InventoryAcceptance, ObservationAcceptance
+from vonk_control.agent_api.common import (
     _CANONICAL_UUID,
     _DIGEST,
     _LOGGER,
@@ -76,7 +41,46 @@ from .common import (
     _validated_authenticated_source,
     contract_verdict_or_wait,
 )
-from .ended_runs import reopen_ended_runs_still_running
+from vonk_control.agent_api.ended_runs import reopen_ended_runs_still_running
+from vonk_control.agent_jobs.contracts import StaleAgentAttempt
+from vonk_control.auth import AgentIdentity
+from vonk_control.download_contract import download_responses
+from vonk_control.enrollment.responses import _now
+from vonk_control.http_errors import temporary_http_answer
+from vonk_control.identifiers import UuidId
+from vonk_control.inventory.repository import (
+    MAX_INVENTORY_FUTURE_SKEW,
+    InventoryRepository,
+    NodeInventoryReport,
+    _validated_inventory,
+)
+from vonk_control.logging import log_event
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
+    STOPPABLE_NOT_RUNNING_RUN_STATES,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.operator_acceptance import operator_acceptance
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.optimistic import Stale, transition
+from vonk_control.owner_liveness import builds_in_flight, run_has_live_operation
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.presence import PresenceError
+from vonk_control.recipe_operations.observation_helpers import (
+    prepare_exact_recipe_run_observation_nodes,
+)
+from vonk_control.run_switch_operations.evidence_waits import wake_evidence_waits
+from vonk_control.source_bundles import SourceBundleError
+from vonk_control.spark_store_retention import store_retention_request
+from vonk_control.telemetry.samples import TelemetryRepository
+from vonk_control.untracked_installations import (
+    run_wanted_here,
+    untracked_installations,
+    untracked_runs,
+    wanted_run_ids,
+)
 
 
 def _wake_post_stop_waits(

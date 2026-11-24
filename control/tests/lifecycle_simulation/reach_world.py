@@ -32,16 +32,20 @@ from dataclasses import dataclass, field
 from functools import partial
 from importlib import resources
 from pathlib import Path
+from types import MethodType
 from typing import Any
 
 import httpx2
 from sqlalchemy import Engine, select
+from vonk_forge_contracts import document_sha256
+
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
+from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
@@ -53,7 +57,6 @@ from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.storage_demands import StorageDemands
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
-from vonk_forge_contracts import document_sha256
 
 from ..recipe_operations_support import ConcurrentPublisher
 from ..run_switch_operations_support import (
@@ -250,8 +253,10 @@ class ReachWorld(World):
         )
         # Installations compile against what the NAS really holds.
         compile_installation = template._install_admission._compiled_plan_provider
-        assert compile_installation is not None
-        compile_installation.__self__._model_cache = cache
+        assert isinstance(compile_installation, MethodType)
+        compiler = compile_installation.__self__
+        assert isinstance(compiler, ControllerExecutionPlanService)
+        compiler._model_cache = cache
         orders = AgentJobService(self.sessions, clock=clock)
         routes = RecipeRouteService(
             self.sessions,

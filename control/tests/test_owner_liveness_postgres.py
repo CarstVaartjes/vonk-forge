@@ -13,6 +13,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.image_store_collection import ImageStoreCollector

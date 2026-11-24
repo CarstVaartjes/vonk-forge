@@ -9,7 +9,9 @@ import pytest
 from fastapi import BackgroundTasks, Depends, FastAPI, Response
 from fastapi.testclient import TestClient
 from pydantic import ConfigDict, Field, RootModel, ValidationError
+
 from vonk_agent_protocol.grant_requests import HostHelperGrantResponse
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.library.contract import (
     FreshnessPolicy,
     LibraryFacetValues,
@@ -19,19 +21,16 @@ from vonk_control.library.contract import (
 )
 from vonk_control.model_cache.contract import ModelCacheOperatorRequest
 from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.operator_acceptance import ControllerAPIRoute
 from vonk_control.recipe_image_availability.api import RecipeOperatorRequest
-from vonk_control.strict_json import (
-    ControllerAPIRoute,
-    StrictJSONModel,
-    serialize_json_value,
-)
+from vonk_control.strict_json import StrictJSONModel, serialize_json_value
 
 
 class _LiteralSemanticsProbe(StrictJSONModel):
     model_config = ConfigDict(strict=True)
     optional_tag: Literal[1] | None = None
     mixed_string: Literal[1] | str
-    mixed_integer: Literal[1] | int
+    mixed_integer: Literal[1] | int  # noqa: PYI051 -- Literal[1] | int is the contract case under test
     mixed_float: Literal[1] | float
     bool_tag: Literal[True]
 
@@ -378,7 +377,6 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
 
 
 def test_unknown_mutation_ends_observation_and_fresh_request_succeeds() -> None:
-    from vonk_agent_protocol.outcome import UnknownOutcomeError
 
     class _Busy(UnknownOutcomeError):
         retry_after_seconds = 17

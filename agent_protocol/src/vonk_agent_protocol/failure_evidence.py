@@ -7,8 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from .page_cache import PageCacheDropEvidence
-from .wire_model import WireModel
+from vonk_agent_protocol.page_cache import PageCacheDropEvidence
+from vonk_agent_protocol.wire_model import WireModel
 
 MAX_DROPPED_COUNT = 2**64 - 1
 

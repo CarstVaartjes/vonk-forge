@@ -5,30 +5,40 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
-from ..cli_artifact_jobs import (
-    ArtifactJobClient,
-    run_artifact_job,
-)
-from ..cli_render.vocabulary import use_vocabulary
-from ..control_client.errors import (
+from cluster_profiles.cli_artifact_jobs import ArtifactJobClient, run_artifact_job
+from cluster_profiles.cli_render.vocabulary import use_vocabulary
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlHTTPError,
     ControlNotFound,
     TransferUnavailable,
 )
-from ..generated_control.models.catalog_vocabulary import CatalogVocabulary
-from .cache_removal import _remove_model, _remove_recipe
-from .cache_submission import (
+from cluster_profiles.controller_cli.cache_removal import _remove_model, _remove_recipe
+from cluster_profiles.controller_cli.cache_submission import (
     _submit_cache_request,
     _submit_model_access_resume,
     _submit_model_cancellation,
     _submit_recipe_cancellation,
     _submit_recipe_retry,
 )
-from .common import ControllerClient, _query, _quoted, _request_key
-from .fleet import _overview
-from .installation import _recipe_installation_reconcile
-from .observation import _cache_progress, _follow_mutation, _poll_path, _watch_resource
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _query,
+    _quoted,
+    _request_key,
+)
+from cluster_profiles.controller_cli.fleet import _overview
+from cluster_profiles.controller_cli.installation import _recipe_installation_reconcile
+from cluster_profiles.controller_cli.observation import (
+    _cache_progress,
+    _follow_mutation,
+    _poll_path,
+    _watch_resource,
+)
+from cluster_profiles.controller_cli.unused_removal import _remove_unused
+from cluster_profiles.generated_control.models.catalog_vocabulary import (
+    CatalogVocabulary,
+)
 
 
 def _library_query(args: argparse.Namespace, *, recipe: bool) -> dict[str, object]:
@@ -120,8 +130,10 @@ def _model(
         result = _submit_cache_request(client, "model", args, factory)
         return _follow_mutation(client, "model", result, args)
     if action == "remove":
+        if args.unused:
+            return _remove_unused(client, args, factory)
         result = _remove_model(client, args, factory)
-        if args.review or args.unused:
+        if args.review:
             return result
         return _follow_mutation(client, "model", result, args)
     raise ValueError(f"unsupported model action: {action}")

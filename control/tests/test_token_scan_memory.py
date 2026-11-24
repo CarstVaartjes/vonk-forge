@@ -9,6 +9,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.catalog.revision_collection import operation_tokens
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job
@@ -66,17 +67,17 @@ def test_collectors_never_feed_a_buffered_result_to_the_token_scan() -> None:
         if "tokens(" not in text:
             continue
         tree = ast.parse(text)
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "tokens"
-                and any(
-                    isinstance(argument, ast.Call)
-                    and isinstance(argument.func, ast.Attribute)
-                    and argument.func.attr in {"scalars", "execute"}
-                    for argument in node.args
-                )
-            ):
-                offenders.append(f"{path.name}:{node.lineno}")
+        offenders.extend(
+            f"{path.name}:{node.lineno}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "tokens"
+            and any(
+                isinstance(argument, ast.Call)
+                and isinstance(argument.func, ast.Attribute)
+                and argument.func.attr in {"scalars", "execute"}
+                for argument in node.args
+            )
+        )
     assert not offenders, offenders

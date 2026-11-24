@@ -26,20 +26,25 @@ from pathlib import Path
 from typing import Any
 
 from cluster_profiles.cli_states_generated import FAILED
+from cluster_profiles.control_client.errors import ControlClientError
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.fleet_qualification_campaign_cli.application import load
+from cluster_profiles.fleet_qualification_campaign_cli.contracts import (
+    ResultsLog,
+    load_campaign,
+)
+from cluster_profiles.fleet_qualification_campaign_cli.recovery import recover
+from cluster_profiles.fleet_qualification_campaign_cli.status import (
+    _select_batch,
+    status,
+)
+from cluster_profiles.fleet_qualification_campaign_cli.stop import stop
 from cluster_profiles.fleet_qualification_observation import (
     QualificationError,
     QualificationObservationUnknown,
     _observe,
 )
-
-from ..control_client.errors import ControlClientError
-from ..control_client.transfers import ControlClient
-from ..qualification_fixtures.contracts import FixtureError
-from .application import load
-from .contracts import ResultsLog, load_campaign
-from .recovery import recover
-from .status import _select_batch, status
-from .stop import stop
+from cluster_profiles.qualification_fixtures.contracts import FixtureError
 
 
 def _arguments(argv: Sequence[str] | None) -> argparse.Namespace:

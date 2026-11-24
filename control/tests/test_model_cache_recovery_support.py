@@ -1,11 +1,11 @@
 """Observe a recoverable call without making its exception taxonomy a contract."""
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 
 @contextmanager
-def observe_unknown() -> Iterator[None]:
+def observe_unknown() -> Generator[None]:
     """The witness is retained bytes, released ownership and fresh admission.
 
     A call may return a miss or end with an observation error. Tests using this

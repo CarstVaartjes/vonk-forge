@@ -32,20 +32,25 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts.model import ModelReference
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 from vonk_agent_protocol.build_import import RecipeBuildRequest
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.catalog import revision_collection as catalog_revision_collection
-from vonk_control.catalog.entities import recipe_document_projection
 from vonk_control.catalog.revision_collection import (
     GRACE,
     INTERVAL,
     SWEEP_BUDGET_SECONDS,
     CatalogRevisionCollector,
 )
-from vonk_control.catalog.revision_contract import ModelRevisionProjection
+from vonk_control.catalog.revision_contract import (
+    ModelRevisionProjection,
+    recipe_document_projection,
+)
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
@@ -76,8 +81,6 @@ from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,
     generate_source_bundle,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
-from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 10, 1, 12, tzinfo=UTC)
 OLD = NOW - GRACE - timedelta(hours=2)
@@ -961,7 +964,7 @@ def test_a_backlog_larger_than_one_pass_resumes_from_its_cursor(
     assert collector._cursor is not None
     removed = first.revisions
     passes = 1
-    while collector._cursor is not None and passes < 5:
+    while collector._cursor is not None and passes < 5:  # pyright: ignore[reportUnnecessaryComparison]  # pyright keeps the narrowing across the call that moves the cursor
         result = collector.collect()
         assert result.revisions > 0 or collector._cursor is None
         removed += result.revisions
@@ -1210,7 +1213,8 @@ def test_a_reference_committed_during_the_batch_keeps_its_revision_on_postgres(
     assert accepted
     assert rescinded.revisions == 0
     assert rescinded.kept == {"live operation": 1}
-    assert catalog.exists(named) and catalog.exists(unrelated)
+    assert catalog.exists(named)
+    assert catalog.exists(unrelated)
     assert collector._cursor is not None  # the next worker pass continues
 
     retried = collector.collect()

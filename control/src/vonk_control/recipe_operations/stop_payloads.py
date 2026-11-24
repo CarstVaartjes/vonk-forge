@@ -7,23 +7,23 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
-
-from ..categorized_errors import BookkeepingUnknown
-from ..lifecycle.evidence import Residue
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..stored.json_values import read_row_column
-from ..strict_json import read_stored_model
-from .execution_contract import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from .impact_plans import StopNodeImpact
+from vonk_control.recipe_operations.impact_plans import StopNodeImpact
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model
 
 
 class RecipeStopAuthorityError(ValueError):
@@ -140,7 +140,6 @@ def durable_run_stop_payloads(
     *,
     run_generation: int,
     cancel_pending_start: bool,
-    allow_missing_nodes: bool,
 ) -> dict[str, RecipeStopPayload]:
     """Authorize exact Stop from current durable run and rank ownership.
 
@@ -176,7 +175,7 @@ def durable_run_stop_payloads(
     # accepted plan recorded.
     recipe_content_sha256 = (
         revision.content_digest
-        if revision is not None and revision.content_digest is not None
+        if revision is not None
         else _installation_recipe_digest(installation)
     )
     if recipe_content_sha256 is None:

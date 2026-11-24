@@ -5,7 +5,7 @@ import json
 import sqlite3
 import time
 import uuid
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -29,6 +29,8 @@ from sqlalchemy import (
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError, StatementError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition
+
 from vonk_control import exact_integer_adoption as adoption_module
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.catalog.revision_contract import (
@@ -55,7 +57,6 @@ from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_operations.impact_plans import StopPlan, UninstallPlan
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
-from vonk_forge_contracts import ModelDefinition
 
 from .display_fixtures import create_draft
 from .model_cache_support import _artifact
@@ -114,7 +115,7 @@ class NoRemoval:
 
 
 @contextmanager
-def _historical_mapper(engine: Engine) -> Iterator[Engine]:
+def _historical_mapper(engine: Engine) -> Generator[Engine]:
     """Yield a private engine whose dialect stores owning integers as BIGINT.
 
     Sequential historical producer fixtures run the real services against the
@@ -160,7 +161,8 @@ def _document(size: int, slug: str) -> dict[str, object]:
     assert isinstance(identity, dict)
     identity["slug"] = slug
     files = document["files"]
-    assert isinstance(files, list) and files
+    assert isinstance(files, list)
+    assert files
     first = files[0]
     assert isinstance(first, dict)
     first["size_bytes"] = size
@@ -304,7 +306,7 @@ def _schema(engine: Engine) -> tuple[tuple[object, ...], ...]:
                 (table, *tuple(row))
                 for table in OWNING_COLUMNS
                 for row in connection.exec_driver_sql(
-                    f"SELECT * FROM {table} ORDER BY 1"
+                    f"SELECT * FROM {table} ORDER BY 1"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                 )
             )
         )
@@ -332,7 +334,8 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
                 join_transaction_mode="create_savepoint",
             )
             baseline = CatalogEntityService(baseline_sessions, clock=lambda: NOW)
-            with pytest.raises(Exception) as _ending:
+
+            def expected_failure():
                 row = create_draft(
                     baseline, _document(2**63, "baseline-large"), actor="operator"
                 )
@@ -340,6 +343,9 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
                     reread = session.get(CatalogDocumentRevision, row.id)
                     assert reread is not None
                     assert reread.download_bytes == 2**63
+
+            with pytest.raises(Exception) as _ending:
+                expected_failure()
         finally:
             transaction.rollback()
     with sessions() as session:
@@ -350,14 +356,16 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
     _adopt(engine)  # Restart/idempotent startup must not recreate rows.
     with sessions() as session:
         retained = session.get(CatalogDocumentRevision, existing.id)
-        assert retained is not None and retained.download_bytes == 9
+        assert retained is not None
+        assert retained.download_bytes == 9
     for value in (2**63, VALUES[-1]):
         row = create_draft(
             owner, _document(value, f"adopted-{len(str(value))}"), actor="operator"
         )
         with sessions() as session:
             retained = session.get(CatalogDocumentRevision, row.id)
-            assert retained is not None and retained.download_bytes == value
+            assert retained is not None
+            assert retained.download_bytes == value
     with engine.connect() as connection:
         for table, names in OWNING_COLUMNS.items():
             columns = {
@@ -408,7 +416,7 @@ def test_database_rejects_noncanonical_tokens_and_exact_adjacent_verified_bytes(
     for token in ("", "00", "01", "+1", "-1", "1.0", "1e2", "1\n", " 1", "١"):
         with pytest.raises(DBAPIError), storage_engine.begin() as connection:
             connection.exec_driver_sql(
-                f"UPDATE model_cache_sets SET expected_bytes={parameter} WHERE artifact_set_sha256={parameter}",
+                f"UPDATE model_cache_sets SET expected_bytes={parameter} WHERE artifact_set_sha256={parameter}",  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                 (token, digest),
             )
     for value in (0, 9, 10):
@@ -426,7 +434,7 @@ def test_database_rejects_noncanonical_tokens_and_exact_adjacent_verified_bytes(
         )
     with pytest.raises(DBAPIError), storage_engine.begin() as connection:
         connection.exec_driver_sql(
-            f"UPDATE model_cache_sets SET verified_bytes=NULL WHERE artifact_set_sha256={parameter}",
+            f"UPDATE model_cache_sets SET verified_bytes=NULL WHERE artifact_set_sha256={parameter}",  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             (digest,),
         )
     with pytest.raises(StatementError), storage_engine.begin() as connection:
@@ -486,7 +494,7 @@ def test_legacy_adoption_preserves_keys_extensions_and_checked_restart(
         )
         parameter = "?" if engine.dialect.name == "sqlite" else "%s"
         connection.exec_driver_sql(
-            f"INSERT INTO proof_child VALUES ({parameter},{parameter})",
+            f"INSERT INTO proof_child VALUES ({parameter},{parameter})",  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             ("retained-child", revision.id),
         )
         connection.exec_driver_sql(
@@ -579,9 +587,11 @@ def test_legacy_adoption_preserves_keys_extensions_and_checked_restart(
         connection.exec_driver_sql("INSERT INTO proof_child VALUES ('','missing')")
     with sessions() as session:
         retained = session.get(CatalogDocumentRevision, revision.id)
-        assert retained is not None and retained.download_bytes == 9
+        assert retained is not None
+        assert retained.download_bytes == 9
         cache_set = session.get(ModelCacheSet, digest)
-        assert cache_set is not None and cache_set.expected_bytes == 9
+        assert cache_set is not None
+        assert cache_set.expected_bytes == 9
 
 
 @pytest.mark.parametrize(
@@ -803,7 +813,8 @@ def test_native_catalog_and_cache_preserve_complete_integer_domain_across_restar
             assert isinstance(identity, dict)
             identity["slug"] = f"exact-integer-{index}"
             files = document["files"]
-            assert isinstance(files, list) and files
+            assert isinstance(files, list)
+            assert files
             first = files[0]
             assert isinstance(first, dict)
             first["size_bytes"] = expected
@@ -889,12 +900,11 @@ def test_native_catalog_and_cache_preserve_complete_integer_domain_across_restar
                 entry = CacheEntryResponse.model_validate_json(
                     json.dumps(restarted_cache.get_entry(digest))
                 )
-                assert entry.expected_bytes == expected and entry.verified_bytes == 0
+                assert entry.expected_bytes == expected
+                assert entry.verified_bytes == 0
                 operation = restarted_cache.get_operation(operation_id)
-                assert (
-                    operation.id == operation_id
-                    and operation.request_key == request_key
-                )
+                assert operation.id == operation_id
+                assert operation.request_key == request_key
             maximum = session.scalar(
                 select(ModelCacheSet.expected_bytes)
                 .order_by(
@@ -980,7 +990,8 @@ def test_invalid_legacy_row_refuses_before_mutation_then_exact_repair_retries(
     _adopt(engine)
     with sessions() as session:
         repaired = session.get(CatalogDocumentRevision, revision.id)
-        assert repaired is not None and repaired.download_bytes == 9
+        assert repaired is not None
+        assert repaired.download_bytes == 9
 
 
 def test_current_schema_startup_does_not_take_sqlite_write_lock_or_change_settings(
@@ -1066,7 +1077,8 @@ def test_sqlite_native_table_options_and_highwater_are_preserved_or_deferred(
                 ddl = connection.exec_driver_sql(
                     "SELECT sql FROM sqlite_master WHERE name='model_cache_sets'"
                 ).scalar_one()
-                assert isinstance(ddl, str) and option in ddl.upper()
+                assert isinstance(ddl, str)
+                assert option in ddl.upper()
                 assert connection.exec_driver_sql(
                     "SELECT artifact_set_sha256,expected_bytes,verified_bytes FROM model_cache_sets"
                 ).one() == ("retained", "9", "0")
@@ -1210,15 +1222,11 @@ def test_adoption_execution_deadline_rolls_back_partial_ddl_then_same_identity_r
     with sessions() as session:
         retained = session.get(CatalogDocumentRevision, revision.id)
         retained_cache = session.get(ModelCacheSet, digest)
-        assert (
-            retained is not None
-            and retained.download_bytes == retained.installed_bytes == 9
-        )
-        assert (
-            retained_cache is not None
-            and retained_cache.expected_bytes == 9
-            and retained_cache.verified_bytes == 0
-        )
+        assert retained is not None
+        assert retained.download_bytes == retained.installed_bytes == 9
+        assert retained_cache is not None
+        assert retained_cache.expected_bytes == 9
+        assert retained_cache.verified_bytes == 0
 
 
 def test_sqlite_weakened_owning_check_with_significant_literal_space_is_replaced(

@@ -6,11 +6,12 @@ import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import insert, select, update
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
@@ -32,15 +33,18 @@ from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevi
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.telemetry import NodeInventorySnapshot
 
-pytest_plugins = ("tests.test_profile_load_installed_cli",)
-
+from .recipe_operations_support import setup_services
+from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profiles_canonical import NODE_1
+from .test_profile_installed_execution import _profile_service
 from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,
     _run_pty,
 )
 from .test_profile_load_submission import _profile_api
+
+pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
 def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save(
@@ -248,7 +252,7 @@ def test_installed_run_declined_after_the_draft_review_changes_nothing(
 
     assert status == 2, transcript
     (preview,) = [call for call in state.calls if call[1] == "/api/profile/1/preview"]
-    draft = cast(dict, preview[2])["definition"]
+    draft = cast(dict[str, Any], preview[2])["definition"]
     assert draft["assignments"][0]["recipe_selector"] == _RUN_RECIPE
     assert not [call for call in state.calls if call[0] == "PUT"]
     assert api.get("/api/profile/1/definition", headers=headers).json() == before
@@ -297,7 +301,7 @@ def test_installed_run_asks_again_when_the_profile_moved_then_saves_and_loads(
 
     assert competing == [200], transcript
     puts = [call for call in state.calls if call[0] == "PUT"]
-    assert [cast(dict, call[2])["expected_revision"] for call in puts] == [
+    assert [cast(dict[str, Any], call[2])["expected_revision"] for call in puts] == [
         revision,
         revision + 1,
     ]
@@ -309,7 +313,8 @@ def test_installed_run_asks_again_when_the_profile_moved_then_saves_and_loads(
     ]
     (load,) = [call for call in state.calls if call[1] == "/api/profile/1/load"]
     previews = [call for call in state.calls if call[1] == "/api/profile/1/preview"]
-    assert len(previews) == 2 and cast(dict, load[2])["review"]["effects_digest"]
+    assert len(previews) == 2
+    assert cast(dict[str, Any], load[2])["review"]["effects_digest"]
     with sessions() as session:
         assert len(list(session.scalars(select(FleetProfileApplication)))) == 1
 
@@ -325,9 +330,6 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
     action: str,
 ) -> None:
     """Catches a global removal-reference scan blocking ordinary profile edits."""
-    from .recipe_operations_support import setup_services
-    from .test_fleet_profile_api import _client, _headers
-    from .test_profile_installed_execution import _profile_service
 
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1
@@ -475,9 +477,11 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
         )
         assert edited.returncode == 0, edited.stdout + edited.stderr
         view = FleetProfileView.model_validate_json(edited.stdout)
-        assert view.definition == expected and view.revision == revision
+        assert view.definition == expected
+        assert view.revision == revision
     persisted = profiles.definition_number(number)
-    assert persisted.definition == expected and persisted.revision == revision
+    assert persisted.definition == expected
+    assert persisted.revision == revision
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -485,9 +489,6 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
     postgres_engine, tmp_path
 ):
     """Catches an untyped reference-scan exception escaping the save boundary."""
-    from .recipe_operations_support import setup_services
-    from .test_fleet_profile_api import _client, _headers
-    from .test_profile_installed_execution import _profile_service
 
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1
@@ -504,7 +505,8 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
                 CatalogDocumentRevision.kind == "model"
             )
         )
-        assert recipe is not None and model is not None
+        assert recipe is not None
+        assert model is not None
         selector = f"{recipe.publisher}/{recipe.slug}"
         model_id, original = model.id, model.document
         if (
@@ -544,7 +546,6 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
     refused = api.put(
         "/api/profile/13", headers=headers, json=request.model_dump(mode="json")
     )
-    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 
     assert refused.status_code == 503, refused.text
     assert (

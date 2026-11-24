@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from typing import Any, cast
 
 import pytest
+from fastapi.testclient import TestClient
+
+from vonk_control.agent_api import common
+from vonk_control.api import middleware
+from vonk_control.api.application import create_app
 from vonk_control.auth import (
     AgentIdentity,
     AgentSource,
     AuthError,
+    TokenCodec,
     TrustedProxyAgentIdentityMiddleware,
     agent_identity_from_scope,
     agent_source_from_scope,
@@ -48,18 +55,15 @@ def test_agent_scope_source_must_be_typed_and_bound_to_identity() -> None:
         is None
     )
     # The raw mapping is deliberately the wrong type: the assertion is that the
-    # frozen dataclass refuses an untyped identity at runtime. This one pyright
-    # error is the point of the case, so it is recorded in the baseline rather
-    # than silenced; the `# type: ignore` that used to sit above it was on the
-    # wrong line and suppressed nothing.
+    # frozen dataclass refuses an untyped identity at runtime.
     with pytest.raises(AuthError):
         AgentSource(
-            identity={"node_id": NODE},
+            identity={"node_id": NODE},  # pyright: ignore[reportArgumentType]  # deliberate: proves the runtime refusal
             management_address="10.0.0.42",
         )
 
 
-@pytest.mark.parametrize("node,verified", (("not-a-node", True), (NODE, False)))
+@pytest.mark.parametrize(("node", "verified"), [("not-a-node", True), (NODE, False)])
 def test_agent_identity_rejects_noncanonical_or_unverified_values(
     node: str, verified: bool
 ) -> None:
@@ -244,7 +248,8 @@ def test_agent_identity_is_validated_once_and_handlers_reuse_it() -> None:
     scope = {"type": "http", "path": "/agent/telemetry", "headers": headers}
     asyncio.run(middleware(scope, lambda: None, lambda _: None))
     assert lookups == [NODE]
-    assert seen[0] is not None and seen[0].node_id == NODE
+    assert seen[0] is not None
+    assert seen[0].node_id == NODE
 
     # A request that skipped the middleware is unvalidated.
     identity = AgentIdentity(NODE, "123", "fingerprint", True)
@@ -267,13 +272,6 @@ def test_agent_identity_is_validated_once_and_handlers_reuse_it() -> None:
 def test_agent_handler_reuses_the_middleware_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from typing import Any, cast
-
-    from fastapi.testclient import TestClient
-    from vonk_control.agent_api import common
-    from vonk_control.api import middleware
-    from vonk_control.api.application import create_app
-    from vonk_control.auth import TokenCodec
 
     lookups: list[object] = []
 

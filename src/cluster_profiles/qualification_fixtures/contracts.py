@@ -6,7 +6,7 @@ import base64
 import json
 import re
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import resources
@@ -85,6 +85,14 @@ class ArtifactTransferClient(Protocol):
     ) -> object: ...  # the receipt is not read here
 
 
+# One input as an artifact job declares it: the file's slot, name, size and digest.
+class InputDeclaration(TypedDict):
+    slot: str
+    name: str
+    size_bytes: int
+    sha256: str
+
+
 @dataclass(frozen=True, slots=True)
 class Fixture:
     fixture_id: str
@@ -97,7 +105,7 @@ class Fixture:
     content: bytes
     provenance: dict[str, str] | None = None
 
-    def declaration(self, slot: str) -> dict[str, object]:
+    def declaration(self, slot: str) -> InputDeclaration:
         return {
             "slot": slot,
             "name": self.name,
@@ -133,10 +141,10 @@ class RecipeFixture:
         return (self, *self.supplemental_cases)
 
     @contextmanager
-    def materialize(self) -> Iterator[list[tuple[dict[str, object], Path]]]:
+    def materialize(self) -> Generator[list[tuple[InputDeclaration, Path]]]:
         with tempfile.TemporaryDirectory(prefix="vonk-qualification-fixtures-") as root:
             directory = Path(root)
-            values: list[tuple[dict[str, object], Path]] = []
+            values: list[tuple[InputDeclaration, Path]] = []
             for slot, fixture in self.inputs:
                 path = directory / fixture.name
                 path.write_bytes(fixture.content)

@@ -15,10 +15,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import sessionmaker
+
+from cluster_profiles.cli_render.progress import progress_line
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
@@ -26,7 +27,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_jobs.waits import refresh_queue_waits
@@ -41,8 +42,6 @@ from vonk_control.operation_api.responses import (
     operation_detail_response,
 )
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
-
-from cluster_profiles.cli_render.progress import progress_line
 
 from .agent_fences import fenced_operation
 from .package_upgrade_fixtures import source_transport
@@ -169,7 +168,8 @@ def _busy(fleet):
         recipe_stop_payload(NODE_A, plan_digest=COMMIT),
     )
     claim = claim_agent(jobs, NODE_A, f"serial-{NODE_A}", runtime_identity=OLD_IDENTITY)
-    assert claim is not None and fenced_operation(sessions, claim).id == stop.id
+    assert claim is not None
+    assert fenced_operation(sessions, claim).id == stop.id
     clock.now += timedelta(seconds=1)
     return stop, claim
 
@@ -188,7 +188,8 @@ def _waits(services, operation_id: str, job_id: str):
         for item in services.job_operations(job_id, None, 100).items
         if item.id == operation_id
     ]
-    assert len(listed) == 1 and len(job_member) == 1
+    assert len(listed) == 1
+    assert len(job_member) == 1
     return (
         detail.model_dump(mode="json"),
         listed[0].model_dump(mode="json"),
@@ -238,7 +239,8 @@ def test_queued_upgrade_reports_the_order_holding_its_spark_then_proceeds(
         assert document["wait_reason"] == WaitReason.OBSERVATION_UNAVAILABLE
         assert not document["blockers"][0].get("operation")
     claim = claim_agent(jobs, NODE_A, f"serial-{NODE_A}", runtime_identity=OLD_IDENTITY)
-    assert claim is not None and fenced_operation(sessions, claim).id == upgrade.id
+    assert claim is not None
+    assert fenced_operation(sessions, claim).id == upgrade.id
 
 
 def test_any_queued_order_on_a_busy_spark_waits_visibly_and_only_there(
@@ -309,7 +311,8 @@ def test_unconfirmed_blocker_stalls_visibly_then_clears_without_changing_intent(
     with sessions() as session:
         queued = session.get(AgentOperation, upgrade.id)
         assert queued is not None
-        assert queued.current_attempt == 0 and queued.next_action_at == recheck_at
+        assert queued.current_attempt == 0
+        assert queued.next_action_at == recheck_at
         assert queued.state == LifecycleState.QUEUED.value
     # Reconciliation of the exact old effect permits the original upgrade.
     with sessions.begin() as session:
@@ -317,7 +320,8 @@ def test_unconfirmed_blocker_stalls_visibly_then_clears_without_changing_intent(
         assert holder is not None
         holder.state = LifecycleState.SUCCEEDED.value
     claim = claim_agent(jobs, NODE_A, f"serial-{NODE_A}", runtime_identity=OLD_IDENTITY)
-    assert claim is not None and fenced_operation(sessions, claim).id == upgrade.id
+    assert claim is not None
+    assert fenced_operation(sessions, claim).id == upgrade.id
     assert not operation_detail_response(services.get_operation(upgrade.id)).blockers
 
 

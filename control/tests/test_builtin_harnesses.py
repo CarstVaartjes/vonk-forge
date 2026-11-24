@@ -7,12 +7,19 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from vonk_forge_contracts import (
+    ModelDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+)
+
 from vonk_control.harnesses.canonical import (
     _distributed_args,
     compile_canonical_harness,
 )
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
-from vonk_control.harnesses.common import HarnessCompileError
+from vonk_control.harnesses.errors import HarnessCompileError
 from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
@@ -22,12 +29,6 @@ from vonk_control.runtime.writable_paths import (
     environment,
     telemetry_contract,
     writable_paths,
-)
-from vonk_forge_contracts import (
-    ModelDefinition,
-    document_sha256,
-    read_model,
-    read_recipe,
 )
 
 BUILTINS = (
@@ -198,7 +199,7 @@ def test_platform_metadata_is_immutable_and_digest_bound() -> None:
         digest = metadata.content_sha256
         before = _projection(metadata.slug, model=model)
         with pytest.raises(Exception) as _ending:
-            metadata.slug = "mutated"  # type: ignore[misc]
+            metadata.slug = "mutated"
         assert metadata.content_sha256 == digest
         assert _projection(metadata.slug, model=model) == before
 
@@ -208,7 +209,7 @@ def model() -> ModelDefinition:
     return read_model(_example("model-definition.json"))
 
 
-def _recipe(slug: str) -> dict:
+def _recipe(slug: str) -> dict[str, Any]:
     raw = _example(
         "recipe-source-build.json" if slug in OPENAI_BUILTINS else "recipe-job.json"
     )
@@ -243,7 +244,7 @@ _BUILT_IMAGE = {
 def _projection(
     slug: str,
     *,
-    recipe: dict | None = None,
+    recipe: dict[str, Any] | None = None,
     model: ModelDefinition,
     package_handle: object = _BUILT_IMAGE,
     settings: dict[str, object] | None = None,

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs.queue import JobService
@@ -26,7 +27,10 @@ def test_the_production_worker_tick_removes_an_abandoned_partial(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     now = datetime(2026, 8, 6, tzinfo=UTC)
-    clock = lambda: now
+
+    def clock():
+        return now
+
     model_cache = ModelCacheService(sessions, tmp_path / "models", clock=clock)
     request.addfinalizer(model_cache.close)
     worker = assemble_production_worker(

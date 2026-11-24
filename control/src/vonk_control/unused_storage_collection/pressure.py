@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
 import time
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -12,32 +11,39 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import InstallationState
-
-from ..artifact_jobs.lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     lock_reference_gates,
 )
-from ..capabilities import CapabilityUnavailableError
-from ..exact_integer_storage import DecimalIntegerOrderKey
-from ..inventory.repository import INVENTORY_MAX_AGE
-from ..logging import log_event
-from ..models.cache import ArtifactLifecycleGate, ModelCacheSet
-from ..models.execution import InstallationNode, RecipeInstallation
-from ..persisted_waits import schedule_wait, wait_due
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..storage_demands import NAS_IMAGES, NAS_MODELS, StorageDemand, spark_scope
-from .common import (
+from vonk_control.capabilities import CapabilityUnavailableError
+from vonk_control.exact_integer_storage import DecimalIntegerOrderKey
+from vonk_control.inventory.repository import INVENTORY_MAX_AGE
+from vonk_control.logging import log_event
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheSet
+from vonk_control.models.execution import InstallationNode, RecipeInstallation
+from vonk_control.persisted_waits import schedule_wait, wait_due
+from vonk_control.runtime_image_preparation.contracts import (
+    RuntimeImagePreparationError,
+)
+from vonk_control.storage_demands import (
+    NAS_IMAGES,
+    NAS_MODELS,
+    StorageDemand,
+    spark_scope,
+)
+from vonk_control.unused_storage_collection.common import (
     _LOGGER,
     _RECEIPT_SUFFIX,
     _eviction_order,
     _Kept,
     _Stopping,
 )
-from .evidence import (
+from vonk_control.unused_storage_collection.evidence import (
     StorageItemKind,
     _CollectorEvidence,
     _DueRemovalTarget,
@@ -46,7 +52,7 @@ from .evidence import (
     _Pressure,
     _Round,
 )
-from .references import (
+from vonk_control.unused_storage_collection.references import (
     _code,
     _latest_snapshots,
     _model_removal_in_flight,
@@ -54,7 +60,7 @@ from .references import (
 )
 
 if TYPE_CHECKING:
-    from .service import UnusedStorageCollector
+    from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 
 def _pressures(self: UnusedStorageCollector, now: datetime) -> list[_Pressure]:
@@ -178,7 +184,7 @@ def _nas_filesystems(
     by_device: dict[int, list[tuple[Path, str]]] = defaultdict(list)
     for root, kind in roots:
         try:
-            by_device[os.stat(root).st_dev].append((root, kind))
+            by_device[root.stat().st_dev].append((root, kind))
         except OSError:
             continue
     result: list[tuple[str, Path, frozenset[str]]] = []
@@ -238,7 +244,7 @@ def _relieve(
         done = attempted.get((item.kind, item.key))
         if done is None:
             done = self._remove_within_budget(
-                item, kept, outcome.removed, attempted, reached
+                item, kept, outcome.removed, attempted, reached=reached
             )
             if done is None:
                 continue
@@ -273,6 +279,7 @@ def _remove_within_budget(
     kept: Counter[str],
     removed: Counter[str],
     attempted: dict[tuple[str, str], bool],
+    *,
     reached: bool,
 ) -> bool | None:
     """Remove ``item`` and record it; None when the pass's attempt budget is spent.
@@ -330,6 +337,14 @@ def _remove(
     label = "image receipt" if item.kind == "image" else item.kind
     group_key = (item.kind, item.key)
     done = 0
+    # Installations have no artifact gate; every other kind maps to one.
+    artifact_kind = (
+        "runtime-image"
+        if item.kind == "image"
+        else "model-set"
+        if item.kind == "model-set"
+        else "model-object"
+    )
     for member in item.members:
         key = (item.kind, member)
         attempted[key] = False
@@ -337,13 +352,6 @@ def _remove(
             if item.kind == StorageItemKind.INSTALLATION:
                 wait_owner = session.get(RecipeInstallation, member)
             else:
-                artifact_kind = (
-                    "runtime-image"
-                    if item.kind == "image"
-                    else "model-set"
-                    if item.kind == "model-set"
-                    else "model-object"
-                )
                 wait_owner = session.get(ArtifactLifecycleGate, (artifact_kind, member))
             retry_at = wait_due(wait_owner) if wait_owner is not None else None
         if retry_at is not None and self._clock() < retry_at:

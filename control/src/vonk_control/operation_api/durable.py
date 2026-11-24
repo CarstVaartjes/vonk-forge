@@ -10,6 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.route_activation import ActivationMarker
@@ -18,47 +19,48 @@ from vonk_agent_protocol.state_machines import (
     EndpointState,
     GatewayRouteState,
 )
-
-from vonk_control.operator_receipt_contract import JobOperatorReceipt
-from vonk_control.wait_contract import QueueWait
-
-from ..agent_jobs.retirement import (
+from vonk_control.agent_jobs.retirement import (
     authorize_operator_resume_in_session,
     operator_resume_eligible_operations_in_session,
     retire_exhausted_operations_in_session,
 )
-from ..agent_jobs.service import AgentJobService
-from ..auth import CursorCodec, CursorError, cursor_key
-from ..endpoint_contract import EndpointResponse
-from ..fleet_profile_contract.endpoints import (
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.auth import CursorCodec, CursorError, cursor_key
+from vonk_control.endpoint_contract import EndpointResponse
+from vonk_control.fleet_profile_contract.endpoints import (
     FleetProfileEndpointAssignmentView,
     FleetProfileEndpointIntent,
     FleetProfileEndpointsView,
 )
-from ..fleet_profile_contract.vocabulary import FleetProfileEndpointState
-from ..gateway.route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
-from ..gateway.route_runtime import recipe_route_run_id, verify_active_route_bundle
-from ..inventory.items import runtime_value
-from ..jobs import states as job_states
-from ..jobs.operator_receipts import (
+from vonk_control.fleet_profile_contract.vocabulary import FleetProfileEndpointState
+from vonk_control.gateway.route_bundle_contract import (
+    RouteBundleDocument,
+    RouteEndpointDocument,
+)
+from vonk_control.gateway.route_runtime import (
+    recipe_route_run_id,
+    verify_active_route_bundle,
+)
+from vonk_control.inventory.items import runtime_value
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.operator_receipts import (
     record_job_operator_receipt,
     replay_job_operator_receipt,
 )
-from ..lifecycle.job import JobAdapter
-from ..models.fleet import AgentCertificate, AgentNode
-from ..models.jobs import Job
-from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..models.routes import (
+from vonk_control.lifecycle.job import JobAdapter
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.models.routes import (
     RecipeRouteAuthority,
     RoutePublication,
     RoutePublicationOwner,
 )
-from ..operations.item_contract import OperationItem, OperationOwnerReference
-from ..operations.progress import aggregate_progress, member_progress
-from ..operations.summary import workload_aliases
-from ..state_filters import state_filter
-from .constants import _ACTIVE_PUBLICATION_STATES, NODE_PATTERN
-from .contracts import (
+from vonk_control.operation_api.constants import (
+    _ACTIVE_PUBLICATION_STATES,
+    NODE_PATTERN,
+)
+from vonk_control.operation_api.contracts import (
     AgentSummary,
     JobProgress,
     OperationApiServices,
@@ -69,11 +71,28 @@ from .contracts import (
     OperationQuery,
     OperatorJobMutation,
 )
-from .diagnostics import _agent_upgrade_diagnostics, _aware
-from .lane_wait import apply_queue_wait, spark_busy_blockers
-from .providers import _activity_keyset_filter, _StandaloneJobActivityProjection
-from .responses import _advertised_actions, _operation_item, _progress_projection
-from .route_snapshot import _ActiveRouteSnapshot, _stored_activation_marker
+from vonk_control.operation_api.diagnostics import _agent_upgrade_diagnostics, _aware
+from vonk_control.operation_api.lane_wait import apply_queue_wait, spark_busy_blockers
+from vonk_control.operation_api.providers import (
+    _activity_keyset_filter,
+    _StandaloneJobActivityProjection,
+)
+from vonk_control.operation_api.responses import (
+    _advertised_actions,
+    _operation_item,
+    _progress_projection,
+)
+from vonk_control.operation_api.route_snapshot import (
+    _ActiveRouteSnapshot,
+    _stored_activation_marker,
+)
+from vonk_control.operations.contract import OperationRecoveryAction
+from vonk_control.operations.item_contract import OperationItem, OperationOwnerReference
+from vonk_control.operations.progress import aggregate_progress, member_progress
+from vonk_control.operations.summary import workload_aliases
+from vonk_control.operator_receipt_contract import JobOperatorReceipt
+from vonk_control.state_filters import state_filter
+from vonk_control.wait_contract import QueueWait
 
 
 class _DurableOperationProjection:
@@ -470,7 +489,7 @@ class _DurableOperationProjection:
                     for operation in operations
                 )
             }
-            waits = spark_busy_blockers(session, operations, now)
+            waits = spark_busy_blockers(operations)
         items = [
             apply_queue_wait(
                 _operation_item(operation, attempts.get(operation.id), now=now),
@@ -482,7 +501,6 @@ class _DurableOperationProjection:
                     "node_id": operation.node_id,
                     "supported_actions": self._activity_actions(
                         operation,
-                        attempts.get(operation.id),
                         resume=operation.id in resume_operation_ids,
                     ),
                 }
@@ -621,7 +639,7 @@ class _DurableOperationProjection:
                     session, parent_job_id, now
                 )
             }
-            waits = spark_busy_blockers(session, rows, now)
+            waits = spark_busy_blockers(rows)
             subjects = workload_aliases(session, rows)
         items = [
             self._activity_item(
@@ -730,7 +748,7 @@ class _DurableOperationProjection:
                     session, parent_job_id, now
                 )
             }
-            waits = spark_busy_blockers(session, rows, now)
+            waits = spark_busy_blockers(rows)
             subjects = workload_aliases(session, rows)
         return OperationListPage(
             items=[
@@ -775,7 +793,7 @@ class _DurableOperationProjection:
                 attempt,
                 request_id=None if job is None else job.request_id,
                 resume=resume,
-                wait=spark_busy_blockers(session, [operation], now).get(operation.id),
+                wait=spark_busy_blockers([operation]).get(operation.id),
                 subject=workload_aliases(session, [operation]).get(operation.id),
                 now=now,
             )
@@ -801,9 +819,7 @@ class _DurableOperationProjection:
                 "created_at": _aware(operation.created_at).isoformat(),
                 "job_id": operation.parent_job_id,
                 "subject": subject,
-                "supported_actions": cls._activity_actions(
-                    operation, attempt, resume=resume
-                ),
+                "supported_actions": cls._activity_actions(operation, resume=resume),
                 "owner": OperationOwnerReference(
                     kind="job", id=operation.parent_job_id, request_id=request_id
                 ),
@@ -813,17 +829,16 @@ class _DurableOperationProjection:
     @staticmethod
     def _activity_actions(
         operation: AgentOperation,
-        attempt: AgentOperationAttempt | None,
         *,
         resume: bool,
     ) -> list[str] | None:
         raw = (
             _advertised_actions(operation.payload.get("supported_actions"))
-            if isinstance(operation.payload, Mapping)
+            if isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             else None
         )
         actions = (
-            [action for action in raw if isinstance(action, str) and action != "resume"]
+            [action for action in raw if action != OperationRecoveryAction.RESUME]
             if isinstance(raw, list)
             else []
         )

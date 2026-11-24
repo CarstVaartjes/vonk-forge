@@ -11,20 +11,20 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from vonk_forge_contracts import EndpointAlias
+
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState, EndpointState
-from vonk_forge_contracts import EndpointAlias
-
-from ..endpoint_contract import EndpointResponse
-from ..strict_json import StrictModel
-from .vocabulary import (
+from vonk_control.endpoint_contract import EndpointResponse
+from vonk_control.fleet_profile_contract.vocabulary import (
     DesiredAssignmentStateField,
     FleetProfileEndpointState,
     FleetProfileOperationState,
     Name,
     UuidId,
 )
+from vonk_control.strict_json import StrictModel
 
 
 class FleetProfileEndpointProjectionIssue(StrictModel):

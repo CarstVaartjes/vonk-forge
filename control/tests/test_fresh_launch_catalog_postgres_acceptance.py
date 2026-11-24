@@ -27,7 +27,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import read_model, read_recipe
+
 from vonk_control.auth import Actor, AuthError, TokenCodec
 from vonk_control.catalog.api import CATALOG_OPERATION_IDS, install_catalog_routes
 from vonk_control.catalog.service import CatalogService
@@ -50,7 +52,6 @@ from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import read_model, read_recipe
 
 from .recipe_library_source import recipe_library_root
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
@@ -153,7 +154,7 @@ def _app(
     *,
     catalog: CatalogService,
     sync: ManagedRecipeCatalogSyncService,
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
 ) -> TestClient:
     app = FastAPI()
 
@@ -171,7 +172,6 @@ def _app(
     install_catalog_routes(
         app,
         actor_dependency=Depends(actor),
-        service=catalog,
         managed_sync=sync,
     )
     install_library_routes(
@@ -297,7 +297,10 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     _upgrade_fresh_database(postgres_engine)
     lap("database_migration")
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    clock = lambda: datetime.now(UTC)
+
+    def clock():
+        return datetime.now(UTC)
+
     catalog = CatalogService(
         sessions,
         clock=clock,

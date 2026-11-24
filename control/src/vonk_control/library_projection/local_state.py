@@ -18,7 +18,7 @@ from sqlalchemy import (
     values,
 )
 from sqlalchemy.orm import load_only
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.state_machines import (
@@ -27,38 +27,19 @@ from vonk_agent_protocol.state_machines import (
     RunState,
     adopt_machine_state,
 )
-
-from ..api_availability import AVAILABILITY_ERRORS
-from ..catalog.queries import active_head_revision
-from ..content_identity import recipe_content_membership
-from ..library.assessment import unassessed
-from ..library.contract import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.api_availability import AVAILABILITY_ERRORS
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.content_identity import recipe_content_membership
+from vonk_control.library.assessment import unassessed
+from vonk_control.library.contract import (
     LibraryCacheState,
     LibraryLocalProgress,
     LibraryLocalState,
     LibraryRecipeProjection,
 )
-from ..library.image_presence import ImageKey, ImagePresence
-from ..machine_states import INSTALLATION_ACTIVE
-from ..model_cache import states as model_cache_states
-from ..model_cache.contract import (
-    CacheManifest,
-    CacheOperationKind,
-    ModelCacheOperationProgress,
-)
-from ..model_cache.errors import ModelCacheError
-from ..model_cache.lineage import verifies_model
-from ..model_cache.resolution import resolve_recipe_set
-from ..models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
-from ..models.catalog import CatalogDocumentRevision
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..operations.progress import project_progress_for_state
-from ..operator_receipt_contract import ReceiptOwner
-from ..persisted_waits import read_wait
-from ..revision_images import revision_images
-from ..stored.json_values import read_row_column
-from ..stored.states import CatalogRevisionState, RecipeBuildState
-from .common import (
+from vonk_control.library.image_presence import ImageKey, ImagePresence
+from vonk_control.library_projection.common import (
     _ACTIVE_RUN_STATES,
     _RUN_STATES,
     LibraryControllerState,
@@ -67,9 +48,28 @@ from .common import (
     compose_recipe_state,
     highest_state,
 )
+from vonk_control.machine_states import INSTALLATION_ACTIVE
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.contract import (
+    CacheManifest,
+    CacheOperationKind,
+    ModelCacheOperationProgress,
+)
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.lineage import verifies_model
+from vonk_control.model_cache.resolution import resolve_recipe_set
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.operations.progress import project_progress_for_state
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.persisted_waits import read_wait
+from vonk_control.revision_images import revision_images
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState
 
 if TYPE_CHECKING:
-    from .service import LibraryProjection
+    from vonk_control.library_projection.service import LibraryProjection
 
 
 def _assessed(
@@ -146,7 +146,7 @@ def _local_state_snapshot(
     except (*AVAILABILITY_ERRORS, RuntimeError, TypeError, ValueError):
         _note_unreadable("local-state", "provider", "observation is unavailable")
         return None
-    if not isinstance(candidate, Mapping):
+    if not isinstance(candidate, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]  # a provider's observation is checked before use
         return None
     snapshot: dict[str, LibraryLocalState] = {}
     for digest in digests:
@@ -168,7 +168,6 @@ def _local_state_snapshot(
 
 
 def _local(
-    self: LibraryProjection,
     digest: str,
     *,
     kind: str,
@@ -181,7 +180,7 @@ def _local(
     observed = snapshot.get(digest)
     raw = observed.model_dump(mode="json") if observed is not None else {}
     try:
-        if not isinstance(raw, Mapping):
+        if not isinstance(raw, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]  # a provider's observation is checked before use
             raise TypeError("local observation is not a mapping")
         return LibraryLocalState.model_validate_json(
             canonical_message(raw or {"controller": "not_cached"})
@@ -494,7 +493,6 @@ def _database_local_state(
                 "failed": "failed",
             },
             set_state,
-            "persisted cache set state is invalid",
         )
         self._merge_local(cache_facts, model_digest, controller=controller)
         for recipe_digest in own_digests.get(set_id, ()):
@@ -577,7 +575,6 @@ def _database_local_state(
                 "failed": "failed",
             },
             build_state,
-            "persisted recipe build state is invalid",
         )
         self._merge_local(
             asset_facts,
@@ -605,7 +602,6 @@ def _database_local_state(
             },
             adopt_machine_state(InstallationState, installation_state)
             or installation_state,
-            "persisted installation state is invalid",
         )
         installation_revision[installation_id] = installation_revision_id
         if (
@@ -641,7 +637,8 @@ def _database_local_state(
     nodes_by_run: dict[str, list[str]] = {}
     for run_id, node_id in run_nodes:
         nodes_by_run.setdefault(run_id, []).append(node_id)
-    for run_id, installation_id, model_digest in runs:
+    for run_id, installation_id, stored_digest in runs:
+        model_digest = stored_digest
         if model_digest is not None and not isinstance(model_digest, str):
             _note_unreadable("recipe run model digest", run_id, repr(model_digest))
             model_digest = None
@@ -732,7 +729,6 @@ def _image_claims(
 
 
 def _apply_image_presence(
-    self: LibraryProjection,
     result: dict[str, LibraryLocalState],
     *,
     head_digests: set[str],

@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from .wire_model import Digest, WireEnum, WireModel
+from vonk_agent_protocol.wire_model import Digest, WireEnum, WireModel
 
 
 class PackageRollbackSource(WireModel):

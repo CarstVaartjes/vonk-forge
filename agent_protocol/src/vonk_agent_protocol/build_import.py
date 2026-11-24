@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, model_validator
 
-from .wire_model import WireModel
+from vonk_agent_protocol.wire_model import WireModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 OciDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]

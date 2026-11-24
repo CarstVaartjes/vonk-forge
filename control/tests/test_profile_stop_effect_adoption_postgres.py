@@ -12,15 +12,19 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profile_contract.vocabulary import (
     profile_switch_child_request_key,
 )
+from vonk_control.fleet_profiles.continuing_effects import _adopted_application_scope
 from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -41,7 +45,10 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.run_switch_operations.results import _persisted_result
 from vonk_control.stored.json_values import write_guard_mode
+from vonk_control.stored.rows import read_row_column
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .fleet_profiles_support import NOW, _node_id, _uuid
@@ -57,7 +64,7 @@ from .run_switch_operations_support import RecordingArtifactExecutor, _service
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_adapter_continuity import _running_child
 from .test_profile_adapter_parallel_postgres import _stored
-from .test_profile_continuity_postgres import (
+from .test_profile_claim_restore import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
 )
@@ -204,14 +211,13 @@ def _pending_stop(
     healthy_child = _running_child(_uuid(18703), _node_id(2))
     healthy_dispatches = []
 
-    def dispatch(
-        application_id, item, assignments, scope, actor, request, index, ordinal
-    ):
+    def dispatch(application_id, item, assignments, scope, actor, index, ordinal):
         if item.kind == "stop":
             return native_start(
-                application_id, item, assignments, scope, actor, request, index, ordinal
+                application_id, item, assignments, scope, actor, index, ordinal
             )
-        assert item.kind == "run" and tuple(scope) == (_node_id(2),)
+        assert item.kind == "run"
+        assert tuple(scope) == (_node_id(2),)
         healthy_dispatches.append(item.id)
         return healthy_child
 
@@ -241,7 +247,8 @@ def _pending_stop(
     )
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.request_id == request_key))
-        assert stop is not None and stop.kind == "recipe.stop.v2"
+        assert stop is not None
+        assert stop.kind == "recipe.stop.v2"
         stop_id = stop.id
         native = list(
             session.scalars(
@@ -277,7 +284,8 @@ def _pending_stop(
         assert stop_plan.run_id == run.owner_id
         assert stop_plan.target_runtime_id == run.owner_id
 
-        assert claim is not None and claim.operation.value == "recipe.stop"
+        assert claim is not None
+        assert claim.operation.value == "recipe.stop"
         assert fenced_operation(sessions, claim).id == native_id
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
@@ -346,7 +354,8 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         assert len(link.stops) == 1
         stop = link.stops[0]
         assert stop.queue_index == stop_index
-        assert stop.operation_id == stop_id and stop.request_key == request_key
+        assert stop.operation_id == stop_id
+        assert stop.request_key == request_key
         assert stop.effect.run_id == before.queue[stop_index].id
         assert stop.effect.node_ids == [nodes[0]]
         assert stop.effect.profile_stop_scope is None
@@ -359,8 +368,9 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         with sessions() as session:
             row = session.get(FleetProfileApplication, original.id)
             selected_row = session.get(FleetProfileApplication, selected.id)
-            assert row is not None and selected_row is not None
-            assert profiles._adopted_application_scope(session, row) == (nodes[0],)
+            assert row is not None
+            assert selected_row is not None
+            assert _adopted_application_scope(session, row) == (nodes[0],)
             bound = _persisted_profile_plan(selected_row)
             assert isinstance(bound, FleetProfilePreview), bound
             assert bound.effects.adopted == review.effects.adopted
@@ -388,7 +398,8 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         )
         restarted.advance(original.id)
         stored = _stored(sessions, original.id)
-        assert stored.queue == before.queue and stored.request_id == before.request_id
+        assert stored.queue == before.queue
+        assert stored.request_id == before.request_id
         assert any(
             item.queue_index == stop_index and item.operation_id == stop_id
             for item in stored.pending_children
@@ -421,10 +432,6 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
     # The old observer's budget has elapsed while the adopted exact effect is
     # still unresolved. Polling before a fresh receipt must preserve that same
     # Stop, not retire it and make the later receipt impossible to consume.
-    from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-    from vonk_control.run_switch_operations.result_helpers import _read_progress
-    from vonk_control.run_switch_operations.results import _persisted_result
-    from vonk_control.stored.json_values import read_row_column
 
     # A transient receipt fault leaves a retry checkpoint on the reusable Stop.
     # The generic parent observer must not retire its accepted effect merely
@@ -456,7 +463,8 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         grant_now=clock[0],
     )
     assert fresh_stop.run_id == adopted_stop.effect.run_id
-    assert fresh is not None and fresh.fence != old_claim.fence
+    assert fresh is not None
+    assert fresh.fence != old_claim.fence
     assert fenced_operation(sessions, fresh).id == native_id
     assert fresh.payload == old_claim.payload
     assert (
@@ -556,7 +564,7 @@ def test_postgres_stop_adoption_loses_authority_on_exact_refusal(pending_stop, f
     with sessions() as session:
         original_row = session.get(FleetProfileApplication, original.id)
         assert original_row is not None
-        assert profiles._adopted_application_scope(session, original_row) == (nodes[0],)
+        assert _adopted_application_scope(session, original_row) == (nodes[0],)
     if fault == "selected-cancel":
         profiles.cancel(
             selected.id,
@@ -580,4 +588,4 @@ def test_postgres_stop_adoption_loses_authority_on_exact_refusal(pending_stop, f
     with sessions() as session:
         original_row = session.get(FleetProfileApplication, original.id)
         assert original_row is not None
-        assert profiles._adopted_application_scope(session, original_row) is None
+        assert _adopted_application_scope(session, original_row) is None

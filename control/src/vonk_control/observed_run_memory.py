@@ -23,25 +23,25 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
+
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_agent_protocol.telemetry import HostResourceSample
-
-from .content_identity import RecipeExecution, runs_identically
-from .dialect_insert import dialect_insert
-from .fleet_events import FleetEventRecorder, FleetEventRepository
-from .memory_reservations import MEMORY_RESERVATION_KINDS
-from .models.catalog import CatalogDocumentRevision
-from .models.execution import (
+from vonk_control.content_identity import RecipeExecution, runs_identically
+from vonk_control.dialect_insert import dialect_insert
+from vonk_control.fleet_events import FleetEventRecorder, FleetEventRepository
+from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     MeasuredRolePeak,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
-from .models.telemetry import NodeInventoryResourceSnapshot
-from .recipe_operations.execution_contract import parse_stored_run_plan
-from .settings import PROFILE_STALL_WINDOW_SECONDS
+from vonk_control.models.telemetry import NodeInventoryResourceSnapshot
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
 
 def record_observed_run_memory(
@@ -222,7 +222,7 @@ def observed_role_peaks(session: Session, content_digest: str) -> dict[str, int]
             MeasuredRolePeak.content_sha256 == content_digest
         )
     )
-    return {role: peak for role, peak in rows}
+    return dict(rows.all())
 
 
 def recent_best_available(

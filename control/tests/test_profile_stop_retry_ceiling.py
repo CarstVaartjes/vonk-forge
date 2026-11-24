@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.models.execution import RecipeRun
@@ -64,6 +65,7 @@ def test_selected_stop_recovers_after_repeated_conflict_clears_and_worker_restar
         refusal = "stop plan is blocked"
         waits: set[str] = set()
         live: list[FleetProfileApplication] = []
+        applications = None
         for _ in range(60 * RECOVERY.max_failures):
             # The simulation's monitor is not consulted: it reports the
             # injected refusal repeating, which is the fault under test.
@@ -92,6 +94,7 @@ def test_selected_stop_recovers_after_repeated_conflict_clears_and_worker_restar
                     waits.add(row.id)
 
         assert live, "the same selected intent must keep a scheduled observation"
+        assert applications is not None
         assert len(applications) > RECOVERY.max_failures + 2
         assert waits, "the Stop refusal must be visible during recovery"
         with world.sessions() as session:
@@ -100,7 +103,8 @@ def test_selected_stop_recovers_after_repeated_conflict_clears_and_worker_restar
             generation = selection.generation
             selected_id = selection.application_id
             kept = session.get(RecipeRun, run_id)
-            assert kept is not None and kept.state == RunState.RUNNING
+            assert kept is not None
+            assert kept.state == RunState.RUNNING
 
         monkeypatch.undo()
         world.restart()
@@ -125,7 +129,8 @@ def test_selected_stop_recovers_after_repeated_conflict_clears_and_worker_restar
                     break
         with world.sessions() as session:
             kept = session.get(RecipeRun, run_id)
-            assert kept is not None and kept.state == RunState.STOPPED
+            assert kept is not None
+            assert kept.state == RunState.STOPPED
             selection = session.get(FleetProfileSelection, 1)
             assert selection is not None
             assert (selection.generation, selection.application_id) == (

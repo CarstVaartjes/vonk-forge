@@ -8,6 +8,7 @@ callers continue to consume integers; only the relational encoding changes.
 from __future__ import annotations
 
 import re
+from typing import override
 
 from sqlalchemy import Boolean, Text
 from sqlalchemy.engine import Dialect
@@ -30,6 +31,7 @@ class ExactNonnegativeInteger(TypeDecorator[int]):
     impl = Text
     cache_ok = True
 
+    @override
     def process_bind_param(self, value: int | None, dialect: Dialect) -> str | None:
         if value is None:
             return None  # The owning column alone decides nullability.
@@ -37,6 +39,7 @@ class ExactNonnegativeInteger(TypeDecorator[int]):
             raise ValueError("integer projection requires a nonnegative integer")
         return str(value)
 
+    @override
     def process_result_value(self, value: object, dialect: Dialect) -> int | None:
         if value is None:
             return None

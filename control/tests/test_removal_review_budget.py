@@ -33,6 +33,8 @@ from types import ModuleType
 import pytest
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.catalog import revision_collection as catalog_revision_collection
 from vonk_control.model_cache.contract import CacheManifest
@@ -58,7 +60,6 @@ from vonk_control.recipe_operations.execution_contract import (
 )
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.unused_storage_collection import evidence as collector_evidence
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .recipe_image_availability_support import _availability_payload
 from .recipe_operations_support import NOW, installed_recipe, setup_services
@@ -505,7 +506,8 @@ def _world(tmp_path: Path, name: str, *, unrelated: Load | None) -> World:
     )
     with sessions() as session:
         row = session.get(RecipeInstallation, installed.owner_id)
-        assert row is not None and row.model_content_sha256 is not None
+        assert row is not None
+        assert row.model_content_sha256 is not None
         target = row.model_content_sha256
     with sessions.begin() as session:
         models = _noise_models(session, NOW)
@@ -713,7 +715,8 @@ def test_a_damaged_plan_of_an_installation_using_the_model_blocks_the_removal(
                     CatalogDocumentRevision.kind == "recipe",
                 )
             ).first()
-            assert real is not None and other is not None
+            assert real is not None
+            assert other is not None
             damaged_id = str(uuid.uuid4())
             session.add(
                 RecipeInstallation(
@@ -745,7 +748,8 @@ def test_a_damaged_plan_of_an_installation_using_the_model_blocks_the_removal(
         for node in world.nodes:
             inventory(world.sessions, node, world.now + timedelta(seconds=1), objects)
         review = world.cache.review_fleet_model_removal(world.target)
-        assert review.fleet is not None and review.fleet.observation_issues
+        assert review.fleet is not None
+        assert review.fleet.observation_issues
         accept = world.cache.remove_fleet_model_selector
         with pytest.raises(ModelCacheConflictInvalid):
             accept(

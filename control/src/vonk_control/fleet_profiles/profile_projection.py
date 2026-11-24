@@ -9,15 +9,15 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import (
     ProfileDocumentState,
     RunSwitchReasonScopeName,
 )
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 from vonk_agent_protocol.state_machines import AssetAvailability
-
-from ..catalog.revision_contract import RecipeRevisionProjection
-from ..fleet_profile_contract.definitions import (
+from vonk_control.catalog.revision_contract import RecipeRevisionProjection
+from vonk_control.fleet_profile_contract.definitions import (
     FleetAssignmentModelView,
     FleetAssignmentRecipeView,
     FleetCacheSummary,
@@ -29,29 +29,43 @@ from ..fleet_profile_contract.definitions import (
     FleetProfileView,
     profile_load_due,
 )
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..model_cache.contract import CachedResourceEstimate
-from ..models.catalog import CatalogDocument, CatalogDocumentRevision
-from ..models.fleet import AgentNode, AgentNodeProfile, FleetProfile
-from ..recipe_update_batches.notice import RecipeUpdateNotice, recipe_update_notice
-from ..stored.states import CatalogRevisionState
-from .assignment_assessment import _AssignmentRows
-from .contracts import _SelectedProfileSnapshot
-from .dependencies import (
+from vonk_control.fleet_profiles.assignment_assessment import (
+    _assignment_rows,
+    _assignment_state,
+    _AssignmentRows,
+)
+from vonk_control.fleet_profiles.contracts import _SelectedProfileSnapshot
+from vonk_control.fleet_profiles.dependencies import (
     _INSTALLATION_POLICY_ADAPTER,
     _LOGGER,
     _OBSERVED_ASSIGNMENT_LABELS,
 )
-from .projection_support import (
+from vonk_control.fleet_profiles.projection_support import (
     _aware,
     _digest,
     _effective_option_choices,
     _profile_document,
 )
+from vonk_control.fleet_profiles.saved_profiles import _definition
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    retire_as_unknown,
+)
+from vonk_control.model_cache.contract import CachedResourceEstimate
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode, AgentNodeProfile, FleetProfile
+from vonk_control.recipe_update_batches.notice import (
+    RecipeUpdateNotice,
+    recipe_update_notice,
+)
+from vonk_control.stored.states import CatalogRevisionState
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 @dataclass(frozen=True)
@@ -78,14 +92,13 @@ class FleetProfileService:
                 .order_by(AgentNode.node_id)
             )
         )
-        display_names = {
-            node_id: display_name
-            for node_id, display_name in session.execute(
+        display_names = dict(
+            session.execute(
                 select(AgentNodeProfile.node_id, AgentNodeProfile.display_name).where(
                     AgentNodeProfile.node_id.in_(node_ids)
                 )
-            )
-        }
+            ).all()
+        )
         return _ProfilePageReads(
             selection=self._selected_profile_snapshot(session),
             roster=tuple(
@@ -110,7 +123,7 @@ class FleetProfileService:
         # The saved definition is read once and serves the choices, the
         # document digest and the view.
         if profile_definition is None:
-            profile_definition = self._definition(row)
+            profile_definition = _definition(row)
         choices = tuple(profile_definition.assignments)
         if page is None:
             page = self._page_reads(session, choices)
@@ -131,7 +144,7 @@ class FleetProfileService:
             else None
         )
         assignment_rows = (
-            self._assignment_rows(session, loaded_assignments)
+            _assignment_rows(session, loaded_assignments)
             if observe and loaded_assignments
             else None
         )
@@ -481,7 +494,7 @@ class FleetProfileService:
         if loaded is None:
             return "Not loaded"
         return _OBSERVED_ASSIGNMENT_LABELS[
-            cls._assignment_state(session, loaded, rows=rows).current_state
+            _assignment_state(session, loaded, rows=rows).current_state
         ]
 
     def _attention_assignment(
@@ -549,9 +562,7 @@ class FleetProfileService:
             )
         if not references:
             return {}
-        titles: dict[tuple[str, str, str], str | None] = {
-            key: None for key in references
-        }
+        titles: dict[tuple[str, str, str], str | None] = dict.fromkeys(references)
         for publisher, slug, digest, title in session.execute(
             select(
                 CatalogDocumentRevision.publisher,

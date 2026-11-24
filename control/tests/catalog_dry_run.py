@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import cache
@@ -27,6 +27,8 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import read_recipe
+
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.auth import CursorCodec
@@ -53,7 +55,6 @@ from vonk_control.recipe_packages import client as recipe_packages
 from vonk_control.run_switch_contract.plans import RunSwitchPlan
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import read_recipe
 
 from .signed_recipe_release import SignedRecipeRelease
 from .signed_recipe_release import _verify as _test_signature
@@ -75,7 +76,8 @@ def indexed_recipes(index: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Every indexed recipe row (document, content digest, package) by slug."""
 
     recipes = index["recipes"]
-    assert isinstance(recipes, list) and recipes
+    assert isinstance(recipes, list)
+    assert recipes
     return {row["document"]["identity"]["slug"]: row for row in recipes}
 
 
@@ -256,7 +258,10 @@ def import_catalog(root: Path, work: Path) -> Iterator[CatalogDryRun]:
     engine = create_engine(f"sqlite:///{work / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock: Callable[[], datetime] = lambda: NOW
+
+    def clock() -> datetime:
+        return NOW
+
     catalog = CatalogService(
         sessions,
         clock=clock,

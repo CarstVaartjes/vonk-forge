@@ -62,7 +62,8 @@ Keep commands in their linked runbooks so this guide stays focused on decisions.
 Package direction is one way: the Controller (`vonk_control`) and `nas_setup` may
 import `vonk_agent_protocol`; nothing else imports a sibling package, and the
 server never imports vonkctl. Facts reach the CLI only through the generated
-client. Every model an `/agent/` route takes or returns lives in
+client. Imports sit at module level and the packages import without a cycle.
+Every model an `/agent/` route takes or returns lives in
 `vonk_agent_protocol`. NAS/project setup and administration are Python; the
 resident agent, privileged helpers and native Spark installer are Rust. Package
 lifecycle logic lives in `vonk-agent-helper::package_hooks`; the Debian
@@ -255,6 +256,12 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
   `clippy.toml`; a crate inherits them. Silence a lint only with a narrow
   `#[expect(lint, reason = "...")]`, never `#[allow]`. Take an exclusive file lock
   through `HeldLock`, never a raw `flock`.
+- Python lint and type configuration lives only in the root `pyproject.toml`
+  (`[tool.ruff]`, `[tool.pyright]`). Silence a finding only on the line it is
+  reported, with its reason: `# noqa: RULE -- reason` or
+  `# pyright: ignore[rule]  # reason`. Never add a `# type: ignore`, a
+  file-level `# ruff: noqa`, or a per-file ignore; the per-file entries that
+  exist are guard-blocked sites awaiting their class follow-up.
 - Every application route appears in the full OpenAPI schema; never use
   `include_in_schema=False` in production routes.
 - Consume wire and persisted JSON with the canonical model's JSON validation

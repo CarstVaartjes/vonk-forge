@@ -19,9 +19,9 @@ from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
-from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
-from ..categorized_errors import BookkeepingUnknown
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_control.categorized_errors import BookkeepingUnknown
 
 PROFILE_READ_STORAGE_SECONDS = 2.0
 _WORKERS = 8
@@ -90,7 +90,7 @@ def _observation_select_only(execution: ORMExecuteState) -> None:
 
 @event.listens_for(Session, "before_flush")
 def _observation_no_flush(
-    session: Session, _context: object, _instances: object
+    _session: Session, _context: object, _instances: object
 ) -> None:
     if _READ.get() is not None:
         raise RuntimeError("Profile observation attempted a database flush")

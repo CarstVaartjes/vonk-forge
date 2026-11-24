@@ -6,9 +6,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_control.source_bundles import generate_source_bundle
 
 from tests.wire_probes import prebuilt_probe
+from vonk_control.source_bundles import generate_source_bundle
 
 
 @pytest.fixture(scope="session")

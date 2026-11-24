@@ -10,12 +10,14 @@ from typing import Any, ClassVar
 
 from sqlalchemy import event, func, insert, select, true, update
 from sqlalchemy import inspect as sqlalchemy_inspect
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
-from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
-from .auth import CursorError
-from .fleet_event_contract import (
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_control.auth import CursorError
+from vonk_control.fleet_event_contract import (
     AgentOperationPayload,
     FleetEventPayload,
     InstallationNodePayload,
@@ -27,17 +29,22 @@ from .fleet_event_contract import (
     RunNodePayload,
     validate_fleet_event_payload,
 )
-from .models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
-from .models.fleet import AgentNodeProfile
-from .models.jobs import Job
-from .models.operations import AgentOperation
-from .models.telemetry import (
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.fleet import AgentNodeProfile
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.telemetry import (
     FleetEventCursor,
     FleetStreamEvent,
     NodeInventoryItemsSnapshot,
     NodeTelemetryLatest,
 )
-from .strict_json import serialize_json_value
+from vonk_control.strict_json import serialize_json_value
 
 EVENT_TYPES = frozenset(
     {"node-telemetry", "node-profile", "recipe-state", "operation-state"}
@@ -243,9 +250,6 @@ def _stage(session: Session, row: _EventRow | None) -> None:
 
 def _seed_cursor(connection: Connection) -> None:
     """Recreate a missing cursor row after the newest stored id."""
-
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
     dialect_insert = sqlite_insert if connection.dialect.name == "sqlite" else pg_insert
     last_id = select(func.coalesce(func.max(FleetStreamEvent.id), 0)).scalar_subquery()
@@ -596,9 +600,9 @@ class FleetEventRecorder:
         self, session: Session, _flush_context: object, _instances: object
     ) -> None:
         candidates: list[object] = []
-        for value in session.new:
-            if type(value) in self._tracked_fields:
-                candidates.append(value)
+        candidates.extend(
+            value for value in session.new if type(value) in self._tracked_fields
+        )
         for value in session.dirty:
             fields = self._tracked_fields.get(type(value))
             if fields is None:

@@ -8,14 +8,30 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, timedelta
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select, update
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+
+from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReasonSeverity
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
+)
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignmentInput,
+    FleetProfileInput,
+)
+from vonk_control.fleet_profiles.read_observation import profile_read
+from vonk_control.fleet_profiles.run_switch_adapter import (
+    RunSwitchFleetProfileAdapter,
+)
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode
@@ -36,6 +52,7 @@ from vonk_control.run_switch_contract.requests import (
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import (
     CompleteArtifactInspector,
@@ -148,7 +165,8 @@ def test_same_clock_later_intent_fences_older_queued_work(tmp_path: Path) -> Non
     with sessions() as session:
         old = session.get(Job, first.operation_id)
         new = session.get(Job, second.operation_id)
-        assert old is not None and new is not None
+        assert old is not None
+        assert new is not None
         assert old.created_at == new.created_at
         assert old.payload["workload_intent_ordinal"] == 1
         assert new.payload["workload_intent_ordinal"] == 2
@@ -251,7 +269,8 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
     assert service._advance(operation.operation_id) is True
     with sessions() as session:
         job = session.get(Job, operation.operation_id)
-        assert job is not None and isinstance(job.result, dict)
+        assert job is not None
+        assert isinstance(job.result, dict)
         assert job.next_action_at is not None
         second_due = job.next_action_at.replace(tzinfo=UTC)
         assert job.result["retry_attempt"] == 3
@@ -260,7 +279,8 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
     assert service._advance(operation.operation_id) is False
     with sessions() as session:
         job = session.get(Job, operation.operation_id)
-        assert job is not None and isinstance(job.result, dict)
+        assert job is not None
+        assert isinstance(job.result, dict)
         assert job.result["retry_attempt"] == 3
     with sessions.begin() as session:
         snapshot = session.scalar(
@@ -326,8 +346,6 @@ def test_run_switch_missing_target_has_retryable_dependency_recovery_bound(
         job = session.get(Job, operation.operation_id)
         assert job is not None
         job.targets = ["spk_ffffffffffffffffffffffffffffffff"]
-
-    from .non_blocking import assert_ended_without_blocking
 
     def end(_operation):
         assert service._advance(operation.operation_id) is True
@@ -408,7 +426,8 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     assert service._advance(operation.operation_id) is True
     waiting = service.get(operation.operation_id)
     assert waiting.state == LifecycleState.OBSERVING
-    assert waiting.result is not None and waiting.next_attempt_at
+    assert waiting.result is not None
+    assert waiting.next_attempt_at
     due = waiting.next_attempt_at
     # Nothing happens before the backoff is due.
     assert service._advance(operation.operation_id) is False
@@ -444,7 +463,6 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
             assert node is not None
             node.state = active_state
             node.revoked_at = None
-        from .non_blocking import assert_ended_without_blocking
 
         def cause(receipt):
             assert receipt.status_reason
@@ -521,7 +539,8 @@ def test_child_activity_change_persists_without_clock_only_writes(
     )
     assert service.tick() is True
     before = _result(service.get(operation.operation_id)).operation
-    assert before is not None and before.activity == "active"
+    assert before is not None
+    assert before.activity == "active"
     assert isinstance(child.result, RunSwitchDistributionChildResult)
     assert child.result.progress.operation is not None
     child.result.progress.operation = child.result.progress.operation.model_copy(
@@ -533,7 +552,8 @@ def test_child_activity_change_persists_without_clock_only_writes(
     )
     assert service.tick() is True
     after = _result(service.get(operation.operation_id)).operation
-    assert after is not None and after.activity == "waiting"
+    assert after is not None
+    assert after.activity == "waiting"
 
 
 def test_due_scheduler_reaches_work_past_a_full_parked_batch(
@@ -656,7 +676,8 @@ def test_malformed_operation_is_reconciled_without_aborting_the_batch(
             assert restored.force_replan
             assert rejected.next_action_at is not None
         advanced = session.get(Job, valid.operation_id)
-        assert advanced is not None and advanced.state == "running"
+        assert advanced is not None
+        assert advanced.state == "running"
         after_index = (advanced.result or {}).get("phase_index")
     # The unrelated due operation still advanced in the same batch.
     assert after_index == 1
@@ -673,7 +694,7 @@ def test_run_switch_admission_declares_the_resource_estimate_uncertain(
         sessions,
         memory_floor_bytes=0,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifacts=CompleteArtifactInspector(),
         artifact_phase_executor=RecordingArtifactExecutor(),
     )
@@ -784,7 +805,8 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(
     plan = service.preview(request, actor="admin")
 
     assert plan.allowed is True
-    assert plan.mapping is not None and plan.mapping.action == "create"
+    assert plan.mapping is not None
+    assert plan.mapping.action == "create"
     assert plan.build.state == "available"
     assert plan.preparation is not None
     # NAS readiness must not wait for copies on the Sparks. The preparation
@@ -845,7 +867,7 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifact_phase_executor=RecordingArtifactExecutor(),
         model_cache=ModelCacheManifestProvider(missing_nas_bytes=1024),
         memory_floor_bytes=50,
@@ -870,23 +892,6 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
 @pytest.mark.parametrize("missing", [False, True])
 def test_profile_admits_unpublished_cache_observation(tmp_path, monkeypatch, missing):
     """A paused first receipt must wait in preparation, never refuse a load."""
-    from threading import Event
-
-    from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReasonSeverity
-    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-    from vonk_control.categorized_errors import BookkeepingUnknown
-    from vonk_control.distribution_executor.preparation import (
-        CompositeDistributionPhaseExecutor,
-    )
-    from vonk_control.fleet_profile_contract.definitions import (
-        FleetProfileAssignmentInput,
-        FleetProfileInput,
-    )
-    from vonk_control.fleet_profiles.read_observation import profile_read
-    from vonk_control.fleet_profiles.run_switch_adapter import (
-        RunSwitchFleetProfileAdapter,
-    )
-    from vonk_control.fleet_profiles.service import FleetProfileService
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     request = _request(sessions, nodes[0])

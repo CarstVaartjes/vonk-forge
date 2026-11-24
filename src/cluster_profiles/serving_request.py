@@ -31,10 +31,18 @@ from collections.abc import Callable, Mapping
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from vonk_forge_contracts.api import (
+    ApiReasoningAlwaysOn,
+    ApiReasoningSwitch,
+    ApiRemainingContext,
+    ApiTokenArgument,
+    ApiTokenValue,
+)
+
 if TYPE_CHECKING:
     from vonk_forge_contracts.api import ChatApi
 
-type Json = str | int | float | bool | None | list[Json] | dict[str, Json]
+type Json = str | int | float | bool | list[Json] | dict[str, Json] | None
 
 #: The value of the recipe's runtime argument of that name; None when it has no integer.
 ArgumentValue = Callable[[str], int | None]
@@ -55,18 +63,12 @@ def _always_on_budget(
 ) -> tuple[bool, int | None]:
     """(is the budget known, the budget); remaining context is known and unbounded."""
 
-    from vonk_forge_contracts.api import (
-        ApiRemainingContext,
-        ApiTokenArgument,
-        ApiTokenValue,
-    )
-
     default = api.default_output_tokens
     if isinstance(default, ApiRemainingContext):
         return True, None
     if isinstance(default, ApiTokenValue):
         budget: int | None = default.value
-    elif isinstance(default, ApiTokenArgument) and argument_value is not None:
+    elif isinstance(default, ApiTokenArgument) and argument_value is not None:  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
         budget = argument_value(default.argument)
     else:
         budget = None
@@ -89,7 +91,6 @@ def bounded_chat_check(
     body = request.get("body") if isinstance(request, dict) else None
     if api is None or fitted.get("kind") != "openai.chat" or not isinstance(body, dict):
         return fitted
-    from vonk_forge_contracts.api import ApiReasoningAlwaysOn, ApiReasoningSwitch
 
     reasoning = api.reasoning
     if isinstance(reasoning, ApiReasoningSwitch):

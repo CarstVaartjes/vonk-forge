@@ -1,5 +1,4 @@
 import json
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -7,11 +6,18 @@ from importlib import resources
 import pytest
 from sqlalchemy import create_engine, inspect, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import (
+    RecipeDefinition,
+    document_sha256,
+    read_model,
+)
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.inventory import GpuHealth, MemoryPool
+from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY, GpuHealth, MemoryPool
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -36,13 +42,9 @@ from vonk_control.run_admission import (
     require_admissible,
     run_port_demand,
 )
-from vonk_forge_contracts import (
-    RecipeDefinition,
-    document_sha256,
-    read_model,
-)
 
 from .display_fixtures import legacy_model_display, model_display_denying
+from .insert_collision_support import Rendezvous
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
 
@@ -296,12 +298,10 @@ def test_run_alias_is_not_in_the_digest_and_is_not_persisted_in_the_plan(
     )
     plan = service.plan_run(installation, alias="qwen", now=now)
     alternate = service.plan_run(installation, alias="qwen-alt", now=now)
-    assert (
-        plan.allowed is True
-        and plan.nodes[0].required_memory_bytes == 225
-        and plan.nodes[0].free_after_bytes == 75
-        and plan.nodes[0].memory_floor_bytes == 50
-    )
+    assert plan.allowed is True
+    assert plan.nodes[0].required_memory_bytes == 225
+    assert plan.nodes[0].free_after_bytes == 75
+    assert plan.nodes[0].memory_floor_bytes == 50
     assert plan.alias == "qwen"
     assert alternate.alias == "qwen-alt"
     # The route name is routing metadata, not execution identity.
@@ -505,7 +505,8 @@ def test_a_3x_model_display_row_does_not_break_run_planning(tmp_path) -> None:
                 CatalogDocumentRevision.kind == "model"
             )
         )
-        assert root is not None and revision is not None
+        assert root is not None
+        assert revision is not None
         session.execute(
             update(CatalogDocument)
             .where(CatalogDocument.id == root.id)
@@ -621,7 +622,6 @@ def test_an_estimate_try_survives_free_memory_changing_before_accept(tmp_path) -
 def test_envelope_larger_than_the_spark_with_another_claim_is_a_retryable_wait(
     tmp_path,
 ) -> None:
-    from vonk_control.run_admission import require_admissible
 
     sessions, now, node, installation = setup(
         tmp_path, free_memory=300, peak_bytes=1001
@@ -755,7 +755,8 @@ def test_a_retryable_plan_blocker_keeps_its_typed_code_and_detail(tmp_path) -> N
         service.accept_run(plan, actor="admin", now=now)
     busy = raised.value
     assert busy.code in {reason.code for item in plan.nodes for reason in item.blockers}
-    assert busy.detail is not None and busy.code in busy.detail
+    assert busy.detail is not None
+    assert busy.code in busy.detail
 
 
 def test_run_adopts_a_fresh_plan_after_nonblocking_reservation_change(tmp_path) -> None:
@@ -782,7 +783,8 @@ def test_run_adopts_a_fresh_plan_after_nonblocking_reservation_change(tmp_path) 
     assert current.allowed
     current_free = current.nodes[0].free_after_bytes
     preview_free = preview.nodes[0].free_after_bytes
-    assert current_free is not None and preview_free is not None
+    assert current_free is not None
+    assert preview_free is not None
     assert current_free < preview_free
 
     run_id = service.accept_run(preview, actor="admin", now=now)
@@ -815,7 +817,7 @@ def test_postgres_competing_admissions_have_one_capacity_winner(
         alias: service.plan_run(installation, alias, now=now)
         for alias in ("qwen-a", "qwen-b")
     }
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
 
     def accept(alias: str) -> bool:
         barrier.wait()
@@ -887,7 +889,7 @@ def test_postgres_retention_lock_on_an_old_report_does_not_block_admission(
 )
 @pytest.mark.parametrize("discovery", [True, False])
 @pytest.mark.parametrize(
-    "health,code",
+    ("health", "code"),
     [
         (GpuHealth.NEEDS_RESET, ProjectionCode.NODE_GPU_REQUIRES_RESET),
         (GpuHealth.UNAVAILABLE, ProjectionCode.NODE_GPU_UNAVAILABLE),
@@ -898,8 +900,6 @@ def test_gpu_health_refuses_work_and_fresh_healthy_inventory_recovers(
 ) -> None:
     # Catches unsupported-metric admission, an invented zero-byte physical
     # capacity refusal after driver loss, and a sticky manual health flag.
-    from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY
-    from vonk_control.fleet_projection.service import FleetProjection
 
     engine = request.getfixturevalue("postgres_engine") if postgres else None
     sessions, now, node, installation = setup(tmp_path, engine=engine)
@@ -937,7 +937,8 @@ def test_gpu_health_refuses_work_and_fresh_healthy_inventory_recovers(
     assert wait.value.code == code
     fleet = FleetProjection(sessions, clock=lambda: at).read()
     spark = next(spark for spark in fleet.nodes if spark.id == node)
-    assert spark.inventory is not None and spark.inventory.gpu_health == health
+    assert spark.inventory is not None
+    assert spark.inventory.gpu_health == health
     assert any(w.code == code for w in spark.warnings)
     healthy = observation.model_copy(
         update={

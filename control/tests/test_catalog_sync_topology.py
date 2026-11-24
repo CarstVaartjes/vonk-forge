@@ -8,9 +8,13 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from importlib.resources import files
+from types import SimpleNamespace
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDisplay, RecipeDisplay, document_sha256
+
+from vonk_control.catalog import sync as catalog_sync
 from vonk_control.catalog.service import RecipeCatalogLocalRevision
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.catalog.sync_contract import (
@@ -18,10 +22,11 @@ from vonk_control.catalog.sync_contract import (
     ManagedCatalogSyncRequest,
 )
 from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
-from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import display_of_recipe
+from .test_catalog_revision_collection import Catalog
 
 _EXAMPLES = files("vonk_forge_contracts").joinpath("examples")
 
@@ -74,7 +79,9 @@ class _Catalog:
     def import_catalog_models(self, actor, documents) -> int:
         return 0
 
-    def apply_displays(self, displays) -> list:
+    def apply_displays(
+        self, displays
+    ) -> list[tuple[RecipeDisplay | ModelDisplay, Exception]]:
         return []
 
     def retract_absent_from(self, published):
@@ -174,13 +181,6 @@ def test_snapshot_availability_costs_constant_queries_per_check(
     tmp_path, monkeypatch
 ) -> None:
     """Catches two queries per catalog entity on every automatic sync check."""
-    from types import SimpleNamespace
-
-    from sqlalchemy import event, select
-    from vonk_control.catalog import sync as catalog_sync
-    from vonk_control.models.catalog import CatalogDocumentRevision
-
-    from .test_catalog_revision_collection import Catalog
 
     engine = create_engine(f"sqlite:///{tmp_path / 'available.sqlite'}")
     Base.metadata.create_all(engine)

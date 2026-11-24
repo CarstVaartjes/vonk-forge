@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
@@ -15,14 +15,14 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitResumeCondition,
 )
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
-
-from .agent_operation_facts import aware
-from .coordinator_contract import CoordinatorFailureEvidence
-from .failure_classification import disposition, error_code, error_detail
-from .logging import redact_text
-from .models.coordinator import CoordinatorFailure
-from .operations.blockers import BlockingOperation, make_blocker
-from .persisted_waits import read_wait, write_wait
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_operation_facts import aware
+from vonk_control.coordinator_contract import CoordinatorFailureEvidence
+from vonk_control.failure_classification import disposition, error_code, error_detail
+from vonk_control.logging import redact_text
+from vonk_control.models.coordinator import CoordinatorFailure
+from vonk_control.operations.blockers import BlockingOperation, make_blocker
+from vonk_control.persisted_waits import read_wait, write_wait
 
 _RETRY_FIRST_SECONDS = 5
 _RETRY_CAP_SECONDS = 300

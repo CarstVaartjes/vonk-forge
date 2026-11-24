@@ -12,6 +12,14 @@ from __future__ import annotations
 from typing import Annotated
 
 from pydantic import Field
+from vonk_forge_contracts import (
+    CatalogVocabulary,
+    ModelDefinition,
+    ModelDisplay,
+    RecipeDefinition,
+    RecipeDisplay,
+)
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     RunSwitchReasonScopeName,
@@ -38,32 +46,25 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_forge_contracts import (
-    CatalogVocabulary,
-    ModelDefinition,
-    ModelDisplay,
-    RecipeDefinition,
-    RecipeDisplay,
-)
-
-from ..agent_upgrades.contract import (
+from vonk_control.agent_upgrades.contract import (
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
 )
-from ..artifact_jobs.evidence import ArtifactJobResultEvidence
-from ..ca_issuance_contract import CertificateIssuanceBinding
-from ..catalog.revision_contract import (
+from vonk_control.artifact_jobs.evidence import ArtifactJobResultEvidence
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     UnprojectedRevision,
 )
-from ..catalog.sync_contract import ManagedCatalogSyncResult
-from ..compiled_artifact_contract import (
+from vonk_control.catalog.sync_contract import ManagedCatalogSyncResult
+from vonk_control.compiled_artifact_contract import (
     ArtifactOutputLimits,
     CompiledArtifactContract,
     ParameterScalar,
 )
-from ..fleet_event_contract import (
+from vonk_control.coordinator_contract import CoordinatorFailureEvidence
+from vonk_control.fleet_event_contract import (
     AgentOperationPayload,
     InstallationNodePayload,
     JobPayload,
@@ -73,15 +74,16 @@ from ..fleet_event_contract import (
     RecipeRunPayload,
     RunNodePayload,
 )
-from ..fleet_profile_contract.applications import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
 )
-from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
-from ..fleet_profile_contract.review import FleetProfilePreview
-from ..fleet_profile_contract.vocabulary import LabelName, LabelValue
-from ..fleet_profiles.stop_authority import ProfileJobRunStopJob
-from ..jobs.documents import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignmentInput
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.vocabulary import LabelName, LabelValue
+from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
+from vonk_control.inventory.items_contract import AgentInventoryItems
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
     AvailabilityUnknownEnd,
@@ -99,26 +101,26 @@ from ..jobs.documents import (
     RecipeUninstallParent,
     RunSwitchJobPayload,
 )
-from ..mapping_parameters import MappingParameters
-from ..model_cache.contract import (
+from vonk_control.mapping_parameters import MappingParameters
+from vonk_control.model_cache.contract import (
     CacheManifest,
     ModelCacheDownloadPayload,
     ModelCacheOperationProgress,
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
 )
-from ..operator_receipt_contract import ReceiptOwner
-from ..recipe_image_availability.removal_contract import (
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,
 )
-from ..recipe_operations.execution_contract import (
+from vonk_control.recipe_operations.execution_contract import (
     StoredBuildPolicyReport,
     StoredInstallationPlan,
     StoredRunEndpoint,
     StoredRunPlan,
 )
-from ..recipe_operations.lifecycle_contract import (
+from vonk_control.recipe_operations.lifecycle_contract import (
     JOB_ACTIVATION,
     RecipeOperationActivatedResult,
     RecipeOperationCancellationResult,
@@ -126,17 +128,25 @@ from ..recipe_operations.lifecycle_contract import (
     RecipeOperationResult,
     RecipeOperationStoppedResult,
 )
-from ..recipe_update_batches.contract import RecipeUpdateDocument, RecipeUpdateFailure
-from ..run_switch_contract.journal import (
+from vonk_control.recipe_update_batches.contract import (
+    RecipeUpdateDocument,
+    RecipeUpdateFailure,
+)
+from vonk_control.repeated_evidence_contract import RepeatedEvidence
+from vonk_control.run_switch_contract.identity import RunSwitchCancellation
+from vonk_control.run_switch_contract.journal import (
     JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
     RunSwitchJournalRepairPendingState,
 )
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
-from .documents import RouteClaimMarker
-from .json_values import bind
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import (
+    RunSwitchDistributionChildResult,
+)
+from vonk_control.stored.documents import RouteClaimMarker
+from vonk_control.stored.json_values import bind
+from vonk_control.wait_contract import WaitEvidence
 
 ProfileLabels = Annotated[dict[LabelName, LabelValue], Field(max_length=16)]
 
@@ -324,7 +334,6 @@ bind(
 bind("agent_operation_attempts", "progress", OperationProgress, nullable=True)
 bind("agent_operation_attempts", "result", AgentResultPayload, nullable=True)
 
-from ..run_switch_contract.identity import RunSwitchCancellation
 
 bind(
     "run_switch_journal_repairs",
@@ -359,7 +368,6 @@ bind(
 bind("local_certificate_issuance", "binding", CertificateIssuanceBinding)
 
 # Every wait uses one contract; next_check is projected from the owner's SQL clock.
-from ..wait_contract import WaitEvidence
 
 for _table in (
     "coordinator_failures",
@@ -379,11 +387,9 @@ for _table in (
 ):
     bind(_table, "wait_evidence", WaitEvidence, nullable=True)
 
-from ..coordinator_contract import CoordinatorFailureEvidence
 
 bind("coordinator_failures", "failure", CoordinatorFailureEvidence)
 
-from ..inventory.items_contract import AgentInventoryItems
 
 bind("node_inventory_snapshots", "agent_items", AgentInventoryItems, nullable=True)
 
@@ -396,7 +402,6 @@ bind(
     nullable=True,
 )
 
-from ..repeated_evidence_contract import RepeatedEvidence
 
 bind(
     "agent_node_contacts",

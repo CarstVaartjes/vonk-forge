@@ -7,26 +7,34 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.inventory import StoreRetentionRequest
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
-
-from .agent_operation_facts import aware
-from .fleet_model_removal_contract import (
+from vonk_control.agent_operation_facts import aware
+from vonk_control.fleet_model_removal_contract import (
     FLEET_REMOVAL_DEADLINE,
     STORE_RETENTION_MAX_AGE,
     FleetRemovalDisposition,
 )
-from .fleet_profile_contract.applications import FleetProfileApplicationProgress
-from .lifecycle.evidence import Residue
-from .logging import log_event
-from .model_cache.contract import CacheOperationKind
-from .model_cache.persistence import _operation_removal
-from .models.cache import ArtifactLifecycleGate, ModelCacheOperation, RecipeBuild
-from .models.fleet import FleetProfileApplication
-from .strict_json import read_stored_model
-from .unused_storage_collection.evidence import _Evidence
-from .unused_storage_collection.protected_objects import protected_model_objects
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.logging import log_event
+from vonk_control.model_cache.contract import CacheOperationKind
+from vonk_control.model_cache.persistence import _operation_removal
+from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
+    ModelCacheOperation,
+    RecipeBuild,
+)
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.strict_json import read_stored_model
+from vonk_control.unused_storage_collection.evidence import _Evidence
+from vonk_control.unused_storage_collection.protected_objects import (
+    protected_model_objects,
+)
 
 # An inventory arrives every two minutes. A stopped writer cannot keep demanding
 # space or authorizing deletion indefinitely.

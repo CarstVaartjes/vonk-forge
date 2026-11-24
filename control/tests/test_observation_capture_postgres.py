@@ -18,9 +18,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
 from starlette.types import Message, Scope
-from vonk_agent_protocol.contracts import canonical_message
+
+from cluster_profiles.observation_transfer_reader import receive_observation
+from tests.observation_transfer_peer import observation_document
+from tests.test_platform_observation import Jobs
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.cli_update_contract import CliUpdateContract
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.db import connections as connection_owner
 from vonk_control.db.connections import build_engine
@@ -33,10 +38,6 @@ from vonk_control.observation.platform import PlatformObservation, PlatformObser
 from vonk_control.observation.transfer import ObservationTransferRecord
 from vonk_control.settings import DATABASE_WAIT_BUDGETS
 from vonk_control.strict_json import serialize_json_value
-
-from cluster_profiles.observation_transfer_reader import receive_observation
-from tests.observation_transfer_peer import observation_document
-from tests.test_platform_observation import Jobs
 
 NODE = "spk_" + "1" * 32
 
@@ -167,7 +168,7 @@ def test_fleet_cursor_and_membership_are_one_real_sql_snapshot(postgres_engine):
 
 
 @pytest.mark.parametrize(
-    "resource,table",
+    ("resource", "table"),
     [("fleet", "agent_nodes"), ("platform", "control_process_heartbeats")],
 )
 def test_slow_stream_releases_sql_and_keeps_original_observation(
@@ -262,7 +263,8 @@ def test_slow_stream_releases_sql_and_keeps_original_observation(
                 for message in messages
                 if message["type"] == "http.response.body"
             )
-            assert record_threads and loop_thread not in record_threads, (
+            assert record_threads, "record encoding blocked the async event loop"
+            assert loop_thread not in record_threads, (
                 "record encoding blocked the async event loop"
             )
             frozen = _received(body, resource)
@@ -332,7 +334,7 @@ def test_slow_stream_releases_sql_and_keeps_original_observation(
 
 
 @pytest.mark.parametrize(
-    "resource,table",
+    ("resource", "table"),
     [
         ("fleet", "agent_nodes"),
         (f"fleet/{NODE}", "agent_nodes"),
@@ -366,7 +368,8 @@ def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
             assert response.headers["retry-after"] == "5"
             assert response.headers["cache-control"] == "no-store"
             assert response.headers["content-type"] == "application/json"
-            assert "nodes" not in response.json() and "workers" not in response.json()
+            assert "nodes" not in response.json()
+            assert "workers" not in response.json()
             # The lock applies only to this observation's dependency; unrelated
             # work does not wait behind the failed capture transaction.
             other = peer.get(
@@ -383,8 +386,6 @@ def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
             )
             return
         if resource == "cli/contract":
-            from vonk_control.cli_update_contract import CliUpdateContract
-
             contract = CliUpdateContract.model_validate_json(
                 repaired.content, strict=True
             )

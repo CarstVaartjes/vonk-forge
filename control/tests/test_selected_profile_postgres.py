@@ -8,12 +8,20 @@ import pytest
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
+from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
 from vonk_control.fleet_profiles.port_promises import PortPromiseTaken
 from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.gpu.clock import selected_gpu_clock
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import (
@@ -25,7 +33,6 @@ from vonk_control.models.fleet import (
 )
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reworded
 from .fleet_profiles_support import (
@@ -34,6 +41,7 @@ from .fleet_profiles_support import (
     _input,
     _node_id,
     _seed,
+    _seed_dual_solo_without_runtime_state,
     _SwitchAdapter,
     _uuid,
 )
@@ -415,7 +423,8 @@ def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recover
     assert worker.tick() is True
     with sessions() as session:
         due = session.get(Job, due_job_id)
-        assert due is not None and due.state == "succeeded"
+        assert due is not None
+        assert due.state == "succeeded"
         assert len(tuple(session.scalars(select(FleetProfileApplication.id)))) == 2
     view = service.get(profile.id)
     assert not any("restore" in action.lower() for action in view.next_actions)
@@ -801,8 +810,6 @@ def test_gpu_clock_uses_the_selected_snapshot_after_saved_edit_and_controller_re
     postgres_engine: Engine,
 ) -> None:
     """Catches authoring changing a live cap, dropping assignment JSON, or idle inheritance."""
-    from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
-    from vonk_control.gpu.clock import selected_gpu_clock
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -838,12 +845,6 @@ def test_dual_spark_loss_during_load_exposes_recovery_admission_and_heals(
     postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catches silent unplaced standing intent after both targets return."""
-    from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
-    from vonk_agent_protocol.state_machines import NodeIdentityState
-    from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
-
-    from .fleet_profiles_support import _seed_dual_solo_without_runtime_state
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -913,7 +914,8 @@ def test_dual_spark_loss_during_load_exposes_recovery_admission_and_heals(
     clock[0] += timedelta(seconds=30)
     service.tick()
     again = service.get(profile.id).maintenance_wait
-    assert again is not None and again.dependency_deadline == first_deadline
+    assert again is not None
+    assert again.dependency_deadline == first_deadline
     blocked[0] = False
     clock[0] = again.next_check
     service.tick()

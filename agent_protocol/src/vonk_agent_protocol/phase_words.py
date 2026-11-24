@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .agent_words import (
+from vonk_agent_protocol.agent_words import (
     TRANSFER_PHASES,
     ProfileChildPhase,
     ProfileReportedPhase,
     ProgressPhase,
 )
-from .lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
 _COPYING = "Copying model files to the Sparks"
 _DOWNLOADING = "Downloading the model"

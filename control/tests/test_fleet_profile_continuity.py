@@ -4,11 +4,22 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.continuing_effects import (
+    _adopted_application_scope,
+    _application_is_current_selection,
+    _superseding_intent,
+)
+from vonk_control.fleet_profiles.contracts import FleetProfileReviewStale
+from vonk_control.fleet_profiles.persistence import _stored_recipe
 from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
@@ -20,6 +31,7 @@ from .display_fixtures import reword
 from .fleet_profiles_support import (
     NOW,
     _database,
+    _follow_profile_retry,
     _node_id,
     _seed,
     _SwitchAdapter,
@@ -98,12 +110,13 @@ def test_new_lane_adopts_original_identity_without_fencing_its_spark():
     assert adapter.cancellations[-1][0] == (_node_id(2),)
     with sessions() as session:
         selection = session.get(FleetProfileSelection, 1)
-        assert selection is not None and selection.application_id == second.id
+        assert selection is not None
+        assert selection.application_id == second.id
         old = session.get(FleetProfileApplication, first.id)
         assert old is not None
-        assert service._application_is_current_selection(session, old)
-        assert service._adopted_application_scope(session, old) == (_node_id(1),)
-        assert not service._superseding_intent(session, old, retained.progress)
+        assert _application_is_current_selection(session, old)
+        assert _adopted_application_scope(session, old) == (_node_id(1),)
+        assert not _superseding_intent(session, old, retained.progress)
     # A third whole-fleet load replaces B while A still copies. The adoption
     # link is flattened to original A; superseding aggregate B must not cancel A.
     third_profile = service.create(
@@ -172,8 +185,8 @@ def test_selected_cancel_fences_both_original_and_new_node_ordinals():
         assert len({node.workload_intent_ordinal for node in nodes}) == 1
         old = session.get(FleetProfileApplication, first.id)
         assert old is not None
-        assert service._adopted_application_scope(session, old) is None
-        assert not service._application_is_current_selection(session, old)
+        assert _adopted_application_scope(session, old) is None
+        assert not _application_is_current_selection(session, old)
 
 
 def test_replaced_alias_is_not_adopted_as_equivalent_work():
@@ -204,7 +217,6 @@ def test_a_stale_replay_is_superseded_by_the_load_that_continues_it():
     stop the newer workload, so its review was stale, and comparing ordinals
     never saw the newer load: it backed off for hours while the newer load
     waited for it. The newest request steers: the old load is superseded."""
-    from vonk_control.fleet_profiles.contracts import FleetProfileReviewStale
 
     sessions, service, _adapter, _first, _original, both_profile = _world()
     old = service.apply(both_profile.id, request_key=_uuid(18002), actor="admin")
@@ -290,18 +302,16 @@ def test_an_older_load_holding_a_higher_ordinal_elsewhere_is_superseded():
     )
     newer = service.apply(newer_profile.id, request_key=_uuid(18021), actor="admin")
     took = service.application(newer.id).progress.workload_intent_ordinal
-    assert took is not None and took < 50
+    assert took is not None
+    assert took < 50
 
     older = service.application(first.id)
-    assert older.state == "superseded" and older.superseded_by == newer.id
+    assert older.state == "superseded"
+    assert older.superseded_by == newer.id
 
 
 def test_running_application_keeps_its_stored_recipe_after_catalog_head_changes():
     """A projection refresh must not replace the exact recipe already accepted."""
-    from vonk_control.catalog.entities import CatalogEntityService
-    from vonk_control.fleet_profiles.persistence import _stored_recipe
-    from vonk_control.models.catalog import CatalogDocumentRevision
-    from vonk_forge_contracts import RecipeDefinition
 
     sessions, service, _adapter, first, original, _ = _world()
     assert original.progress.intended_profile is not None
@@ -321,7 +331,6 @@ def test_running_application_keeps_its_stored_recipe_after_catalog_head_changes(
         stored = session.get(CatalogDocumentRevision, pinned)
         assert stored is not None
         assert _stored_recipe(stored) == old_definition
-    from .fleet_profiles_support import _follow_profile_retry
 
     now = [NOW + timedelta(seconds=1)]
     service._clock = lambda: now[0]

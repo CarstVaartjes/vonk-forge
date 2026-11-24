@@ -3,12 +3,12 @@
 from typing import Annotated
 
 from pydantic import Field
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
-
-from .lifecycle.evidence import Residue
-from .strict_json import StrictModel
-from .wait_contract import QueueWait
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.strict_json import StrictModel
+from vonk_control.wait_contract import QueueWait
 
 
 class CoordinatorFailureEvidence(StrictModel):

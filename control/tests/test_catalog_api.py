@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
+
+from cluster_profiles.generated_control.models.managed_catalog_sync_response import (
+    ManagedCatalogSyncResponse as ClientSyncResponse,
+)
 from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import Actor
 from vonk_control.catalog.api import ManagedCatalogSyncResponse, install_catalog_routes
+from vonk_control.catalog.sync import CatalogSyncView
 from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncProblem,
@@ -47,15 +55,6 @@ def test_managed_catalog_sync_response_allows_catalogs_over_256_rows() -> None:
         completed_at=None,
     )
 
-    from datetime import datetime
-
-    from fastapi.testclient import TestClient
-    from vonk_control.catalog.sync import CatalogSyncView
-
-    from cluster_profiles.generated_control.models.managed_catalog_sync_response import (
-        ManagedCatalogSyncResponse as ClientSyncResponse,
-    )
-
     class Sync:
         def latest(self) -> CatalogSyncView:
             return CatalogSyncView(
@@ -85,7 +84,7 @@ def test_managed_catalog_sync_response_allows_catalogs_over_256_rows() -> None:
 
     app = FastAPI()
     install_catalog_routes(
-        app, actor_dependency=Depends(_administrator), service=None, managed_sync=Sync()
+        app, actor_dependency=Depends(_administrator), managed_sync=Sync()
     )
     received = TestClient(app).get("/api/catalog/managed-recipes/sync-status")
     assert received.status_code == 200

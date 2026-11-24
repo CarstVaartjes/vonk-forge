@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 import vonk_forge_contracts as contracts
+
 from vonk_control.bounded_json import (
     BoundedJSONError,
     require_mapping,

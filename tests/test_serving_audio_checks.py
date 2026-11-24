@@ -13,7 +13,7 @@ import struct
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from threading import Thread
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 from vonk_forge_contracts import read_recipe
@@ -46,7 +46,7 @@ def wav(seconds: float, rate: int = 16000, *, data_size: int | None = None) -> b
 AUDIO = wav(1.0)
 
 
-def _checks() -> dict[str, dict]:
+def _checks() -> dict[str, dict[str, Any]]:
     document = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "recipe-audio-serving.json")
@@ -65,7 +65,7 @@ SPEAK = CHECKS["speak"]
 
 
 class _Audio(BaseHTTPRequestHandler):
-    seen: ClassVar[list[dict]] = []
+    seen: ClassVar[list[dict[Any, Any]]] = []
     transcript: ClassVar[bytes] = b'{"text":"ask not what your country"}'
 
     def do_POST(self) -> None:
@@ -94,11 +94,11 @@ class _Audio(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, _format: str, *_args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         return
 
 
-@pytest.fixture()
+@pytest.fixture
 def server():
     _Audio.seen = []
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Audio)
@@ -150,7 +150,7 @@ def test_an_unusable_fixture_is_an_execution_error_before_any_request(
         multipart_body({"model": "m"}, "file", "audio/wav", FIXTURE, fixtures)
 
 
-def _observed(check: dict, body: bytes, kind: str = "application/json"):
+def _observed(check: dict[str, Any], body: bytes, kind: str = "application/json"):
     return evaluate_http_response(
         HttpObservation(200, {"Content-Type": kind}, body), check
     )
@@ -195,7 +195,8 @@ def test_speech_that_is_not_audible_wav_fails_the_check(body: bytes, kind: str) 
 
 def test_a_streamed_wav_with_a_placeholder_size_counts_the_bytes_it_has() -> None:
     audio = assert_speech({"content-type": "audio/wav"}, wav(1.0, data_size=0xFFFFFFFF))
-    assert audio.seconds == 1.0 and audio.sample_rate == 16000
+    assert audio.seconds == 1.0
+    assert audio.sample_rate == 16000
 
 
 def test_a_wav_whose_data_chunk_precedes_fmt_is_refused() -> None:

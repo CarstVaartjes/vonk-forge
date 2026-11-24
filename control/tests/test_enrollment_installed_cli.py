@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor
 from vonk_control.models.fleet import AgentEnrollmentGrant
@@ -100,7 +101,8 @@ def test_installed_enrollment_keeps_private_grant_and_original_identity(
             assert grant["token"] == secrets[0]
         with services.sessions() as session:
             rows = list(session.scalars(select(AgentEnrollmentGrant)))
-            assert len(rows) == 1 and rows[0].id == key
+            assert len(rows) == 1
+            assert rows[0].id == key
 
         # A new installed process observes and revokes the exact issued grant.
         status = run("fleet", "enrollment", "status", key)
@@ -197,7 +199,8 @@ def test_installed_enrollment_process_death_recovers_original_grant_identity(
             assert len(grants) == 1
             assert grants[0].id == key
             assert grants[0].requested_display_name == "Process-death Spark"
-            assert grants[0].consumed_at is None and grants[0].revoked_at is None
+            assert grants[0].consumed_at is None
+            assert grants[0].revoked_at is None
 
             # The intent receipt was fsynced before POST. Killing the actual
             # installed process here prevents it from receiving or writing the
@@ -232,7 +235,8 @@ def test_installed_enrollment_process_death_recovers_original_grant_identity(
             )
             assert recovered.returncode == 0, recovered.stdout + recovered.stderr
             status = json.loads(recovered.stdout)
-            assert status["id"] == key and status["state"] == "pending"
+            assert status["id"] == key
+            assert status["state"] == "pending"
             assert secret not in recovered.stdout + recovered.stderr
             assert [
                 (method, path)

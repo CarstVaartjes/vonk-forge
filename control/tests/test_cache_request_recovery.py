@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -23,6 +22,9 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from cluster_profiles.cli import main
+from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, lock_reference_gates
 from vonk_control.auth import Actor
@@ -41,9 +43,7 @@ from vonk_control.recipe_image_availability.view_contract import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
-from cluster_profiles.cli import main
-from cluster_profiles.control_client.transfers import ControlClient
-
+from .insert_collision_support import Rendezvous
 from .model_cache_support import _artifact
 from .recipe_image_availability_support import (
     Transport,
@@ -60,7 +60,7 @@ def _start_together(
 ) -> list[tuple[int, object]]:
     """Start two real PostgreSQL submissions together without pinning their order."""
 
-    barrier = threading.Barrier(2, timeout=10)
+    barrier = Rendezvous(2, timeout=10)
 
     def capture(index: int, call: Callable[[], object]) -> tuple[int, object]:
         barrier.wait()
@@ -329,7 +329,7 @@ def test_recipe_lookup_preserves_id_visibility_and_private_request_correlation(
                 for name, value in response.headers.items():
                     self.headers[name] = value
 
-            def read(self, size=-1):
+            def read(self, size: int | None = -1):
                 if self.failure == "lost_body":
                     raise http.client.IncompleteRead(b'{"id":', 100)
                 if self.failure == "malformed_body":
@@ -415,7 +415,6 @@ def test_recipe_lookup_preserves_id_visibility_and_private_request_correlation(
 
 def test_download_consent_digest_survives_observation_only_drift(tmp_path: Path):
     """Catches transfer/capacity drift requiring new consent for identical effects."""
-    from sqlalchemy import create_engine
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -439,7 +438,8 @@ def test_download_consent_digest_survives_observation_only_drift(tmp_path: Path)
     assert service.get_operation(first.id).state == LifecycleState.SUCCEEDED
     after = service.download_preview(artifact_set_sha256=manifest.digest)
     assert after["new_bytes"] == 0
-    assert isinstance(before["new_bytes"], int) and before["new_bytes"] > 0
+    assert isinstance(before["new_bytes"], int)
+    assert before["new_bytes"] > 0
     fresh = service.start_download(
         actor="operator",
         request_key=str(uuid.uuid4()),

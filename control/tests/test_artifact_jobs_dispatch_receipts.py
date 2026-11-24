@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
@@ -20,7 +21,7 @@ from vonk_agent_protocol.recipe_jobs import (
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.blob_store import (
@@ -46,7 +47,6 @@ from vonk_control.recipe_operations.errors import (
     RecipeRequestInvalid,
 )
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .artifact_jobs_support import (
     MutableClock,
@@ -62,17 +62,18 @@ from .artifact_jobs_support import (
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .recipe_operations_support import NOW
 from .runtime_identity_support import claim_agent
+from .test_artifact_job_recovery import recover_unknown_job_under_new_intent
 
 
 @pytest.mark.parametrize(
     "corruption",
-    (
+    [
         "non-object-payload",
         "payload-digest",
         "foreign-owner",
         "malformed-request-id",
         "null-request-id",
-    ),
+    ],
 )
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_artifact_submission_receipt_degrades_on_corrupt_owner(
@@ -88,7 +89,8 @@ def test_artifact_submission_receipt_degrades_on_corrupt_owner(
         with sessions() as session:
             artifact_job = session.get(ArtifactJob, submitted.id)
             parent = session.get(Job, submitted.operation_id)
-            assert artifact_job is not None and parent is not None
+            assert artifact_job is not None
+            assert parent is not None
             object.__setattr__(parent, "request_id", None)
             # The submission's identity is damaged bookkeeping: the job is shown
             # without it instead of being refused.
@@ -658,7 +660,9 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
         )
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running" and run.stopped_at is None
+        assert run is not None
+        assert run.state == "running"
+        assert run.stopped_at is None
 
     acknowledged = cancellation_result(
         claim,
@@ -773,7 +777,8 @@ def test_duplicate_jobrun_stop_replays_the_stop_that_ended_after_its_probe(
     with sessions() as session:
         jobs = tuple(session.scalars(select(Job).where(Job.request_id == request_id)))
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
         installation_id = run.installation_id
     assert [job.id for job in jobs] == [finished[0].id]
     # Nothing is left holding the installation: fresh work is admitted.
@@ -852,7 +857,6 @@ def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> N
 
 
 def test_artifact_lease_expiry_is_observed_then_reconciled_under_new_intent(tmp_path):
-    from .test_artifact_job_recovery import recover_unknown_job_under_new_intent
 
     recover_unknown_job_under_new_intent(tmp_path, malformed=False)
 

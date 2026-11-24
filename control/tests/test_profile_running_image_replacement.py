@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.inventory.items import runtime_value
 from vonk_control.models.cache import RecipeBuild
@@ -60,9 +61,11 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
     with sessions() as session:
         running = session.scalar(select(RecipeRun))
         application = session.get(FleetProfileApplication, application_id)
-        assert running is not None and running.state == "running"
+        assert running is not None
+        assert running.state == "running"
         assert running.route_state == "published"
-        assert application is not None and application.profile_id is not None
+        assert application is not None
+        assert application.profile_id is not None
         profile_id = application.profile_id
         old_run_id = running.id
         old_installation_id = running.installation_id
@@ -141,7 +144,8 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
     )
     with sessions.begin() as session:
         build = session.get(RecipeBuild, replacement_build_id)
-        assert build is not None and build.state == "succeeded"
+        assert build is not None
+        assert build.state == "succeeded"
         build.image_digest = changed.image_digest
         build.oci_layout_sha256 = changed.oci_archive_sha256
         build.image_bytes = changed.image_bytes
@@ -162,7 +166,8 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
     assert old_run_id in {run.run_id for run in review.admission_decisions[0].stops}
     with sessions() as session:
         installed = session.get(RecipeInstallation, old_installation_id)
-        assert installed is not None and installed.plan == old_plan
+        assert installed is not None
+        assert installed.plan == old_plan
     accepted = profiles.apply(
         profile_id,
         request_key=str(uuid4()),
@@ -208,15 +213,14 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
     assert json.loads(completed.stdout)["state"] == "succeeded", completed.stdout
     with sessions() as session:
         old = session.get(RecipeRun, old_run_id)
-        assert (
-            old is not None
-            and old.state == "stopped"
-            and old.route_state != "published"
-        )
+        assert old is not None
+        assert old.state == "stopped"
+        assert old.route_state != "published"
         replacement = session.scalar(
             select(RecipeRun).where(RecipeRun.id != old_run_id)
         )
-        assert replacement is not None and replacement.state == "running"
+        assert replacement is not None
+        assert replacement.state == "running"
         assert replacement.route_state == "published"
         assert replacement.installation_id != old_installation_id
         installed = session.get(RecipeInstallation, replacement.installation_id)
@@ -224,16 +228,16 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
         assert installed.recipe_build_id == replacement_build_id
         if distinct_build:
             previous = session.get(RecipeBuild, selected.build_id)
-            assert (
-                previous is not None and previous.image_digest == original.image_digest
-            )
+            assert previous is not None
+            assert previous.image_digest == original.image_digest
         for plan in parse_stored_installation_plan(
             installed.plan
         ).compiled_execution_plans.values():
             assert plan.runtime_image.image_digest == changed.image_digest
             assert plan.runtime_image.oci_layout_sha256 == changed.oci_archive_sha256
         stops = tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
-        assert len(stops) == 1 and stops[0].payload["owner_id"] == old_run_id
+        assert len(stops) == 1
+        assert stops[0].payload["owner_id"] == old_run_id
     assert (
         storage.read_receipt(original.oci_archive_sha256).image_digest
         == original.image_digest

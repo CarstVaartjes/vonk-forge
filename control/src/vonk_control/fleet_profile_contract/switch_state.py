@@ -10,17 +10,21 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+
 from vonk_agent_protocol.agent_words import (
     ProfileSwitchChildKind,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.requests import RunSwitchProfileStopScope
-from ..strict_json import StrictModel
-from .definitions import FleetProfileAssignment
-from .effects import FleetProfileChildProgress
-from .vocabulary import FleetProfileOperationState, NodeId, UuidId
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.effects import FleetProfileChildProgress
+from vonk_control.fleet_profile_contract.vocabulary import (
+    FleetProfileOperationState,
+    NodeId,
+    UuidId,
+)
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.requests import RunSwitchProfileStopScope
+from vonk_control.strict_json import StrictModel
 
 if TYPE_CHECKING:
     FleetProfileSwitchChildKind = Literal["install", "run", "stop", "cleanup"]

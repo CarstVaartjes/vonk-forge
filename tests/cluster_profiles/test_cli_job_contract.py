@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -20,7 +21,7 @@ REVISION_ID = "00000000-0000-4000-8000-000000000007"
 CONTRACT_PATH = "/api/artifact-jobs/contract"
 
 
-def _slot(slot_id: str, media_type: str, extension: str, limit: int) -> dict:
+def _slot(slot_id: str, media_type: str, extension: str, limit: int) -> dict[str, Any]:
     return {
         "id": slot_id,
         "label": slot_id.title(),

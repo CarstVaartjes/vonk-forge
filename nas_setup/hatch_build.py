@@ -3,10 +3,11 @@
 from pathlib import Path
 from typing import cast
 
+from hatchling.builders.config import BuilderConfig
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 
-class CustomBuildHook(BuildHookInterface):
+class CustomBuildHook(BuildHookInterface[BuilderConfig]):
     def initialize(self, version: str, build_data: object) -> None:
         if self.target_name != "wheel" or version == "editable":
             return

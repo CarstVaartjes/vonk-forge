@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.install_admission.contracts import (
@@ -33,6 +34,10 @@ from vonk_control.run_switch_contract.requests import (
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
 )
+from vonk_control.run_switch_operations.constants import (
+    _FINAL_VERIFICATION_MAX_SECONDS,
+)
+from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services
@@ -99,7 +104,8 @@ def test_parked_start_after_observation_deadline_keeps_exact_effect_pending(
     view = service.get(operation.operation_id)
     assert view.state == LifecycleState.OBSERVING
     assert view.progress.state == LifecycleState.OBSERVING
-    assert view.result is not None and view.next_attempt_at is not None
+    assert view.result is not None
+    assert view.next_attempt_at is not None
     # One retry clock: the lifecycle core's bounded backoff, never past a minute.
     assert now[0] < view.next_attempt_at <= now[0] + timedelta(seconds=60)
     assert service.tick() is False
@@ -126,7 +132,8 @@ def test_legacy_operator_wait_without_a_clock_is_healed_not_left_waiting(
     service._clock = lambda: now[0]
     with service._sessions.begin() as session:
         row = session.get(Job, operation.operation_id)
-        assert row is not None and isinstance(row.result, dict)
+        assert row is not None
+        assert isinstance(row.result, dict)
         row.state = "needs-operator"
         result = dict(row.result)
         result.pop("observation_due_at", None)
@@ -137,7 +144,8 @@ def test_legacy_operator_wait_without_a_clock_is_healed_not_left_waiting(
     assert service.tick() is True  # healed: it is observed again, not parked
     healed = service.get(operation.operation_id)
     assert healed.state != LifecycleState.NEEDS_OPERATOR
-    assert healed.result is not None and healed.next_attempt_at is not None
+    assert healed.result is not None
+    assert healed.next_attempt_at is not None
     assert healed.next_attempt_at > now[0]
 
 
@@ -172,7 +180,8 @@ def test_restart_interrupted_start_keeps_exact_child_when_effect_is_uncertain(
     service, operation, _ = _parked_start_switch(tmp_path, healthy=False)
     with service._sessions.begin() as session:
         parent = session.get(Job, operation.operation_id)
-        assert parent is not None and isinstance(parent.result, dict)
+        assert parent is not None
+        assert isinstance(parent.result, dict)
         child_id = parent.result.get("child_operation_id")
         assert isinstance(child_id, str)
         child = session.get(Job, child_id)
@@ -200,7 +209,8 @@ def test_restart_retry_due_is_projected_without_replacing_the_child(
     due = NOW + timedelta(seconds=7)
     with service._sessions.begin() as session:
         parent = session.get(Job, operation.operation_id)
-        assert parent is not None and isinstance(parent.result, dict)
+        assert parent is not None
+        assert isinstance(parent.result, dict)
         child_id = parent.result.get("child_operation_id")
         assert isinstance(child_id, str)
         child = session.get(Job, child_id)
@@ -246,7 +256,7 @@ def test_scoped_cleanup_is_allowed_without_launch_readiness(tmp_path: Path) -> N
 
     lifecycle.preview_run = unavailable  # type: ignore[method-assign]
     try:
-        cleanup = service.preview_cleanup(installation.owner_id, actor="admin")
+        cleanup = service.preview_cleanup(installation.owner_id)
     finally:
         del lifecycle.preview_run
 
@@ -276,7 +286,7 @@ def test_scoped_cleanup_is_blocked_while_a_run_is_active(tmp_path: Path) -> None
         RecordingArtifactExecutor(),
     )
 
-    cleanup = service.preview_cleanup(installation.owner_id, actor="admin")
+    cleanup = service.preview_cleanup(installation.owner_id)
 
     assert cleanup.allowed is False
 
@@ -309,8 +319,7 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuild
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-        ),
-        actor="admin",
+        )
     )
 
     assert plan.allowed, [(reason.code, reason.detail) for reason in plan.blockers]
@@ -358,8 +367,7 @@ def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-        ),
-        actor="admin",
+        )
     )
     assert preview.allowed, [
         (reason.code, reason.detail) for reason in preview.blockers
@@ -378,7 +386,8 @@ def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
     assert child_id is not None
     with sessions.begin() as session:
         child_job = session.get(Job, child_id)
-        assert child_job is not None and child_job.kind == "recipe.reconcile"
+        assert child_job is not None
+        assert child_job.kind == "recipe.reconcile"
         child_operations = tuple(
             session.scalars(
                 select(AgentOperation)
@@ -410,12 +419,14 @@ def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
                 )
             )
         )
-        assert held and all(item.state == "active" for item in held)
+        assert held
+        assert all(item.state == "active" for item in held)
 
     lifecycle.record_node_result(child_id, nodes[1], succeeded=True, evidence={})
     with sessions() as session:
         row = session.get(RecipeInstallation, installation.owner_id)
-        assert row is not None and row.state == "uninstalled"
+        assert row is not None
+        assert row.state == "uninstalled"
         released = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -423,7 +434,8 @@ def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
                 )
             )
         )
-        assert released and all(item.state == "released" for item in released)
+        assert released
+        assert all(item.state == "released" for item in released)
 
     for _ in range(6):
         if service.get(operation.operation_id).state not in {"queued", "running"}:
@@ -467,8 +479,7 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-        ),
-        actor="admin",
+        )
     )
     assert first_plan.allowed, [
         (item.code, item.detail) for item in first_plan.blockers
@@ -495,9 +506,6 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
             "reason": "temporary dependency",
         },
     )
-    from vonk_control.run_switch_operations.constants import (
-        _FINAL_VERIFICATION_MAX_SECONDS,
-    )
 
     service._clock = lambda: (
         lifecycle._clock() + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
@@ -509,7 +517,8 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
     assert service.get(first.operation_id).state == "failed"
     with sessions() as session:
         partial = session.get(RecipeInstallation, installation.owner_id)
-        assert partial is not None and partial.state == "partial"
+        assert partial is not None
+        assert partial.state == "partial"
         members = tuple(
             session.scalars(
                 select(InstallationNode)
@@ -528,8 +537,7 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-        ),
-        actor="admin",
+        )
     )
     assert retry_plan.allowed, [
         (item.code, item.detail) for item in retry_plan.blockers
@@ -566,7 +574,8 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
     _record_successful_reconcile_member(sessions, lifecycle, retry_child_id, nodes[1])
     with sessions() as session:
         completed = session.get(RecipeInstallation, installation.owner_id)
-        assert completed is not None and completed.state == "uninstalled"
+        assert completed is not None
+        assert completed.state == "uninstalled"
         claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -574,9 +583,8 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
                 )
             )
         )
-        assert claims and all(
-            item.state == ReservationState.RELEASED for item in claims
-        )
+        assert claims
+        assert all(item.state == ReservationState.RELEASED for item in claims)
 
 
 def test_scoped_cleanup_removes_the_installation_through_run_switch(
@@ -656,11 +664,11 @@ def test_scoped_cleanup_retries_when_uninstall_capacity_writer_is_busy(
         del args, kwargs
         raise RunAdmissionBusy("run capacity writer is busy")
 
-    lifecycle.uninstall = busy_once  # type: ignore[method-assign]
+    lifecycle.uninstall = busy_once
     try:
         assert service.tick() is True
     finally:
-        lifecycle.uninstall = original_uninstall  # type: ignore[method-assign]
+        lifecycle.uninstall = original_uninstall
 
     parked = service.get(operation.operation_id)
     assert parked.state == "running"
@@ -708,11 +716,11 @@ def test_a_retryable_plan_blocker_is_named_not_hidden_as_capacity_busy(
         raise RunAdmissionBusy("blocked", code=blocker.code, blockers=(blocker,))
 
     original_uninstall = lifecycle.uninstall
-    lifecycle.uninstall = blocked  # type: ignore[method-assign]
+    lifecycle.uninstall = blocked
     try:
         assert service.tick() is True
     finally:
-        lifecycle.uninstall = original_uninstall  # type: ignore[method-assign]
+        lifecycle.uninstall = original_uninstall
 
     parked = service.get(operation.operation_id)
     assert parked.result is not None
@@ -729,8 +737,6 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
     Each owner backs off from the shared counter, a capacity wait for a new
     reason starts its own backoff again, and phase progress clears it.
     """
-
-    from vonk_control.run_switch_operations.result_helpers import _read_progress
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installation = installed_recipe(
@@ -762,7 +768,7 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
         assert view.next_attempt_at is not None
         now[0] = view.next_attempt_at + timedelta(seconds=1)
 
-    lifecycle.uninstall = busy  # type: ignore[method-assign]
+    lifecycle.uninstall = busy
     try:
         assert service.tick() is True
         view, current = result()
@@ -795,7 +801,7 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
         assert current.retry_attempt == 2
         # Recovery is asserted through effects and ownership below.
     finally:
-        lifecycle.uninstall = original_uninstall  # type: ignore[method-assign]
+        lifecycle.uninstall = original_uninstall
 
     # Phase progress clears the shared counter.
     advance_to_due()
@@ -820,7 +826,8 @@ def _planned_installation(tmp_path: Path, *, nodes: int = 2):
     installation_id = admission.accept_install(plan, actor="admin", now=NOW)
     with sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
     return sessions, lifecycle, installation_id, node_ids
 
 
@@ -837,7 +844,7 @@ def test_scoped_cleanup_abandons_a_never_installed_plan(tmp_path: Path) -> None:
         sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
     )
 
-    preview = service.preview_cleanup(installation_id, actor="admin")
+    preview = service.preview_cleanup(installation_id)
 
     assert preview.allowed is True, [reason.code for reason in preview.blockers]
     assert preview.cleanup_disposition == "abandon"
@@ -868,7 +875,8 @@ def test_scoped_cleanup_abandons_a_never_installed_plan(tmp_path: Path) -> None:
     assert replay.disposition == receipt.disposition
     with sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
-        assert installation is not None and installation.state == "uninstalled"
+        assert installation is not None
+        assert installation.state == "uninstalled"
         members = tuple(
             session.scalars(
                 select(InstallationNode).where(
@@ -913,7 +921,7 @@ def test_scoped_cleanup_refuses_a_planned_row_with_installed_bytes(
         sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
     )
 
-    preview = service.preview_cleanup(installation_id, actor="admin")
+    preview = service.preview_cleanup(installation_id)
 
     assert preview.allowed is False
     assert preview.cleanup_disposition == "uninstall"
@@ -926,4 +934,5 @@ def test_scoped_cleanup_refuses_a_planned_row_with_installed_bytes(
     assert operation.state in {"queued", LifecycleState.OBSERVING}
     with sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"

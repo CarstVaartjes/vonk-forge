@@ -5,8 +5,9 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.inventory.items import inventory_items, runtime_value
 from vonk_control.inventory.repository import (
@@ -36,7 +37,8 @@ def start_on_released_gang(
     assert lifecycle._clock() == clock()
     with sessions() as session:
         stopped = session.get(RecipeRun, old_run_id)
-        assert stopped is not None and stopped.state == "stopped"
+        assert stopped is not None
+        assert stopped.state == "stopped"
         assert set(
             session.scalars(select(RunNode.node_id).where(RunNode.run_id == old_run_id))
         ) == set(nodes)

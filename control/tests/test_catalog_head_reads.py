@@ -8,6 +8,8 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog.queries import active_head_revision
 from vonk_control.catalog.service import CatalogService
@@ -21,7 +23,6 @@ from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.recipe_update_batches.notice import newest_active_revisions
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import create_draft, reword
 from .test_catalog_entities import _model, _recipe

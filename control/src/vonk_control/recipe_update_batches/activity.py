@@ -5,30 +5,33 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleSubject,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
-
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..models.jobs import Job
-from ..operation_api.contracts import (
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.models.jobs import Job
+from vonk_control.operation_api.contracts import (
     OperationListPage,
     OperationProvider,
     OperationQuery,
 )
-from ..operation_api.providers import _activity_keyset_filter
-from ..operations.contract import AvailabilityOperationFailure
-from ..operations.item_contract import OperationItem, OperationOwnerReference
-from ..state_filters import state_filter
-from ..strict_json import serialize_json_value
-from .contract import UPDATE_KIND
+from vonk_control.operation_api.providers import _activity_keyset_filter
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.operations.item_contract import OperationItem, OperationOwnerReference
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityError,
+)
+from vonk_control.recipe_update_batches.contract import UPDATE_KIND
+from vonk_control.state_filters import state_filter
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeUpdateBatches
+    from vonk_control.recipe_update_batches.service import RecipeUpdateBatches
 
-from .helpers import _now
+from vonk_control.recipe_update_batches.helpers import _now
 
 
 class ActivityMixin:
@@ -43,7 +46,6 @@ class ActivityMixin:
 
     def _activity_item(self, job: Job) -> OperationItem:
         service = cast("RecipeUpdateBatches", self)
-        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
 
         owner = OperationOwnerReference(
             kind="job", id=job.id, request_id=job.request_id

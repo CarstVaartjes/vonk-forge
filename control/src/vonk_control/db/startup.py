@@ -8,7 +8,7 @@ from sqlalchemy.exc import (
     SQLAlchemyError,
 )
 
-from .connections import (
+from vonk_control.db.connections import (
     _CONTENTION_SQLSTATES,
     _database_sqlstate,
     _DatabaseStartupContention,
@@ -16,8 +16,8 @@ from .connections import (
     run_with_database_startup_retry,
     upgrade_schema,
 )
-from .constants import _ALEMBIC_CONFIG, _STARTUP_ADVISORY_LOCK
-from .schema import reconcile_schema
+from vonk_control.db.constants import _ALEMBIC_CONFIG, _STARTUP_ADVISORY_LOCK
+from vonk_control.db.schema import reconcile_schema
 
 
 def verify_schema_is_current(connection: Connection) -> None:

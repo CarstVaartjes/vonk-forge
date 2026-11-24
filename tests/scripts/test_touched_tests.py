@@ -36,7 +36,9 @@ def test_selection_follows_edits_imports_and_support_modules(tmp_path: Path) -> 
             "tests/test_in_package.py": "import vonk.pkg.inner\n",
         },
     )
-    chosen = lambda *paths: {p for _, p in select(list(paths), tmp_path)}
+
+    def chosen(*paths: str) -> set[str]:
+        return {p for _, p in select(list(paths), tmp_path)}
 
     assert chosen("control/tests/test_edited.py") == {"control/tests/test_edited.py"}
     assert chosen("control/src/vonk/engine.py") == {

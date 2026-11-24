@@ -9,13 +9,13 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import select
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-from ..auth import cursor_key
-from ..catalog.queries import active_head_revision
-from ..library.contract import (
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_control.auth import cursor_key
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.identifiers import _UUID_PATTERN
+from vonk_control.library.contract import (
     _MAX_PAGE_RECIPES,
-    _UUID_PATTERN,
     LibraryFilterValues,
     LibraryModelProjection,
     LibraryRecipeAuthoringDetail,
@@ -31,14 +31,9 @@ from ..library.contract import (
     model_actions,
     recipe_actions,
 )
-from ..model_cache.resolution import ResolutionMixin
-from ..model_cache.source_helpers import _model_selector
-from ..models.catalog import CatalogDocumentRevision
-from ..operator_receipt_contract import ReceiptOwner
-from ..request_fault import RequestFault
-from ..stored.states import CatalogRevisionState
-from .common import (
+from vonk_control.library_projection.common import (
     _LIBRARY_ORDER,
+    LibrarySelectorAmbiguous,
     _canonical_model,
     _canonical_recipe,
     _canonical_recipe_summary,
@@ -46,11 +41,17 @@ from .common import (
     _note_unreadable,
     _observed_library_page,
 )
+from vonk_control.model_cache.resolution import ResolutionMixin
+from vonk_control.model_cache.source_helpers import _model_selector
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.request_fault import RequestFault
+from vonk_control.stored.states import CatalogRevisionState
 
 _REVISION_ID = re.compile(_UUID_PATTERN)
 
 if TYPE_CHECKING:
-    from .service import LibraryProjection
+    from vonk_control.library_projection.service import LibraryProjection
 
 
 def models(
@@ -73,7 +74,7 @@ def models(
         raise RequestFault("model library limit is invalid")
     if sort not in {"updated", "name"}:
         raise RequestFault("model library sort is invalid")
-    model_rows, recipe_rows = self._documents_for_snapshot(None)
+    model_rows, recipe_rows = self._documents_for_snapshot()
     snapshot = (
         self._local_state_snapshot(
             [row.content_digest for row, _ in (*model_rows, *recipe_rows)]
@@ -270,7 +271,7 @@ def model_detail(self: LibraryProjection, selector: str) -> ModelDetailResponse:
         raise KeyError(selector)
     row, model = max(rows, key=lambda pair: pair[0].created_at)
     # Alignment comes from the derived catalog index, never a catalog read.
-    _, recipes = self._documents_for_snapshot(None)
+    _, recipes = self._documents_for_snapshot()
     texts = self._document_texts([row, *(recipe_row for recipe_row, _ in recipes)])
     alignment = self._alignment_by_model(recipes, texts).get(
         (model.identity.publisher, model.identity.slug), ()
@@ -317,7 +318,7 @@ def recipe_library(
     if sort not in {"updated", "name"}:
         raise RequestFault("recipe library sort is invalid")
     deadline = time.monotonic() + self._request_budget
-    model_rows, recipe_rows = self._documents_for_snapshot(None)
+    model_rows, recipe_rows = self._documents_for_snapshot()
     snapshot = (
         self._local_state_snapshot(
             [row.content_digest for row, _ in (*model_rows, *recipe_rows)]
@@ -574,8 +575,6 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
     if not exact:
         raise KeyError(selector)
     if len(exact) > 1:
-        from .common import LibrarySelectorAmbiguous
-
         raise LibrarySelectorAmbiguous(
             selector, [f"{row.publisher}/{row.slug}" for row in exact]
         )
@@ -589,7 +588,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         digests=model_digests,
         reader=_canonical_model,
     )
-    _, indexed_recipes = self._documents_for_snapshot(None)
+    _, indexed_recipes = self._documents_for_snapshot()
     recipe_rows = [
         (exact[0], exact_recipe),
         *[

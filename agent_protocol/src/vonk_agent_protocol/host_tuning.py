@@ -12,7 +12,11 @@ from typing import Annotated
 
 from pydantic import Field, model_validator
 
-from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireEnum, WireModel
+from vonk_agent_protocol.wire_model import (
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    WireEnum,
+    WireModel,
+)
 
 # Memory in bytes, at most telemetry's capacity bound (16 TiB).
 MemoryBytes = Annotated[int, Field(strict=True, ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)]

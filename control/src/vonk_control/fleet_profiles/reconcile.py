@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import case, func, select, true
+
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,
     ProfileChildSource,
     ProfileReasonSeverity,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,
@@ -22,57 +22,68 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
-
-from ..failure_classification import error_code, is_definite, is_security_failure
-from ..fleet_profile_contract.applications import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.failure_classification import (
+    error_code,
+    is_definite,
+    is_security_failure,
+)
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
     FleetProfileChildOperation,
 )
-from ..fleet_profile_contract.switch_state import FleetProfileStepResult
-from ..jobs import states as job_states
-from ..lifecycle.evidence import Residue
-from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..lifecycle.types import Effect as _LifecycleEffect
-from ..lifecycle.types import State as _LifecycleState
-from ..models.fleet import FleetProfileApplication
-from ..operations.blockers import (
-    PHASE_RETRY_CODE,
-    BlockingOperation,
-    OperationBlocker,
-    bound_blockers,
-    make_blocker,
+from vonk_control.fleet_profile_contract.switch_state import FleetProfileStepResult
+from vonk_control.fleet_profiles import states as fleet_profile_states
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
+from vonk_control.fleet_profiles.continuing_effects import (
+    _adopted_application_scope,
+    _application_is_current_selection,
+    _superseding_intent,
 )
-from ..persisted_waits import schedule_wait
-from ..recipe_operations.errors import RecipeOperationConflict
-from ..reservation_owners import release_dead_owner_reservations
-from ..run_switch_contract.phase_results import RunSwitchStopResult
-from ..strict_json import read_stored_model
-from . import states as fleet_profile_states
-from .contracts import (
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,
     FleetProfilePermissionDenied,
     FleetProfileReviewStale,
     _FleetProfileRecoveryBindingConflict,
 )
-from .dependencies import (
+from vonk_control.fleet_profiles.dependencies import (
     _CHILD_FAILED_STATES,
     _CHILD_PENDING_STATES,
 )
-from .error_summary import _normalized_failure_text
-from .persistence import (
+from vonk_control.fleet_profiles.error_summary import _normalized_failure_text
+from vonk_control.fleet_profiles.persistence import (
+    _intended_profile,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_progress,
 )
-from .projection_support import (
-    _aware,
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.lifecycle.fleet_profile import FleetProfileAdapter
+from vonk_control.lifecycle.types import Effect as _LifecycleEffect
+from vonk_control.lifecycle.types import State as _LifecycleState
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.operations.blockers import (
+    PHASE_RETRY_CODE,
+    BlockingOperation,
+    OperationBlocker,
+    bound_blockers,
+    make_blocker,
 )
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
+from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.run_switch_contract.phase_results import RunSwitchStopResult
+from vonk_control.strict_json import read_stored_model
 
 if TYPE_CHECKING:
-    from .service import FleetProfileService
-    from .service import FleetProfileService as _FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
+    from vonk_control.fleet_profiles.service import (
+        FleetProfileService as _FleetProfileService,
+    )
 
 
 class FleetProfileService:
@@ -150,7 +161,7 @@ class FleetProfileService:
                     )
                     if row is not None and self._lifecycle.retry_pending(row):
                         progress = _persisted_profile_progress(row)
-                        if self._superseding_intent(session, row, progress):
+                        if _superseding_intent(session, row, progress):
                             self._lifecycle.supersede(
                                 row,
                                 str(error),
@@ -237,7 +248,7 @@ class FleetProfileService:
                 return True
             progress = stored
             if progress.intended_profile is not None:
-                intended = self._intended_profile(row, session=session)
+                intended = _intended_profile(row, session=session)
                 if isinstance(intended, Residue):
                     self._defer_on_residue(row, progress, intended, now)
                     return True
@@ -258,14 +269,14 @@ class FleetProfileService:
                 # Defensive parity with the SQL exclusion above. Never let a
                 # malformed query or dialect quirk monopolize ordinary work.
                 return cancellation_observed
-            if not self._application_is_current_selection(
+            if not _application_is_current_selection(
                 session, row, progress
-            ) and not self._superseding_intent(session, row, progress):
+            ) and not _superseding_intent(session, row, progress):
                 self._defer_exact_step(
                     row, progress, "Selected intent observation is unavailable", now
                 )
                 return True
-            if not self._application_is_current_selection(session, row, progress):
+            if not _application_is_current_selection(session, row, progress):
                 self._lifecycle.supersede(
                     row,
                     "Profile order was replaced by a newer fleet profile load; "
@@ -276,7 +287,7 @@ class FleetProfileService:
                     session=session,
                 )
                 return True
-            if self._superseding_intent(session, row, progress):
+            if _superseding_intent(session, row, progress):
                 self._lifecycle.supersede(
                     row,
                     "Profile order was replaced by a changed profile or later "
@@ -499,9 +510,11 @@ class FleetProfileService:
                                     for child in document.children
                                     if child.queue_index == stop.queue_index
                                     and (
-                                        child.operation_id == stop.operation_id
-                                        or child.original_operation_id
-                                        == stop.operation_id
+                                        stop.operation_id
+                                        in (
+                                            child.operation_id,
+                                            child.original_operation_id,
+                                        )
                                     )
                                     and child.kind == ProfileChildPhase.STOP.value
                                 ),
@@ -529,7 +542,7 @@ class FleetProfileService:
                         if item.id in effect.assignment_ids
                     ]
                     owner_pending |= owner.state != LifecycleState.SUCCEEDED or any(
-                        self._assignment_state(
+                        _assignment_state(
                             session,
                             item,
                             expected_image=expected_images.get(item.id),
@@ -569,7 +582,7 @@ class FleetProfileService:
                     row.status_reason = "Waiting for exact continuing assignments to finish under the selected profile"
                     row.updated_at = now
                     return True
-                continuing_scope = self._adopted_application_scope(session, row)
+                continuing_scope = _adopted_application_scope(session, row)
                 self._lifecycle.succeed(row, now, reason=None, session=session)
                 progress = read_stored_model(
                     FleetProfileApplicationProgress,
@@ -662,7 +675,7 @@ class FleetProfileService:
                         error, FleetProfilePermissionDenied | UnknownOutcomeError
                     ):
                         failed_progress = _persisted_profile_progress(failed)
-                        if self._superseding_intent(session, failed, failed_progress):
+                        if _superseding_intent(session, failed, failed_progress):
                             self._lifecycle.supersede(
                                 failed,
                                 "A newer accepted intent owns the effects",

@@ -8,6 +8,7 @@ import pytest
 from psycopg.errors import DeadlockDetected, LockNotAvailable, UndefinedObject
 from sqlalchemy import Column, Index, Integer, MetaData, Table, create_engine
 from sqlalchemy.exc import DBAPIError
+
 from vonk_control.db import startup
 from vonk_control.db.connections import _DatabaseStartupContention
 from vonk_control.db.schema import reconcile_schema
@@ -65,18 +66,18 @@ def test_startup_retries_contention_instead_of_aborting(
 def test_every_schema_repair_catch_calls_the_contention_helper() -> None:
     uncovered = []
     for path in sorted(DB.glob("schema*.py")):
-        for node in ast.walk(ast.parse(path.read_text())):
-            if (
-                isinstance(node, ast.ExceptHandler)
-                and isinstance(node.type, ast.Name)
-                and node.type.id == "SQLAlchemyError"
-                and not any(
-                    isinstance(call, ast.Call)
-                    and isinstance(call.func, ast.Name)
-                    and call.func.id == "_reraise_contention"
-                    for statement in node.body
-                    for call in ast.walk(statement)
-                )
-            ):
-                uncovered.append(f"{path.name}:{node.lineno}")
+        uncovered.extend(
+            f"{path.name}:{node.lineno}"
+            for node in ast.walk(ast.parse(path.read_text()))
+            if isinstance(node, ast.ExceptHandler)
+            and isinstance(node.type, ast.Name)
+            and node.type.id == "SQLAlchemyError"
+            and not any(
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Name)
+                and call.func.id == "_reraise_contention"
+                for statement in node.body
+                for call in ast.walk(statement)
+            )
+        )
     assert not uncovered

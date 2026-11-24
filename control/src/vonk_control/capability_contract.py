@@ -7,8 +7,7 @@ from vonk_agent_protocol.capability_reply import (
     CapabilityReason,
     ControllerCapability,
 )
-
-from .strict_json import StrictModel
+from vonk_control.strict_json import StrictModel
 
 
 class CapabilityAvailability(StrEnum):

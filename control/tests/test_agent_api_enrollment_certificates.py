@@ -8,22 +8,30 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, timedelta
 from pathlib import Path
+from typing import SupportsIndex, overload
 
 import pytest
 from sqlalchemy import select
 from starlette.types import Message
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.agent_api.authority import RESULT_REFUSALS
 from vonk_control.agent_api.common import (
     AgentApiServices,
     EnrollmentRateLimiter,
 )
 from vonk_control.api.application import create_app
 from vonk_control.enrollment.body import _bounded_enrollment_body
-from vonk_control.models.fleet import AgentCertificate
+from vonk_control.enrollment.validation import _decode_token, _digest
+from vonk_control.evidence_repeats import repeating_evidence
+from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.models.fleet import AgentCertificate, AgentEnrollmentGrant
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recovery_policy import RECOVERY
 
 from .agent_api_support import (
     NODE_A,
@@ -39,7 +47,7 @@ from .agent_api_support import (
     valid_enrollment_body,
 )
 from .agent_fences import fenced_attempt, fenced_operation
-from .agent_jobs_support import canonical_start_payload
+from .agent_jobs_support import canonical_start_payload, distribution_payload
 
 
 class ChunkedEnrollmentRequest:
@@ -59,11 +67,17 @@ class CopyBoundedChunk(bytes):
         instance.largest_slice = 0
         return instance
 
-    def __getitem__(self, key):
+    @overload
+    def __getitem__(self, key: SupportsIndex, /) -> int: ...
+
+    @overload
+    def __getitem__(self, key: slice, /) -> bytes: ...
+
+    def __getitem__(self, key: SupportsIndex | slice, /) -> int | bytes:
         if isinstance(key, slice):
             start = key.start or 0
             stop = len(self) if key.stop is None else key.stop
-            self.largest_slice = max(self.largest_slice, max(0, stop - start))
+            self.largest_slice = max(self.largest_slice, 0, stop - start)
         return super().__getitem__(key)
 
     def __radd__(self, _other):
@@ -71,8 +85,6 @@ class CopyBoundedChunk(bytes):
 
 
 def assert_grant_available(services: AgentApiServices, token: str) -> None:
-    from vonk_control.enrollment.validation import _decode_token, _digest
-    from vonk_control.models.fleet import AgentEnrollmentGrant
 
     assert services.enrollment is not None
     with services.enrollment._sessions() as session:
@@ -81,12 +93,11 @@ def assert_grant_available(services: AgentApiServices, token: str) -> None:
                 AgentEnrollmentGrant.token_digest == _digest(_decode_token(token))
             )
         )
-        assert grant is not None and grant.consumed_at is None
+        assert grant is not None
+        assert grant.consumed_at is None
 
 
 def assert_grant_unconsumed(services: AgentApiServices, token: str) -> None:
-    from vonk_control.enrollment.validation import _decode_token, _digest
-    from vonk_control.models.fleet import AgentEnrollmentGrant
 
     with services.sessions() as session:
         grant = session.scalar(
@@ -174,8 +185,12 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
     with services.sessions() as session:
         old = session.get(AgentCertificate, "101")
         new = session.get(AgentCertificate, issued["serial"])
-        assert old is not None and old.state == "revoked" and old.revoked_at is not None
-        assert new is not None and new.state == "active" and new.revoked_at is None
+        assert old is not None
+        assert old.state == "revoked"
+        assert old.revoked_at is not None
+        assert new is not None
+        assert new.state == "active"
+        assert new.revoked_at is None
 
 
 @pytest.mark.parametrize("with_diagnostics", [False, True])
@@ -203,9 +218,6 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         },
     }
     if with_diagnostics:
-        import json
-        from pathlib import Path
-
         fixture = (
             Path(__file__).parents[2]
             / "agent_protocol/src/vonk_agent_protocol/vectors/failure-diagnostics-v1.json"
@@ -231,20 +243,18 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         assert attempt.result["status"] == "failed"
         assert attempt.result["error_code"] == result["result"]["error_code"]
         if with_diagnostics:
-            from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-
             typed = FailureDiagnostics.model_validate(attempt.result["diagnostics"])
             assert "/proc: permission denied" in typed.stderr.text
             assert "should-never-persist" not in typed.model_dump_json()
-        assert parent_job is not None and parent_job.state == LifecycleState.QUEUED
+        assert parent_job is not None
+        assert parent_job.state == LifecycleState.QUEUED
         assert parent_job.status_reason is not None
         assert parent_job.status_reason.startswith(attempt.result["error_code"])
         operation = session.get(AgentOperation, attempt.operation_id)
-        assert operation is not None and operation.next_action_at is not None
+        assert operation is not None
+        assert operation.next_action_at is not None
         clock.now = operation.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     if with_diagnostics:
-        from vonk_control.failure_evidence import FailureEvidenceService
-
         evidence = FailureEvidenceService(services.sessions, clock=clock)
         fenced = fenced_attempt(services.sessions, claim["fence"])
         bundle = evidence.read(fenced.operation_id, fenced.attempt)
@@ -310,10 +320,6 @@ def test_a_result_refused_on_every_delivery_is_shown_until_one_is_accepted(
 ) -> None:
     """Catches a Spark whose every result is refused before the route runs, unseen."""
 
-    from vonk_control.agent_api.authority import RESULT_REFUSALS
-    from vonk_control.evidence_repeats import repeating_evidence
-    from vonk_control.recovery_policy import RECOVERY
-
     client, services, _, clock = agent_system
     services.operations.enqueue(
         parent(services.sessions, clock).id,
@@ -343,7 +349,8 @@ def test_a_result_refused_on_every_delivery_is_shown_until_one_is_accepted(
         )
         assert response.status_code == 422
     (warning,) = shown()
-    assert RESULT_REFUSALS in warning and "controller.invalid_request" in warning
+    assert RESULT_REFUSALS in warning
+    assert "controller.invalid_request" in warning
     # Weeks later the same record is old news and is no longer shown.
     assert shown(timedelta(days=14)) == ()
 
@@ -357,7 +364,7 @@ def test_a_result_refused_on_every_delivery_is_shown_until_one_is_accepted(
 
 @pytest.mark.parametrize(
     ("failure", "expected_status"),
-    (
+    [
         # The accepted boundary is the longest stable code the shared rule
         # allows; a shorter conventional code is the same path.
         ({"status": "failed", "error_code": "a" * 64}, 204),
@@ -369,7 +376,7 @@ def test_a_result_refused_on_every_delivery_is_shown_until_one_is_accepted(
         # A failed envelope that omits its failed status cannot identify the
         # failure and is refused by the same contextual rule.
         ({"error_code": "stop_failed"}, 422),
-    ),
+    ],
 )
 def test_failed_result_error_code_obeys_the_shared_contract_rule(
     agent_system, failure, expected_status
@@ -431,7 +438,8 @@ def test_invalid_failed_results_preserve_the_attempt_and_valid_completion_allows
     with services.sessions() as session:
         attempt = fenced_attempt(services.sessions, claim["fence"])
         stored = session.get(AgentOperationAttempt, attempt.id)
-        assert stored is not None and stored.result is None
+        assert stored is not None
+        assert stored.result is None
         assert stored.state == LifecycleState.RUNNING
     completed = client.post(
         "/agent/result",
@@ -526,8 +534,6 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
     both acceptance and the preserved receipt.
     """
 
-    from .agent_jobs_support import distribution_payload
-
     client, services, _, clock = agent_system
     services.operations.enqueue(
         parent(services.sessions, clock).id,
@@ -608,14 +614,15 @@ def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> 
         fenced = fenced_operation(services.sessions, claim["fence"])
         operation = session.get(AgentOperation, fenced.id)
         job = session.get(Job, fenced.parent_job_id)
-        assert operation is not None and operation.status_reason is not None
-        assert job is not None and "installed_bytes" in (job.status_reason or "")
+        assert operation is not None
+        assert operation.status_reason is not None
+        assert job is not None
+        assert "installed_bytes" in (job.status_reason or "")
         # The same bytes are refused on every delivery: the attempt is settled
         # failed with the refusal as its evidence, never left to lapse into a
         # reissue of the same work.
         assert operation.state == LifecycleState.FAILED
         assert operation.next_action_at is None
-    from vonk_control.failure_evidence import FailureEvidenceService
 
     attempt = fenced_attempt(services.sessions, claim["fence"])
     bundle = FailureEvidenceService(services.sessions, clock=clock).read(
@@ -645,7 +652,8 @@ def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> 
         operation = session.get(
             AgentOperation, fenced_operation(services.sessions, claim["fence"]).id
         )
-        assert operation is not None and operation.status_reason is not None
+        assert operation is not None
+        assert operation.status_reason is not None
 
 
 def test_a_concluded_operation_never_acquires_a_boundary_refusal_note(
@@ -679,8 +687,10 @@ def test_a_concluded_operation_never_acquires_a_boundary_refusal_note(
     with services.sessions() as session:
         concluded = session.get(AgentOperation, operation.id)
         succeeded = session.get(Job, job.id)
-        assert concluded is not None and concluded.state == "succeeded"
-        assert succeeded is not None and succeeded.state == "succeeded"
+        assert concluded is not None
+        assert concluded.state == "succeeded"
+        assert succeeded is not None
+        assert succeeded.state == "succeeded"
 
     stale = client.post(
         "/agent/heartbeat",
@@ -691,8 +701,10 @@ def test_a_concluded_operation_never_acquires_a_boundary_refusal_note(
     with services.sessions() as session:
         concluded = session.get(AgentOperation, operation.id)
         succeeded = session.get(Job, job.id)
-        assert concluded is not None and concluded.state == "succeeded"
-        assert succeeded is not None and succeeded.state == "succeeded"
+        assert concluded is not None
+        assert concluded.state == "succeeded"
+        assert succeeded is not None
+        assert succeeded.state == "succeeded"
         # The parent job is the owner surface the operator reads; it must not
         # carry a refusal for work that already reached its outcome.
         assert succeeded.status_reason is None
@@ -745,9 +757,11 @@ def test_a_concluded_orders_refused_result_never_annotates_its_waiting_parent(
         settled = session.get(
             AgentOperation, fenced_operation(services.sessions, claim["fence"]).id
         )
-        assert waiting is not None and waiting.state not in {"succeeded", "failed"}
+        assert waiting is not None
+        assert waiting.state not in {"succeeded", "failed"}
         assert "refused" not in (waiting.status_reason or "")
-        assert settled is not None and settled.state == "succeeded"
+        assert settled is not None
+        assert settled.state == "succeeded"
     # The evidence stays: the order's own accepted outcome, and the refusal
     # in the Controller's one line per refused agent request.
     assert fenced_attempt(services.sessions, claim["fence"]).state == "succeeded"
@@ -793,8 +807,6 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
 def test_recipe_job_failure_uses_its_typed_exit_result_at_authenticated_ingress(
     agent_system,
 ):
-    import json
-    from pathlib import Path
 
     client, services, _, clock = agent_system
     vectors = (
@@ -1024,7 +1036,7 @@ def test_oversized_enrollment_preserves_split_discovery_prefix(agent_system) -> 
     request = ChunkedEnrollmentRequest(first, second, b"must-not-be-received")
 
     with pytest.raises(Exception):  # noqa: B017 -- ending witness; bounded body and corrected grant below
-        asyncio.run(_bounded_enrollment_body(request, services))  # type: ignore[arg-type]
+        asyncio.run(_bounded_enrollment_body(request))  # type: ignore[arg-type]
 
     assert request.received == 2
     assert_corrected_enrollment_succeeds(services, token)
@@ -1044,7 +1056,7 @@ def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
     request = ChunkedEnrollmentRequest(huge, b"must-not-be-received")
 
     with pytest.raises(Exception):  # noqa: B017 -- ending witness; bounded body and corrected grant below
-        asyncio.run(_bounded_enrollment_body(request, services))  # type: ignore[arg-type]
+        asyncio.run(_bounded_enrollment_body(request))  # type: ignore[arg-type]
 
     assert request.received == 1
     assert huge.largest_slice <= 2048
@@ -1053,7 +1065,7 @@ def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
 
 @pytest.mark.parametrize(
     "raw",
-    (b"[1]", b"[]", b'"scalar"', b"0", b"true", b"false", b"null"),
+    [b"[1]", b"[]", b'"scalar"', b"0", b"true", b"false", b"null"],
     ids=("array", "empty-array", "string", "number", "true", "false", "null"),
 )
 @pytest.mark.usefixtures("damaged_json_rows")

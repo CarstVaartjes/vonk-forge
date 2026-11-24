@@ -16,7 +16,7 @@ import httpx2
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import SchemaError, ValidationError, best_match
 
-from .errors import (
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlMalformedResponse,
     ControlSchemaRejected,

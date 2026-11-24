@@ -7,6 +7,15 @@ from copy import deepcopy
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256
+
+from cluster_profiles.cli_render.dispatch import render_payload
+from tests.fleet_projection_support import (
+    NODE_A,
+    NOW,
+    _canonical_catalog_documents,
+    _certificate,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_control.fleet_profile_contract.definitions import (
@@ -30,14 +39,6 @@ from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.recipe_update_batches.notice import (
     newest_active_revisions,
     recipe_update_notice,
-)
-from vonk_forge_contracts import document_sha256
-
-from tests.fleet_projection_support import (
-    NODE_A,
-    NOW,
-    _canonical_catalog_documents,
-    _certificate,
 )
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
@@ -358,12 +359,13 @@ def test_profile_assignment_says_when_it_runs_an_older_revision() -> None:
         not_loaded = FleetProfileService._loaded_recipe_update(
             session, None, recipe, newest, [NODE_A]
         )
-    assert older is not None and older.newest_revision_id == REVISION_2
-    assert current is None and not_loaded is None
+    assert older is not None
+    assert older.newest_revision_id == REVISION_2
+    assert current is None
+    assert not_loaded is None
 
 
 def test_fleet_output_shows_the_update_as_information_not_attention(capsys) -> None:
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     sessions = _sessions()
     _seed(sessions, running=REVISION_1)

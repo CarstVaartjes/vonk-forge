@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import ProfileOperationKind
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import (

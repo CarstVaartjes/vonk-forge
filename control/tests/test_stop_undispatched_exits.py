@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import pytest
 from sqlalchemy.exc import OperationalError
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.admission_locking import PATIENT_AFTER_RETRIES, AdmissionLockBusy
@@ -101,7 +102,9 @@ class _Service(StopMixin):
         self._lookups += 1
         return self._replay if self._lookups > 1 else None
 
-    def _service_stop_pending(self, *_args):
+    def _service_stop_pending(
+        self, request_id, profile_target_node_ids, profile_application_id
+    ):
         return False
 
     def _stop_logical_job_run(self, *_args, **_kwargs):
@@ -110,7 +113,8 @@ class _Service(StopMixin):
     def _accept_service_stop(self, *args, **kwargs):
         return self._accept(*args, **kwargs)
 
-    def _check_service_stop(self, *_args):
+    # Never reached on these paths; a review here would fail the test.
+    def _check_service_stop(self, session, job):  # pyright: ignore[reportIncompatibleMethodOverride]
         return None
 
     def _dispatch_stop_after_withdrawal(self, *_args, **_kwargs):
@@ -292,4 +296,5 @@ def test_one_shot_deadlock_inside_the_transaction_is_retried_then_admitted(
         "run-1", plan_digest="digest", actor="admin", request_id="request-1"
     )
     assert view.id == "stop-1"
-    assert len(refusals) == 1 and refusals[0].__cause__ is deadlock
+    assert len(refusals) == 1
+    assert refusals[0].__cause__ is deadlock

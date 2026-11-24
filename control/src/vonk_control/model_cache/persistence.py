@@ -9,6 +9,7 @@ from typing import cast
 
 from pydantic import ValidationError
 from sqlalchemy.orm import object_session
+
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.reason_codes.model_cache import (
@@ -16,24 +17,22 @@ from vonk_agent_protocol.reason_codes.model_cache import (
     ModelCacheCode,
     ModelCacheFailureCode,
 )
-
-from ..lifecycle.evidence import (
+from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..lifecycle.types import State
-from ..logging import redact_text
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
-from ..operations.contract import AvailabilityOperationFailure
-from ..stored.json_values import read_row_column
-from ..strict_json import read_stored_model, serialize_json_value
-from .artifacts import ArtifactSetManifest, _sha256_json
-from .constants import _CREDENTIAL_FAILURE_PUBLIC_CODES, _LOGGER, SCHEMA_VERSION
-from .contract import (
+from vonk_control.lifecycle.types import State
+from vonk_control.logging import redact_text
+from vonk_control.model_cache.artifacts import ArtifactSetManifest, _sha256_json
+from vonk_control.model_cache.constants import (
+    _CREDENTIAL_FAILURE_PUBLIC_CODES,
+    _LOGGER,
+    SCHEMA_VERSION,
+)
+from vonk_control.model_cache.contract import (
     ModelCacheCancellation,
     ModelCacheCounters,
     ModelCacheDownloadPayload,
@@ -48,8 +47,20 @@ from .contract import (
     parse_model_cache_payload,
     parse_model_cache_result,
 )
-from .errors import ModelCacheResolutionError, ModelCacheStorageInvalid
-from .progress import cache_progress
+from vonk_control.model_cache.errors import (
+    ModelCacheResolutionError,
+    ModelCacheStorageInvalid,
+)
+from vonk_control.model_cache.progress import cache_progress
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.operations.blockers import (
+    OperationBlocker,
+    bound_blockers,
+    make_blocker,
+)
+from vonk_control.operations.contract import AvailabilityOperationFailure
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 
 def _model_removal_intent_digest(
@@ -155,7 +166,7 @@ def _rebuild_operation_payload(
     # Only the repair boundary inspects a damaged raw copy, after the canonical
     # column reader has reported it. The repaired candidate is validated below.
     raw = operation.payload
-    if not isinstance(raw, Mapping):
+    if not isinstance(raw, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         return None
     candidate = dict(raw)
     if not isinstance(candidate.get("retry"), Mapping):

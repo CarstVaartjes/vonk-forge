@@ -32,42 +32,59 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from sqlalchemy import Text, cast, exists, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 from sqlalchemy.sql.elements import ColumnElement
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     InstallationNodeState,
     InstallationState,
 )
-
-from . import agent_operation_states
-from .agent_contacts import last_seen
-from .fleet_profile_contract.applications import FleetProfileApplicationProgress
-from .fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
-from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW
-from .jobs import states as job_states
-from .model_cache import states as model_cache_states
-from .models.cache import ModelCacheOperation, RecipeBuild, RecipeLibrarySyncRun
-from .models.execution import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import agent_operation_states
+from vonk_control.agent_contacts import last_seen
+from vonk_control.agent_operation_facts import (
+    AGENT_ORDER_RECOVERY_BUDGET,
+    attempt_holds_order,
+    aware,
+    fencing_intent,
+    job_run_bound,
+)
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
+from vonk_control.fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
+from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
+from vonk_control.jobs import states as job_states
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.models.cache import (
+    ModelCacheOperation,
+    RecipeBuild,
+    RecipeLibrarySyncRun,
+)
+from vonk_control.models.execution import (
     STOPPABLE_RUN_STATES,
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
-from .models.fleet import (
+from vonk_control.models.fleet import (
     AgentCertificateRotation,
     AgentEnrollment,
     AgentNode,
     FleetProfileApplication,
 )
-from .models.jobs import Job
-from .models.operations import AgentOperation, AgentOperationAttempt
-from .stored.states import LibrarySyncRunState, RecipeBuildState
-from .strict_json import read_stored_model
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.stall_window import progress_deadline
+from vonk_control.stored.rows import read_row_column
+from vonk_control.stored.states import LibrarySyncRunState, RecipeBuildState
+from vonk_control.strict_json import read_stored_model
 
 #: A Job in one of these has ended; nothing it owns can still be used by it.
 JOB_ENDED_STATES = job_states.words(
@@ -180,7 +197,7 @@ def owner(session: Session, ref: OwnerRef, now: datetime | None = None) -> Owner
         return arm(session, ref, now)
 
 
-def _fleet_profile(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+def _fleet_profile(session: Session, ref: OwnerRef, _now: datetime | None) -> Owner:
     application = session.get(FleetProfileApplication, ref.id)
     if application is None:
         return Owner(ref, False, "profile application is missing", state="missing")
@@ -194,7 +211,7 @@ def _fleet_profile(session: Session, ref: OwnerRef, now: datetime | None) -> Own
     )
 
 
-def _node(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+def _node(session: Session, ref: OwnerRef, _now: datetime | None) -> Owner:
     node = session.get(AgentNode, ref.id)
     if node is None:
         return Owner(ref, False, "Spark is not enrolled", state="missing")
@@ -227,7 +244,7 @@ def _spark_return(session: Session, ref: OwnerRef, now: datetime | None) -> Owne
     )
 
 
-def _job(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+def _job(session: Session, ref: OwnerRef, _now: datetime | None) -> Owner:
     job = session.get(Job, ref.id)
     if job is None:
         return Owner(ref, False, "operation is missing", state="missing")
@@ -241,7 +258,7 @@ def _job(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
     )
 
 
-def _run(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+def _run(session: Session, ref: OwnerRef, _now: datetime | None) -> Owner:
     run = session.get(RecipeRun, ref.id)
     if run is None:
         return Owner(ref, False, "run is missing", state="missing")
@@ -377,7 +394,6 @@ def build_holds_disk(
 
 
 def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
-    from .agent_operation_facts import attempt_holds_order
 
     operation = session.get(AgentOperation, ref.id)
     if operation is None:
@@ -391,7 +407,6 @@ def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Own
     if now is None:
         return Owner(ref, True, "attempt is not judged", state=operation.state)
     node = session.get(AgentNode, operation.node_id)
-    from .agent_jobs.contracts import fencing_intent
 
     intent = fencing_intent(operation)
     superseded = (
@@ -408,7 +423,7 @@ def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Own
     )
 
 
-def _cache_operation(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+def _cache_operation(session: Session, ref: OwnerRef, _now: datetime | None) -> Owner:
     operation = session.get(ModelCacheOperation, ref.id)
     if operation is None:
         return Owner(ref, False, "model cache operation is missing", state="missing")
@@ -745,3 +760,36 @@ def _settled(since: datetime | None, now: datetime | None, window: timedelta) ->
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def order_recovery_deadline(
+    operation: StoredOperation, now: datetime
+) -> datetime | None:
+    """The order's recovery deadline: never reached while its Spark is away.
+
+    An order waiting for its Spark to come back waits on a live owner (an
+    enrolled Spark may return); the window then runs a whole budget from
+    ``now``. On a present Spark, an order that does not advance has stalled.
+    """
+
+    if operation.recovery_deadline is None:
+        return None
+    stored = aware(operation.recovery_deadline)
+    if operation.kind == WireAgentOperation.RECIPE_JOB_RUN.value:
+        payload = read_row_column(operation, "payload")
+        if isinstance(payload, RecipeJobRunRequest) and payload.output_delivery_only:
+            # Exited output bytes expire even while their Spark is offline.
+            return stored
+    session = object_session(operation)
+    if session is None:
+        return stored
+    window = progress_deadline(
+        started_at=stored - AGENT_ORDER_RECOVERY_BUDGET,
+        progressed_at=None,
+        window=AGENT_ORDER_RECOVERY_BUDGET,
+        now=now,
+        waiting_on=owner(
+            session, OwnerRef(OwnerKind.SPARK_RETURN, operation.node_id), now
+        ),
+    )
+    return max(stored, window, job_run_bound(session, operation) or stored)

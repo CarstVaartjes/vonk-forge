@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from enum import Enum
 from typing import TextIO
 
-from .progress import live_lines, phase_key, progress_line
+from cluster_profiles.cli_render.progress import live_lines, phase_key, progress_line
 
 #: A pipe or log gets a line when the phase changes and at most this often.
 PLAIN_INTERVAL_SECONDS = 30.0

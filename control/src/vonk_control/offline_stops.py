@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models.jobs import Job
-from .models.operations import AgentOperation
+from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
+from vonk_control.jobs.documents import RecipeStopParent
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.strict_json import read_stored_model
 
 
 def deferred_stop_nodes(job: Job) -> frozenset[str]:
-    # Imported here because the canonical job contracts reach the queue adapters.
-    from .fleet_profiles.stop_authority import ProfileJobRunStopJob
-    from .jobs.documents import RecipeStopParent
-    from .strict_json import read_stored_model
-
     if job.kind != "recipe.stop":
         return frozenset()
     try:
@@ -36,9 +35,6 @@ def is_deferred_stop(job: Job | None, operation: AgentOperation) -> bool:
     digests of the Controller's own rows never decide it. Authentication and
     attempt fences remain enforced by the normal claim and result paths.
     """
-    from .fleet_profiles.stop_authority import ProfileJobRunStopJob
-    from .jobs.documents import RecipeStopParent
-    from .strict_json import read_stored_model
 
     if (
         job is None
@@ -60,7 +56,6 @@ def is_deferred_stop(job: Job | None, operation: AgentOperation) -> bool:
 
 
 def pending_run_stop_nodes(session: Session, run_id: str) -> frozenset[str]:
-    from sqlalchemy import select
 
     return frozenset(
         node_id

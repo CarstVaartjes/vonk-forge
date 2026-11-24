@@ -9,10 +9,11 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
-from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
+from vonk_agent_protocol.job_inputs import RecipeJobInputManifest, RecipeJobInputRequest
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -24,51 +25,15 @@ from vonk_agent_protocol.job_limits import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-from vonk_agent_protocol.recipe_jobs import (
-    RecipeJobInputRequest,
-    RecipeJobOutputLimits,
-    RecipeJobRunRequest,
-)
+from vonk_agent_protocol.recipe_jobs import RecipeJobOutputLimits, RecipeJobRunRequest
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.state_machines import InstallationState, RunState
-
-from .. import agent_operation_states as aos
-from ..admission_locking import ConstraintReplay, admitting
-from ..bounded_retry import bounded_attempts
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..cluster_mappings import mapping_option_choices
-from ..compiled_artifact_contract import ParameterScalar
-from ..execution_plan_service import compile_job_invocation
-from ..identity_insert import insert_identity
-from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.evidence import Damaged, Residue
-from ..lifecycle.types import CancelRequested, Outcome
-from ..logging import log_event
-from ..models.cache import RecipeBuild
-from ..models.execution import (
-    ArtifactJob,
-    ArtifactJobBlob,
-    ArtifactJobFile,
-    RecipeInstallation,
-    RecipeRun,
-)
-from ..models.jobs import Job
-from ..models.mapping import ClusterMapping
-from ..models.operations import AgentOperation
-from ..recipe_operations.errors import RecipeOperationConflict, RecipeRetryLater
-from ..recipe_operations.execution_contract import RecipeExecutionContractError
-from ..recipe_operations.observation_helpers import run_takes_jobs
-from ..recipe_operations.runtime_specs import recipe_engine
-from ..recipe_operations.start_payloads import (
-    RecipeStartPlacement,
-    bind_compiled_execution_plan,
-    start_peer_addresses,
-)
-from . import states as ajs
-from .contracts import (
+from vonk_control import agent_operation_states as aos
+from vonk_control.admission_locking import ConstraintReplay, admitting
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.contracts import (
     ArtifactJobCapabilitiesResponse,
     ArtifactJobError,
     ArtifactJobInvalid,
@@ -89,9 +54,54 @@ from .contracts import (
     _recipe_interface,
     _validate_inputs_against_contract,
 )
-from .evidence import ArtifactJobResultEvidence, read_result_evidence
-from .job_contract import ArtifactJobContractResponse, read_job_contract
-from .outputs import ArtifactJobService as OutputService
+from vonk_control.artifact_jobs.evidence import (
+    ArtifactJobResultEvidence,
+    read_result_evidence,
+)
+from vonk_control.artifact_jobs.job_contract import (
+    ArtifactJobContractResponse,
+    read_job_contract,
+)
+from vonk_control.artifact_jobs.outputs import ArtifactJobService as OutputService
+from vonk_control.bounded_retry import bounded_attempts
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.cluster_mappings import mapping_option_choices
+from vonk_control.compiled_artifact_contract import ParameterScalar
+from vonk_control.execution_plan_service import compile_job_invocation
+from vonk_control.identity_insert import insert_identity
+from vonk_control.lifecycle.agent_operation import (
+    AgentOperationAdapter,
+    set_parent_state,
+)
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.lifecycle.evidence import Damaged, Residue
+from vonk_control.lifecycle.types import CancelRequested, Outcome
+from vonk_control.logging import log_event
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
+    ArtifactJob,
+    ArtifactJobBlob,
+    ArtifactJobFile,
+    RecipeInstallation,
+    RecipeRun,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.errors import (
+    RecipeOperationConflict,
+    RecipeRetryLater,
+)
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+)
+from vonk_control.recipe_operations.observation_helpers import run_takes_jobs
+from vonk_control.recipe_operations.runtime_specs import recipe_engine
+from vonk_control.recipe_operations.start_payloads import (
+    RecipeStartPlacement,
+    bind_compiled_execution_plan,
+    start_peer_addresses,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -317,7 +327,7 @@ class ArtifactJobService(OutputService):
             select(ArtifactJob).where(ArtifactJob.request_id == request_id)
         )
         run = session.get(RecipeRun, run_id)
-        if run is None or existing is None and run.state != RunState.RUNNING:
+        if run is None or (existing is None and run.state != RunState.RUNNING):
             raise ArtifactJobUnavailableError(
                 "recipe run observation is unavailable",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
@@ -656,11 +666,7 @@ class ArtifactJobService(OutputService):
             first = launches[0]
             assert first is not None
             contract = first.contract
-            mapping = (
-                session.get(ClusterMapping, run.mapping_id)
-                if run.mapping_id is not None
-                else None
-            )
+            mapping = session.get(ClusterMapping, run.mapping_id)
             limits = self._stored_output_limits(session, artifact_job, repair=True)
             if isinstance(limits, Residue):
                 raise ArtifactJobUnavailableError(
@@ -847,8 +853,7 @@ class ArtifactJobService(OutputService):
                     reason=InvalidRequestReason.CONFLICT,
                 )
             if (
-                evidence is not None
-                and evidence.cancel_request_id == request_id
+                evidence.cancel_request_id == request_id
                 and evidence.cancel_actor == actor
                 and evidence.cancel_reason == cancellation_reason
             ):

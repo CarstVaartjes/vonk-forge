@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +15,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, QueuePool
+
 from vonk_control.db import startup as startup_owner
 from vonk_control.db.connections import run_with_database_startup_retry
 from vonk_control.db.constants import _STARTUP_ADVISORY_LOCK
@@ -120,7 +121,8 @@ def startup_database(legacy_engine: Engine) -> StartupDatabase:
         command.stamp(config, "head")
         assert len(ordinary_migration_pids) == 1
         assert len(connection_timeouts) == 1
-        assert len(ordinary_engines) == 1 and ordinary_disposed == ordinary_engines
+        assert len(ordinary_engines) == 1
+        assert ordinary_disposed == ordinary_engines
     finally:
         event.remove(Engine, "before_cursor_execute", before_migration_sql)
         event.remove(Engine, "do_connect", before_connect)
@@ -173,7 +175,7 @@ class Attempts:
 
 
 @contextmanager
-def watch_native_attempts() -> Iterator[Attempts]:
+def watch_native_attempts() -> Generator[Attempts]:
     attempts = Attempts()
     captured_connections: set[Connection] = set()
 
@@ -314,7 +316,8 @@ def test_initialize_database_same_call_releases_old_attempt_before_owner_clears(
         try:
             # Exactly one public entry call must finish migration and adoption.
             initialize_database(database.url, config_path=CONFIG)
-            assert len(waits) == 1 and len(attempts.pids) == 2
+            assert len(waits) == 1
+            assert len(attempts.pids) == 2
             assert attempts.disposed == set(attempts.pids)
         finally:
             blocker.rollback()
@@ -353,7 +356,8 @@ def test_initialize_database_busy_owner_exhausts_one_fixed_deadline_without_muta
         try:
             with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
                 initialize_database(database.url, config_path=CONFIG)
-            assert waits and sum(waits) <= 0.3
+            assert waits
+            assert sum(waits) <= 0.3
             # One fixed 0.3 s deadline; a renewed one never ends.
             assert 0.3 <= time.monotonic() - started < 10
             assert attempts.disposed == set(attempts.pids)
@@ -466,7 +470,8 @@ def test_initialize_database_bad_handshake_is_bounded_and_names_the_refusal_with
             assert engine.pool.checkedout() == 0
 
     def bounded_refusal(wait: float) -> None:
-        assert failed and not connected
+        assert failed
+        assert not connected
         assert all(engine.url == bad_url for engine in failed)
         waits.append(wait)
         time.sleep(wait)
@@ -481,7 +486,9 @@ def test_initialize_database_bad_handshake_is_bounded_and_names_the_refusal_with
                 bad_url.render_as_string(hide_password=False), config_path=CONFIG
             )
         assert getattr(failure.value.orig, "sqlstate", None) is None
-        assert failed and waits and not connected
+        assert failed
+        assert waits
+        assert not connected
         assert all(engine.url == bad_url for engine in failed)
         assert sum(waits) <= 0.3
         # One fixed 0.3 s deadline; a renewed one never ends.
@@ -492,7 +499,8 @@ def test_initialize_database_bad_handshake_is_bounded_and_names_the_refusal_with
     diagnostics = capsys.readouterr().err
     assert "password authentication failed" in diagnostics
     assert "deadline expired" in diagnostics
-    assert "credentials unchanged" in diagnostics and bad_password not in diagnostics
+    assert "credentials unchanged" in diagnostics
+    assert bad_password not in diagnostics
     assert _schema(database.engine) == before
     with database.engine.connect() as connection:
         assert (

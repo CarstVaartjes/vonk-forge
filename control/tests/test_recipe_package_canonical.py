@@ -13,9 +13,13 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
+from scripts.canary_package import canary_package_path
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog.service import CatalogService
@@ -31,10 +35,6 @@ from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_packages.contracts import RecipePackageError
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_control.source_policy import inspect_build_source_policy
-
-from scripts.canary_package import canary_package_path
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .display_fixtures import publish_displays, reword
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
@@ -86,7 +86,8 @@ def test_candidate_package_decodes_and_restart_reuses_the_cached_package(
     client.prepare(snapshot)
     item = client.fetch(snapshot.items[0].uri)
     assert item.document["kind"] == "recipe"
-    assert item.dependencies and item.dependencies[0]["kind"] == "model"
+    assert item.dependencies
+    assert item.dependencies[0]["kind"] == "model"
     client.close()
 
     release.requests.clear()
@@ -235,13 +236,13 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
 
 @pytest.mark.parametrize(
     "source_path",
-    (
+    [
         "../recipe.json",
         "/recipes/recipe.json",
         "recipes\\recipe.json",
         "recipes/\x00recipe.json",
         "recipes//recipe.json",
-    ),
+    ],
 )
 def test_candidate_package_skips_unsafe_source_path(
     tmp_path: Path, source_path: str

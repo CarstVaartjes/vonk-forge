@@ -5,22 +5,34 @@ import math
 import uuid
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.telemetry import TelemetrySample
-from vonk_agent_protocol.wire_model import MAX_TELEMETRY_CAPACITY_BYTES
+
+from vonk_agent_protocol.telemetry import (
+    EngineReading,
+    GpuUnavailableReason,
+    HostResourceSample,
+    TelemetrySample,
+)
+from vonk_agent_protocol.wire_model import (
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    canonical_message,
+)
+from vonk_control.fleet_projection.common import telemetry_point
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.telemetry import (
     NodeEngineSample,
+    NodeInventoryResourceSnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
+from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.telemetry.samples import ENGINE_LIVE_WINDOW, TelemetryRepository
 
 NODE_A = "spk_" + "a" * 32
@@ -99,7 +111,7 @@ def test_newer_telemetry_replaces_latest_and_replay_does_not(telemetry) -> None:
     assert repository.latest((NODE_A,))[NODE_A].observed_at == START + timedelta(
         seconds=5
     )
-    assert [observed_at for observed_at in _stored(sessions)] == [
+    assert list(_stored(sessions)) == [
         START + timedelta(seconds=4),
         START + timedelta(seconds=5),
     ]
@@ -135,7 +147,7 @@ def test_new_boot_only_newer_observation_advances_latest(
     assert latest[NODE_A].boot_id == str(BOOT_B)
     assert latest[NODE_A].observed_at == START + timedelta(seconds=10)
     assert NODE_B not in latest
-    assert [observed_at for observed_at in _stored(sessions)] == [
+    assert list(_stored(sessions)) == [
         START + timedelta(seconds=8),
         START + timedelta(seconds=9),
         START + timedelta(seconds=10),
@@ -207,22 +219,16 @@ def test_resource_store_rejects_invalid_measurement_without_partial_sample(
     telemetry,
 ) -> None:
     repository, sessions, _, _ = telemetry
-    from vonk_agent_protocol.telemetry import HostResourceSample
-    from vonk_control.models.telemetry import NodeInventoryResourceSnapshot
-    from vonk_control.stored.json_values import write_guard_mode
 
     repository.record_batch(NODE_A, (sample(sequence=1),))
     with sessions() as session:
         resource = session.scalar(select(NodeInventoryResourceSnapshot))
         assert resource is not None
         identifier = resource.id
+
     # Controller initialization selects warning mode for production writes;
     # this rejection assertion owns its strict scope instead of test order.
-    with (
-        write_guard_mode(strict=True),
-        pytest.raises(ValueError),
-        sessions.begin() as session,
-    ):
+    def expected_failure(session):
         resource = session.get(NodeInventoryResourceSnapshot, identifier)
         assert resource is not None
         resource.host_resources = HostResourceSample.model_construct(
@@ -231,6 +237,13 @@ def test_resource_store_rejects_invalid_measurement_without_partial_sample(
             disk_total_bytes=None,
             disk_free_bytes=None,
         )
+
+    with (
+        write_guard_mode(strict=True),
+        pytest.raises(ValueError),
+        sessions.begin() as session,
+    ):
+        expected_failure(session)
     assert repository.latest((NODE_A,))[NODE_A].memory_available_bytes == 64_000_000_000
 
 
@@ -421,8 +434,6 @@ def test_sample_and_latest_writes_are_one_transaction(telemetry) -> None:
 
 def test_gpu_failure_round_trips_and_next_sample_recovers(telemetry):
     # Catches losing the typed collection reason between wire, store and fleet.
-    from vonk_agent_protocol.telemetry import GpuUnavailableReason, TelemetrySample
-    from vonk_control.fleet_projection.common import telemetry_point
 
     repository, _, _, _ = telemetry
     wire = TelemetrySample(
@@ -468,7 +479,7 @@ def test_gpu_failure_round_trips_and_next_sample_recovers(telemetry):
     assert point.memory_total_bytes == recovered.memory_total_bytes
 
 
-def _vector() -> dict:
+def _vector() -> dict[str, Any]:
     return json.loads(
         (
             files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v1.json"
@@ -477,7 +488,6 @@ def _vector() -> dict:
 
 
 def test_gpu_power_uptime_and_process_memory_are_stored_and_served(telemetry) -> None:
-    from vonk_control.fleet_projection.common import telemetry_point
 
     repository, _sessions, _engine, _clock = telemetry
     vector = _vector()
@@ -509,7 +519,7 @@ def test_gpu_power_uptime_and_process_memory_are_stored_and_served(telemetry) ->
     } & set(served)
 
 
-def _vector_v2() -> dict:
+def _vector_v2() -> dict[str, Any]:
     return json.loads(
         (
             files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v2.json"
@@ -520,7 +530,6 @@ def _vector_v2() -> dict:
 def test_host_readings_are_stored_and_served_and_engines_are_not_on_the_point(
     telemetry,
 ) -> None:
-    from vonk_control.fleet_projection.common import telemetry_point
 
     repository, sessions, _engine, _clock = telemetry
     vector = _vector_v2()["sample"]
@@ -659,7 +668,6 @@ _ENGINE_METRICS = json.loads(
 
 @pytest.mark.parametrize("sample", _ENGINE_METRICS, ids=lambda s: s["name"])
 def test_engine_metrics_vector_readings_are_valid_wire_readings(sample) -> None:
-    from vonk_agent_protocol.telemetry import EngineReading
 
     reading = EngineReading.model_validate_json(canonical_message(sample["expected"]))
     assert json.loads(canonical_message(reading)) == sample["expected"]

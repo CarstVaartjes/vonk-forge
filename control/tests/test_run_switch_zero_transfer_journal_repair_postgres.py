@@ -6,15 +6,25 @@ import copy
 import hashlib
 import json
 import subprocess
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from threading import Event
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from psycopg.errors import LockNotAvailable
+from sqlalchemy import delete, event, inspect, select, update
+from sqlalchemy.engine import ExceptionContext
+
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
+from vonk_control import terminal_history_collection
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.db.startup import initialize_database
 from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.journal_models import (
     RunSwitchJournalRepair,
@@ -23,19 +33,28 @@ from vonk_control.journal_models import (
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
-from vonk_control.models.operations import AgentOperation
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operations.contract import OperationRecoveryAction
+from vonk_control.persisted_waits import read_wait
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_switch_contract.journal import (
     JournalRepairDisposition,
+    JournalRepairPurpose,
+    RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
+    RunSwitchJournalRepairPendingState,
 )
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_journal_repair import repair as repair_owner
 from vonk_control.run_switch_journal_repair.discovery import journal_document
 from vonk_control.run_switch_journal_repair.observation import (
     try_repair_zero_transfer_journal,
 )
+from vonk_control.run_switch_journal_repair.pending import REPAIR_BUDGET
 from vonk_control.run_switch_operations import advance as advance_owner
+from vonk_control.run_switch_operations import cancellation_retry
 from vonk_control.run_switch_operations.image_receipts import _planned_transfer_parts
 from vonk_control.run_switch_operations.planning_helpers import (
     _run_switch_payload,
@@ -43,8 +62,10 @@ from vonk_control.run_switch_operations.planning_helpers import (
 )
 from vonk_control.run_switch_operations.results import _stored_result
 from vonk_control.stored.json_values import write_guard_mode
+from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .lock_wait_support import backend_pid, lock_waits_behind
+from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import setup_services
 from .runtime_identity_support import claim_agent
 from .runtime_image_fixtures import hold_image_through_another_recipe
@@ -59,6 +80,7 @@ from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,
 )
+from .test_terminal_history_collection import _job
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
@@ -81,7 +103,8 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
         sessions, profiles, planner, application.id, clock, 1
     )
     claim = claim_agent(jobs, nodes[0], "serial-0", 60)
-    assert claim is not None and claim.operation == "recipe.install"
+    assert claim is not None
+    assert claim.operation == "recipe.install"
     for completed in (32, 48):
         jobs.heartbeat(
             claim,
@@ -137,11 +160,15 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
     assert advance_owner._merge_progress_evidence is original_merge
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert row is not None and row.result is not None and row.state == "running"
+        assert row is not None
+        assert row.result is not None
+        assert row.state == "running"
         raw = copy.deepcopy(row.result)
-        assert raw["completed_bytes"] == 48 and raw["total_bytes"] == 0
+        assert raw["completed_bytes"] == 48
+        assert raw["total_bytes"] == 0
         measured = _stored_result(raw)
-        assert measured is not None and not isinstance(measured, Residue)
+        assert measured is not None
+        assert not isinstance(measured, Residue)
         assert measured.completed_bytes == measured.total_bytes == 48
         claims = [
             (item.id, item.state, item.amount_bytes)
@@ -202,14 +229,16 @@ def test_warn_mode_fault_repairs_same_child_then_native_receipt_reaches_installe
     assert planner.tick()
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert row is not None and row.result is not None
+        assert row is not None
+        assert row.result is not None
         assert (row.id, row.request_id, row.payload_digest, row.payload) == identity
         repaired = _stored_result(row.result)
-        assert repaired is not None and not isinstance(repaired, Residue)
-        assert repaired.completed_bytes == 0 and repaired.total_bytes == 0
-        assert (
-            repaired.operation is not None and repaired.operation.completed_bytes == 48
-        )
+        assert repaired is not None
+        assert not isinstance(repaired, Residue)
+        assert repaired.completed_bytes == 0
+        assert repaired.total_bytes == 0
+        assert repaired.operation is not None
+        assert repaired.operation.completed_bytes == 48
         assert repaired.child_operation_id == install_id
         expected = dict(raw)
         expected["completed_bytes"] = 0
@@ -223,10 +252,8 @@ def test_warn_mode_fault_repairs_same_child_then_native_receipt_reaches_installe
             evidence.original_digest
             == hashlib.sha256(journal_document(raw).encode()).hexdigest()
         )
-        assert (
-            evidence.operation_id == switch_id
-            and evidence.native_samples[0].fence == claim.fence
-        )
+        assert evidence.operation_id == switch_id
+        assert evidence.native_samples[0].fence == claim.fence
         assert [
             (item.id, item.state, item.amount_bytes)
             for item in session.scalars(select(ResourceReservation))
@@ -247,11 +274,10 @@ def test_warn_mode_fault_repairs_same_child_then_native_receipt_reaches_installe
     )
     assert planner.tick()
     switch = planner.get(switch_id)
-    assert switch.result is not None and switch.result.operation is not None
-    assert (
-        switch.result.operation.completed_bytes == 56
-        and switch.result.completed_bytes == 0
-    )
+    assert switch.result is not None
+    assert switch.result.operation is not None
+    assert switch.result.operation.completed_bytes == 56
+    assert switch.result.completed_bytes == 0
     # Observe the repaired sample through the real API and installed strict CLI
     # while the ORIGINAL native child is still pending, not just after terminal.
     _follow_saved_due(sessions, profiles, application.id, clock)
@@ -292,7 +318,8 @@ def test_warn_mode_fault_repairs_same_child_then_native_receipt_reaches_installe
     assert measured_effects[0]["operation_id"] == switch_id
     with sessions() as session:
         still_pending = session.get(Job, install_id)
-        assert still_pending is not None and still_pending.state == "running"
+        assert still_pending is not None
+        assert still_pending.state == "running"
     # Complete through actual fenced native result consumer, including the
     # next role's real claim. A terminal parent alone cannot free any scope.
     jobs.record_result(
@@ -308,7 +335,8 @@ def test_warn_mode_fault_repairs_same_child_then_native_receipt_reaches_installe
         )
     )
     second = claim_agent(jobs, nodes[1], "serial-1", 60)
-    assert second is not None and second.operation == "recipe.install"
+    assert second is not None
+    assert second.operation == "recipe.install"
     jobs.record_result(
         AgentResult.model_validate_json(
             canonical_message(
@@ -348,7 +376,8 @@ def test_warn_mode_fault_repairs_same_child_then_native_receipt_reaches_installe
     assert document["id"] == application.id
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert row is not None and row.request_id == identity[1]
+        assert row is not None
+        assert row.request_id == identity[1]
         assert (
             len(list(session.scalars(select(Job).where(Job.kind == "recipe.install"))))
             == 1
@@ -399,8 +428,6 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
             60,
         )
     elif fault == "second-attempt":
-        from vonk_control.models.operations import AgentOperationAttempt
-
         with sessions() as session:
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
@@ -425,11 +452,9 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
                 clock[0] = operation.next_action_at
         jobs.reconcile_orders()
         retry = claim_agent(jobs, _nodes[0], "serial-0", 60)
-        assert (
-            retry is not None
-            and retry.operation == "recipe.install"
-            and retry.fence != claim.fence
-        )
+        assert retry is not None
+        assert retry.operation == "recipe.install"
+        assert retry.fence != claim.fence
         jobs.heartbeat(
             retry,
             OperationProgress(
@@ -443,14 +468,12 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
     else:
         # Explicit corruption negatives, under the seed-only guard. The initial
         # cross-domain fault above is always produced by the genuine old merger.
-        from sqlalchemy import delete
-        from vonk_control.models.fleet import AgentNode
-        from vonk_control.models.operations import AgentOperationAttempt
 
         with write_guard_mode(strict=False), sessions.begin() as session:
             child = session.get(Job, install_id)
             row = session.get(Job, switch_id)
-            assert child is not None and row is not None
+            assert child is not None
+            assert row is not None
             if fault in {"missing-attempt", "damaged-pending"}:
                 session.execute(
                     delete(AgentOperationAttempt).where(
@@ -458,8 +481,6 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
                     )
                 )
             elif fault == "wrong-child-request":
-                import uuid
-
                 child.request_id = str(uuid.uuid4())
             elif fault == "newer-ordinal":
                 node = session.get(AgentNode, row.targets[0])
@@ -469,7 +490,8 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
     assert result == JournalRepairDisposition.DEFERRED
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert row is not None and row.result == raw
+        assert row is not None
+        assert row.result == raw
         assert [
             (item.id, item.state, item.amount_bytes)
             for item in session.scalars(select(ResourceReservation))
@@ -480,8 +502,6 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
 def test_startup_adds_evidence_storage_without_replacing_issued_checkpoint(
     faulty_install, postgres_engine
 ):
-    from sqlalchemy import inspect
-    from vonk_control.db.startup import initialize_database
 
     (
         sessions,
@@ -512,11 +532,10 @@ def test_startup_adds_evidence_storage_without_replacing_issued_checkpoint(
     }
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert (
-            row is not None
-            and (row.id, row.request_id, row.payload_digest, row.payload) == identity
-        )
-        assert row.result == raw and row.state == "running"
+        assert row is not None
+        assert (row.id, row.request_id, row.payload_digest, row.payload) == identity
+        assert row.result == raw
+        assert row.state == "running"
         assert set(session.scalars(select(AgentOperation.id))) == native_ids
         assert [
             (item.id, item.state, item.amount_bytes)
@@ -531,7 +550,8 @@ def test_startup_adds_evidence_storage_without_replacing_issued_checkpoint(
         row = session.get(Job, switch_id)
         assert row is not None
         repaired = _stored_result(row.result)
-        assert repaired is not None and not isinstance(repaired, Residue)
+        assert repaired is not None
+        assert not isinstance(repaired, Residue)
         assert repaired.child_operation_id == install_id
         assert len(list(session.scalars(select(RunSwitchJournalRepair)))) == 1
 
@@ -540,20 +560,12 @@ def test_startup_adds_evidence_storage_without_replacing_issued_checkpoint(
 def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances(
     faulty_install, held_kind, monkeypatch
 ):
-    from concurrent.futures import ThreadPoolExecutor
-    from types import SimpleNamespace
-
-    from vonk_control import terminal_history_collection
-    from vonk_control.models.fleet import AgentNode
-    from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
     # This proves disjoint work advances past a held row in one pass, not how
     # much SQL a loaded runner fits in the collector's wall-clock pass budget.
     monkeypatch.setattr(
         terminal_history_collection, "time", SimpleNamespace(monotonic=lambda: 0.0)
     )
-
-    from .test_terminal_history_collection import _job
 
     (
         sessions,
@@ -610,9 +622,9 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
         assert TerminalHistoryCollector(sessions, clock=lambda: clock[0]).tick()
         with sessions() as session:
             row = session.get(Job, switch_id)
-            assert row is not None and row.result == raw
+            assert row is not None
+            assert row.result == raw
             assert (row.id, row.request_id, row.payload_digest, row.payload) == identity
-            from vonk_control.persisted_waits import read_wait
 
             pending = session.get(RunSwitchJournalRepairPending, switch_id)
             if pending is None:
@@ -637,10 +649,6 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
     with sessions() as session:
         pending = session.get(RunSwitchJournalRepairPending, switch_id)
         if pending is not None:
-            from vonk_control.run_switch_contract.journal import (
-                RunSwitchJournalRepairPendingState,
-            )
-
             RunSwitchJournalRepairPendingState.model_validate_json(
                 canonical_message(pending.progress), strict=True
             )
@@ -652,9 +660,11 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
     assert planner.tick()
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert row is not None and row.request_id == identity[1]
+        assert row is not None
+        assert row.request_id == identity[1]
         repaired = _stored_result(row.result)
-        assert repaired is not None and not isinstance(repaired, Residue)
+        assert repaired is not None
+        assert not isinstance(repaired, Residue)
         assert repaired.child_operation_id == install_id
         assert row.next_action_at is None  # confirmed repair settled its wait
         assert row.result.get("observation_deadline_at") == deadline
@@ -667,9 +677,6 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
     monkeypatch,
     repair_race,
 ):
-    from uuid import uuid4
-
-    from vonk_control.run_switch_contract.journal import JournalRepairPurpose
 
     (
         sessions,
@@ -702,9 +709,7 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
             60,
         )
     else:
-        from vonk_control.run_switch_journal_repair import pending as repair_owner
-
-        original_record = repair_owner.record_repair_cancellation
+        original_record = cancellation_retry.record_repair_cancellation
 
         def repair_before_record(*args):
             assert (
@@ -714,7 +719,7 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
             original_record(*args)
 
         monkeypatch.setattr(
-            repair_owner, "record_repair_cancellation", repair_before_record
+            cancellation_retry, "record_repair_cancellation", repair_before_record
         )
     cancellation = planner.cancel(
         switch_id,
@@ -725,13 +730,13 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
     assert cancellation.state != "cancelled"
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert row is not None and row.request_id == identity[1]
+        assert row is not None
+        assert row.request_id == identity[1]
         progress = _stored_result(row.result)
-        assert progress is not None and not isinstance(progress, Residue)
-        assert (
-            progress.child_operation_id == install_id
-            and progress.cancellation is not None
-        )
+        assert progress is not None
+        assert not isinstance(progress, Residue)
+        assert progress.child_operation_id == install_id
+        assert progress.cancellation is not None
         [audit] = list(session.scalars(select(RunSwitchJournalRepair)))
         evidence = RunSwitchJournalRepairEvidence.model_validate_json(
             canonical_message(audit.evidence), strict=True
@@ -760,7 +765,8 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
         )
     )
     second = claim_agent(jobs, nodes[1], "serial-1", 60)
-    assert second is not None and second.operation == "recipe.install"
+    assert second is not None
+    assert second.operation == "recipe.install"
     jobs.record_result(
         AgentResult.model_validate_json(
             canonical_message(
@@ -776,7 +782,8 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
     assert lifecycle.get(install_id).state == "succeeded"
     assert planner.tick()
     closed = planner.get(switch_id)
-    assert closed.state == "cancelled" and closed.request_key == identity[1]
+    assert closed.state == "cancelled"
+    assert closed.request_key == identity[1]
     with sessions() as session:
         assert (
             len(list(session.scalars(select(Job).where(Job.kind == "recipe.install"))))
@@ -784,9 +791,6 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
         )
         assert len(list(session.scalars(select(RunSwitchJournalRepair)))) == 1
     # The settled preparation cannot retain a same-Spark admission hold.
-    from types import SimpleNamespace
-
-    from .non_blocking import assert_ended_without_blocking
 
     with sessions() as session:
         row = session.get(Job, switch_id)
@@ -811,8 +815,6 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
 def test_native_lease_expiry_reconciles_same_owner_when_sample_repair_is_deferred(
     faulty_install,
 ):
-    from vonk_control.models.operations import AgentOperationAttempt
-    from vonk_control.run_switch_contract.journal import JournalRepairPurpose
 
     (
         sessions,
@@ -864,9 +866,11 @@ def test_native_lease_expiry_reconciles_same_owner_when_sample_repair_is_deferre
     jobs.reconcile_orders()
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert row is not None and row.request_id == identity[1]
+        assert row is not None
+        assert row.request_id == identity[1]
         progress = _stored_result(row.result)
-        assert progress is not None and not isinstance(progress, Residue)
+        assert progress is not None
+        assert not isinstance(progress, Residue)
         assert progress.child_operation_id == install_id
         [audit] = list(session.scalars(select(RunSwitchJournalRepair)))
         evidence = RunSwitchJournalRepairEvidence.model_validate_json(
@@ -879,7 +883,8 @@ def test_native_lease_expiry_reconciles_same_owner_when_sample_repair_is_deferre
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert attempt is not None and attempt.lease_deadline == deadline
+        assert attempt is not None
+        assert attempt.lease_deadline == deadline
         assert attempt.state != "running"
         assert set(session.scalars(select(AgentOperation.id))) == native_ids
 
@@ -887,7 +892,6 @@ def test_native_lease_expiry_reconciles_same_owner_when_sample_repair_is_deferre
 def test_new_native_identity_after_discovery_aborts_declared_lock_set(
     faulty_install, monkeypatch
 ):
-    from vonk_control.run_switch_journal_repair import repair as repair_owner
 
     (
         sessions,
@@ -906,7 +910,6 @@ def test_new_native_identity_after_discovery_aborts_declared_lock_set(
         _claims,
         native_ids,
     ) = faulty_install
-    from vonk_control.models.operations import AgentOperationAttempt
 
     with sessions() as session:
         before_attempts = set(session.scalars(select(AgentOperationAttempt.id)))
@@ -944,7 +947,8 @@ def test_new_native_identity_after_discovery_aborts_declared_lock_set(
     assert changed == [True]
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert row is not None and row.result == raw
+        assert row is not None
+        assert row.result == raw
         assert set(session.scalars(select(AgentOperation.id))) == native_ids
         assert set(session.scalars(select(AgentOperationAttempt.id))) != before_attempts
         assert not list(session.scalars(select(RunSwitchJournalRepair)))
@@ -953,7 +957,6 @@ def test_new_native_identity_after_discovery_aborts_declared_lock_set(
 def test_finished_rank_lease_cannot_waive_live_rank_measurement_provenance(
     faulty_install,
 ):
-    from vonk_control.models.operations import AgentOperationAttempt
 
     (
         sessions,
@@ -993,7 +996,8 @@ def test_finished_rank_lease_cannot_waive_live_rank_measurement_provenance(
         assert finished_attempt is not None
         clock[0] = finished_attempt.lease_deadline - timedelta(seconds=10)
     live = claim_agent(jobs, nodes[1], "serial-1", 60)
-    assert live is not None and live.operation == "recipe.install"
+    assert live is not None
+    assert live.operation == "recipe.install"
     with sessions() as session:
         finished = session.scalar(
             select(AgentOperationAttempt).where(
@@ -1005,7 +1009,8 @@ def test_finished_rank_lease_cannot_waive_live_rank_measurement_provenance(
                 AgentOperationAttempt.fence == live.fence
             )
         )
-        assert finished is not None and current is not None
+        assert finished is not None
+        assert current is not None
         assert finished.state == LifecycleState.SUCCEEDED
         clock[0] = finished.lease_deadline + timedelta(microseconds=1)
         assert clock[0] < current.lease_deadline
@@ -1023,14 +1028,16 @@ def test_finished_rank_lease_cannot_waive_live_rank_measurement_provenance(
         ]
         before_native = set(session.scalars(select(AgentOperation.id)))
         child = session.get(Job, install_id)
-        assert child is not None and child.state == LifecycleState.RUNNING
+        assert child is not None
+        assert child.state == LifecycleState.RUNNING
     assert (
         try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
         == JournalRepairDisposition.DEFERRED
     )
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert row is not None and row.result == raw
+        assert row is not None
+        assert row.result == raw
         assert [
             (item.id, item.state, item.amount_bytes)
             for item in session.scalars(select(ResourceReservation))
@@ -1042,7 +1049,8 @@ def test_finished_rank_lease_cannot_waive_live_rank_measurement_provenance(
                 AgentOperationAttempt.fence == live.fence
             )
         )
-        assert current is not None and current.state == LifecycleState.RUNNING
+        assert current is not None
+        assert current.state == LifecycleState.RUNNING
 
 
 @pytest.mark.parametrize(
@@ -1054,17 +1062,6 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
     faulty_install, fault, cancel
 ):
     """Catches endless DEFERRED holds and cancel refusal before intent is saved."""
-    from types import SimpleNamespace
-    from uuid import uuid4
-
-    from sqlalchemy import delete
-    from vonk_control.models.operations import AgentOperationAttempt
-    from vonk_control.run_switch_contract.journal import (
-        RunSwitchJournalRepairPendingState,
-    )
-    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-
-    from .non_blocking import assert_ended_without_blocking
 
     (
         sessions,
@@ -1106,7 +1103,9 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
             canonical_message(pending.progress), strict=True
         )
     first_due = planner.get(switch_id).next_attempt_at
-    assert first.attempts == 1 and first_due is not None and first_due > clock[0]
+    assert first.attempts == 1
+    assert first_due is not None
+    assert first_due > clock[0]
     assert planner.get(switch_id).next_attempt_at == first_due
     activity = planner.activity_provider().get_operation(switch_id)
     assert activity is not None
@@ -1127,10 +1126,8 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
             saved = RunSwitchJournalRepairPendingState.model_validate_json(
                 canonical_message(pending.progress), strict=True
             )
-            assert (
-                saved.cancellation is not None
-                and saved.deadline_at == first.deadline_at
-            )
+            assert saved.cancellation is not None
+            assert saved.deadline_at == first.deadline_at
     # Recreate the consumer to prove retry deadlines are PostgreSQL-owned.
     _profiles, planner = _measured_profile_service(sessions, _lifecycle)
     clock[0] = first_due
@@ -1141,7 +1138,8 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
         second = RunSwitchJournalRepairPendingState.model_validate_json(
             canonical_message(pending.progress), strict=True
         )
-        assert second.attempts >= 2 and second.deadline_at == first.deadline_at
+        assert second.attempts >= 2
+        assert second.deadline_at == first.deadline_at
         job = session.get(Job, switch_id)
         assert job is not None
         parent = _run_switch_payload(job)
@@ -1198,11 +1196,9 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
     assert admitted.node_ids == list(nodes)
     with sessions() as session:
         job = session.get(Job, switch_id)
-        assert job is not None and job.result == raw
+        assert job is not None
+        assert job.result == raw
         assert session.get(RunSwitchJournalRepairPending, switch_id) is None
-        from vonk_control.run_switch_contract.journal import (
-            RunSwitchJournalRepairEndEvidence,
-        )
 
         [audit] = list(
             session.scalars(
@@ -1227,19 +1223,6 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
 
 def test_cancel_under_native_repair_contention_persists_before_proof(faulty_install):
     """A NOWAIT repair refusal cannot refuse or erase the accepted cancel."""
-    from threading import Event
-    from types import SimpleNamespace
-    from uuid import uuid4
-
-    from psycopg.errors import LockNotAvailable
-    from sqlalchemy import event
-    from sqlalchemy.engine import ExceptionContext
-    from vonk_control.jobs.documents import RunSwitchRunIntent
-    from vonk_control.run_switch_contract.journal import (
-        RunSwitchJournalRepairPendingState,
-    )
-
-    from .non_blocking import assert_ended_without_blocking
 
     (
         sessions,
@@ -1262,7 +1245,8 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
         job = session.get(Job, switch_id)
         assert job is not None
         parent = _run_switch_payload(job)
-        assert parent is not None and isinstance(parent.intent, RunSwitchRunIntent)
+        assert parent is not None
+        assert isinstance(parent.intent, RunSwitchRunIntent)
         request = parent.intent.request
     holder = sessions()
     holder.begin()
@@ -1346,7 +1330,6 @@ def test_current_witness_repairs_despite_unusable_history(
     faulty_install, damaged_history
 ):
     """Stored diagnostics cannot veto the current exact verified witnesses."""
-    from uuid import uuid4
 
     sessions, _, _, _, _, clock, _, _, switch_id, _, _, identity, raw, _, _ = (
         faulty_install
@@ -1366,7 +1349,6 @@ def test_current_witness_repairs_despite_unusable_history(
             ).model_copy(update={"request_key": str(uuid4())})
         )
         # Seed storage damage below the append-only ORM writer boundary.
-        from sqlalchemy import update
 
         session.execute(
             update(RunSwitchJournalRepair)
@@ -1385,7 +1367,8 @@ def test_current_witness_repairs_despite_unusable_history(
         assert job is not None
         assert (job.id, job.request_id, job.payload_digest, job.payload) == identity
         result = _stored_result(job.result)
-        assert result is not None and not isinstance(result, Residue)
+        assert result is not None
+        assert not isinstance(result, Residue)
         assert result.completed_bytes == 0
     assert (
         try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
@@ -1402,7 +1385,6 @@ def test_a_live_child_install_keeps_its_repair_waiting_past_the_old_budget(
     missing evidence is waited for past the old two-minute cap; once nothing
     holds the child any more, a whole window later the repair ends.
     """
-    from vonk_control.run_switch_journal_repair.pending import REPAIR_BUDGET
 
     (
         sessions,
@@ -1433,7 +1415,8 @@ def test_a_live_child_install_keeps_its_repair_waiting_past_the_old_budget(
         )
     with sessions() as session:
         row = session.get(Job, switch_id)
-        assert row is not None and row.state not in {
+        assert row is not None
+        assert row.state not in {
             LifecycleState.FAILED,
             LifecycleState.CANCELLED,
         }

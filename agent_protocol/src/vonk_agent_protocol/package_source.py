@@ -4,8 +4,8 @@ from typing import Literal
 
 from pydantic import Field
 
-from .package_upgrade import PackageRollbackSource
-from .wire_model import WireModel
+from vonk_agent_protocol.package_upgrade import PackageRollbackSource
+from vonk_agent_protocol.wire_model import WireModel
 
 
 class AgentPackageSource(WireModel):

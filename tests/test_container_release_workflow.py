@@ -3,10 +3,12 @@ import io
 import json
 import os
 import re
+import runpy
+import shutil
 import subprocess
 import tarfile
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import pytest
 import yaml
@@ -127,7 +129,7 @@ class _Workflow(TypedDict):
 
 
 def development_workflow() -> _Workflow:
-    return yaml.load(DEV_WORKFLOW.read_text(), Loader=yaml.BaseLoader)
+    return yaml.load(DEV_WORKFLOW.read_text(), Loader=yaml.BaseLoader)  # noqa: S506 -- BaseLoader is deliberate
 
 
 def development_job_step(job_name: str, step_name: str) -> _WorkflowStep:
@@ -630,7 +632,7 @@ def test_development_image_receipt_binds_registry_sources_and_compose(
 
 @pytest.mark.parametrize(
     "mutation",
-    ("wrong_repository", "swapped_role", "wrong_digest", "missing_role", "extra_field"),
+    ["wrong_repository", "swapped_role", "wrong_digest", "missing_role", "extra_field"],
 )
 def test_development_image_receipt_rejects_invalid_registry_identity(
     tmp_path: Path, mutation: str
@@ -822,7 +824,8 @@ def test_release_tag_is_ssh_signed_trusted_and_reachable_from_main() -> None:
     )
     assert "+refs/heads/main:refs/remotes/origin/main" in verify
     assert "git show refs/remotes/origin/main:.github/release-allowed-signers" in verify
-    assert "git cat-file -t" in verify and "= tag" in verify
+    assert "git cat-file -t" in verify
+    assert "= tag" in verify
     assert "gpg.format=ssh" in verify
     assert "gpg.ssh.allowedSignersFile" in verify
     assert "verify-tag" in verify
@@ -875,12 +878,16 @@ def test_alias_reconciliation_binds_selected_release_to_signed_tag_revision() ->
         "promote", "Promote accepted images and advance installer pointer last"
     )
 
-    assert "actions: read" in alias and "packages: write" in alias
-    assert "SOURCE_SHA" in alias and "AUTHORITY_REF" in alias and "TAG_OID" in alias
+    assert "actions: read" in alias
+    assert "packages: write" in alias
+    assert "SOURCE_SHA" in alias
+    assert "AUTHORITY_REF" in alias
+    assert "TAG_OID" in alias
     assert "scripts/promote-accepted-channel" in evidence
     assert evidence.index("scripts/promote-accepted-channel") < evidence.index("| tee")
     assert '"$CHANNEL" "$AUTHORITY_REF" "$SOURCE_SHA" "$TAG_OID"' in evidence
-    assert "installer-publication" in evidence and "promotion-receipt.jsonl" in evidence
+    assert "installer-publication" in evidence
+    assert "promotion-receipt.jsonl" in evidence
 
 
 def test_production_release_retries_reconcile_immutable_outputs_before_completion() -> (
@@ -905,7 +912,8 @@ def test_alias_uses_only_attested_immutable_release_assets_before_parsing() -> N
     assert "Download immutable candidate publication bundle" in promote
     assert "Download signed acceptance receipt" in promote
     assert "VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" in evidence
-    assert "SOURCE_SHA" in evidence and "TAG_OID" in evidence
+    assert "SOURCE_SHA" in evidence
+    assert "TAG_OID" in evidence
     assert "r2:$R2_INSTALLER_PUBLIC_BUCKET" in evidence
     assert "installer-publication/installer-publication" in evidence
 
@@ -1210,7 +1218,8 @@ def test_latest_alias_advances_only_after_release_evidence() -> None:
         "scripts/promote-image-aliases"
     )
     assert ".channel == $channel and .source_sha == $source" in promotion
-    assert "alias=latest" in promotion and "alias=dev" in promotion
+    assert "alias=latest" in promotion
+    assert "alias=dev" in promotion
     assert '--commit "$0" commit "$@"' in promotion
     commit = promotion[
         promotion.index("if [[ $mode == commit ]]") : promotion.index(
@@ -1363,8 +1372,6 @@ def test_final_job_creates_checksum_protected_public_release_asset() -> None:
 
 @pytest.fixture
 def reusable_image_repo(tmp_path):
-    import runpy
-    import shutil
 
     policy = runpy.run_path(str(ROOT / "scripts/dev-image-inputs"))
     repo = tmp_path / "repo"
@@ -1762,7 +1769,7 @@ LITELLM_DOCKERFILE = "deploy/compose/litellm/Dockerfile"
 LITELLM_VERIFY = "scripts/verify-litellm-base-signature"
 
 
-def _builds_litellm(step: dict, matrix: dict) -> bool:
+def _builds_litellm(step: dict[str, Any], matrix: dict[str, Any]) -> bool:
     if not str(step.get("uses", "")).startswith("docker/build-push-action"):
         return False
     file = str(step.get("with", {}).get("file", ""))

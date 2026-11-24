@@ -7,19 +7,41 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import AgentOperation, canonical_message
+from vonk_forge_contracts import ModelDefinition, document_sha256
+
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.artifact_jobs.lifecycle import (
+    ArtifactIdentity,
+    require_reference_open,
+)
 from vonk_control.cache_removal_review import CacheAssetDisposition
-from vonk_control.fleet_model_removal_contract import FleetRemovalDisposition
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.fleet_model_removal_contract import (
+    STORE_RETENTION_MAX_AGE,
+    FleetRemovalDisposition,
+)
+from vonk_control.fleet_profile_contract.definitions import (
+    FleetProfileAssignmentInput,
+    FleetProfileInput,
+)
+from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
+from vonk_control.model_cache.contract import ModelCacheRemovalPayload
+from vonk_control.model_cache.errors import ModelCacheConflictInvalid
+from vonk_control.model_cache.persistence import _store_operation_payload
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation
 from vonk_control.models.fleet import AgentNode
@@ -27,9 +49,14 @@ from vonk_control.models.jobs import Job
 from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.strict_json import read_stored_model
-from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
+from .lifecycle_simulation.reach_world import (
+    MODEL_SELECTOR,
+    WEIGHTS,
+    build_reach_world,
+)
+from .lifecycle_simulation.world import SOLO
 from .model_cache_support import _artifact, _download
 from .recipe_operations_support import (
     NOW,
@@ -44,6 +71,7 @@ from .test_model_removal_reference_lifecycle import (
     _removal_service,
 )
 from .test_model_removal_worker_postgres import _prepare_removal_target
+from .unused_storage_collection_support import _profile
 
 
 def submit_model_download(cache: ModelCacheService, tmp_path: Path) -> None:
@@ -123,7 +151,8 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
         inventory(world.sessions, NODE, now[0], [obj])
         inventory(world.sessions, second, now[0], [obj])
         review = cache.review_fleet_model_removal(selector)
-        assert review.fleet is not None and review.fleet.nas_remove
+        assert review.fleet is not None
+        assert review.fleet.nas_remove
         assert review.fleet.targets[0].reclaimable_bytes == len(b"finished weights")
         key = str(uuid4())
         accepted = cache.remove_fleet_model_selector(
@@ -135,7 +164,8 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
         assert accepted.state == LifecycleState.QUEUED
         with world.sessions() as session:
             request = store_retention_request(session, NODE, now[0])
-        assert request is not None and request.remove_model_objects == [obj.sha256]
+        assert request is not None
+        assert request.remove_model_objects == [obj.sha256]
         cache.advance_removals()
         assert cache.get_operation(accepted.id).state != LifecycleState.SUCCEEDED
         assert path.exists()
@@ -165,7 +195,8 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
         result = cache.get_operation(accepted.id)
         assert result.state == LifecycleState.SUCCEEDED, result.last_error
         assert not path.exists()
-        assert result.fleet is not None and result.fleet.confirmed_nodes == [
+        assert result.fleet is not None
+        assert result.fleet.confirmed_nodes == [
             NODE,
             second,
         ]
@@ -200,7 +231,8 @@ def test_fleet_removal_confirms_from_a_report_a_slow_agent_clock_stamped_early(
         obj = ModelStoreObject(sha256=path.name, bytes=path.stat().st_size)
         inventory(world.sessions, NODE, now[0], [obj], collected_before=slow)
         review = cache.review_fleet_model_removal(selector)
-        assert review.fleet is not None and review.fleet.nas_remove
+        assert review.fleet is not None
+        assert review.fleet.nas_remove
         accepted = cache.remove_fleet_model_selector(
             selector,
             actor="operator",
@@ -298,15 +330,14 @@ def test_shared_content_is_retained_on_nas_and_spark(
             assert resumed.cancellation is None
         with world.sessions() as session:
             request = store_retention_request(session, NODE, now)
-        assert request is not None and not request.remove_model_objects
+        assert request is not None
+        assert not request.remove_model_objects
     finally:
         cache.close()
 
 
 def _refreshed_model(sessions, document_id: str, stored: object, digest: str) -> str:
     """Publish a metadata-only revision of a model; returns the new head digest."""
-    from vonk_control.catalog.entities import CatalogEntityService
-    from vonk_forge_contracts import ModelDefinition, document_sha256
 
     definition = ModelDefinition.model_validate(stored)
     document = reworded(definition, "refreshed").model_dump(mode="json")
@@ -331,7 +362,6 @@ def test_unused_installation_uninstalls_through_existing_job(
     installation of the earlier revision holds the same lineage's files and is
     uninstalled too, so the removal ends instead of waiting out its deadline.
     """
-    from vonk_control.cluster_mappings import ClusterMappingService
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=installation_count, mapping_node_count=1
@@ -341,9 +371,8 @@ def test_unused_installation_uninstalls_through_existing_job(
     )
     with sessions() as session:
         installation = session.get(RecipeInstallation, first.owner_id)
-        assert (
-            installation is not None and installation.model_content_sha256 is not None
-        )
+        assert installation is not None
+        assert installation.model_content_sha256 is not None
         selector = installation.model_content_sha256
         revision_id = installation.recipe_revision_id
         model = session.scalar(
@@ -504,16 +533,13 @@ def test_profile_or_running_workload_retains_model_and_installation(
     installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
     with sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
-        assert (
-            installation is not None and installation.model_content_sha256 is not None
-        )
+        assert installation is not None
+        assert installation.model_content_sha256 is not None
         installation_id, digest = installation.id, installation.model_content_sha256
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         assert revision is not None
         recipe_selector = f"{revision.publisher}/{revision.slug}"
     if saved_profile:
-        from .unused_storage_collection_support import _profile
-
         world = object.__new__(Catalog)
         world.sessions = sessions
         _profile(world, recipe_selector, list(nodes))
@@ -533,7 +559,8 @@ def test_profile_or_running_workload_retains_model_and_installation(
     try:
         inventory(sessions, nodes[0], now, [])
         review = cache.review_fleet_model_removal(digest)
-        assert review.fleet is not None and not review.fleet.nas_remove
+        assert review.fleet is not None
+        assert not review.fleet.nas_remove
         assert (
             review.fleet.targets[0].installations[0].disposition
             == FleetRemovalDisposition.RETAIN
@@ -548,7 +575,8 @@ def test_profile_or_running_workload_retains_model_and_installation(
         assert cache.get_operation(accepted.id).state == LifecycleState.SUCCEEDED
         with sessions() as session:
             kept = session.get(RecipeInstallation, installation_id)
-            assert kept is not None and kept.state == InstallationState.INSTALLED
+            assert kept is not None
+            assert kept.state == InstallationState.INSTALLED
             assert (
                 session.scalar(
                     select(Job).where(Job.kind == AgentOperation.RECIPE_UNINSTALL)
@@ -633,12 +661,6 @@ def test_profile_added_after_review_replans_without_fencing_or_deleting(
     postgres_engine, tmp_path: Path
 ) -> None:
     """Catches acceptance of an obsolete review after a profile acquires a pin."""
-    from vonk_control.fleet_profile_contract.definitions import (
-        FleetProfileAssignmentInput,
-        FleetProfileInput,
-    )
-    from vonk_control.fleet_profiles.service import FleetProfileService
-    from vonk_control.model_cache.errors import ModelCacheConflictInvalid
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine
@@ -646,9 +668,8 @@ def test_profile_added_after_review_replans_without_fencing_or_deleting(
     installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
     with sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
-        assert (
-            installation is not None and installation.model_content_sha256 is not None
-        )
+        assert installation is not None
+        assert installation.model_content_sha256 is not None
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         assert revision is not None
         digest, recipe = (
@@ -687,7 +708,8 @@ def test_profile_added_after_review_replans_without_fencing_or_deleting(
                 review_digest=old.review_digest,
             )
         current = cache.review_fleet_model_removal(digest)
-        assert current.fleet is not None and not current.fleet.nas_remove
+        assert current.fleet is not None
+        assert not current.fleet.nas_remove
         receipt = cache.remove_fleet_model_selector(
             digest,
             actor="admin",
@@ -709,8 +731,6 @@ def test_lost_owner_authority_expires_before_fresh_reference(
     """Catches an everlasting wait or releasing deletion gates while an agent
     still has a fresh eviction authority from the failed owner.
     """
-    from vonk_control.fleet_model_removal_contract import STORE_RETENTION_MAX_AGE
-    from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -746,7 +766,8 @@ def test_lost_owner_authority_expires_before_fresh_reference(
         assert receipt.fleet is not None
         with world.sessions() as session:
             grant = store_retention_request(session, NODE, now[0])
-            assert grant is not None and grant.remove_model_objects == [path.name]
+            assert grant is not None
+            assert grant.remove_model_objects == [path.name]
         if damage == "deadline":
             now[0] = receipt.fleet.deadline_at + timedelta(seconds=1)
         else:
@@ -779,7 +800,8 @@ def test_lost_owner_authority_expires_before_fresh_reference(
         assert path.exists()
         with world.sessions() as session:
             grant = store_retention_request(session, NODE, now[0])
-            assert grant is not None and grant.remove_model_objects == []
+            assert grant is not None
+            assert grant.remove_model_objects == []
         cache.reconcile_removal_gates()
         with world.sessions() as session:
             gate = session.get(ArtifactLifecycleGate, ("model-object", path.name))
@@ -804,14 +826,10 @@ def test_lost_owner_authority_expires_before_fresh_reference(
             assert gate is None, (
                 now[0],
                 None if row is None else (row.state, row.updated_at, row.completed_at),
-                None if gate is None else gate.removal_authority_expires_at,
+                gate.removal_authority_expires_at,
             )
         # Reacquire the exact content reference, rather than proving only that
         # unrelated work can proceed after the failed request.
-        from vonk_control.artifact_jobs.lifecycle import (
-            ArtifactIdentity,
-            require_reference_open,
-        )
 
         with world.sessions.begin() as session:
             require_reference_open(
@@ -828,8 +846,6 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
     """Catches inventory trusting a structurally valid plan whose effects no
     longer match the operator's accepted digest.
     """
-    from vonk_control.model_cache.contract import ModelCacheRemovalPayload
-    from vonk_control.models.cache import ModelCacheOperation
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -865,7 +881,6 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
         with world.sessions.begin() as session:
             row = session.get(ModelCacheOperation, receipt.id)
             assert row is not None
-            from vonk_control.strict_json import read_stored_model
 
             plan = read_stored_model(
                 ModelCacheRemovalPayload, row.payload, from_json=True
@@ -874,12 +889,12 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
             plan.fleet.effects.targets[0].objects[0].object = ModelStoreObject(
                 sha256="f" * 64, bytes=1
             )
-            from vonk_control.model_cache.persistence import _store_operation_payload
 
             _store_operation_payload(row, "remove", plan)
         with world.sessions() as session:
             request = store_retention_request(session, NODE, now)
-        assert request is not None and request.remove_model_objects == []
+        assert request is not None
+        assert request.remove_model_objects == []
         assert path.read_bytes() == b"accepted weights"
         submit_model_download(cache, tmp_path)
     finally:
@@ -893,20 +908,6 @@ def test_profile_draft_cannot_cross_accepted_fleet_object_fence(
     """Catches narrowing the draft guard to remote objects only: a fleet
     removal also owns NAS bytes before a Spark has copied them.
     """
-    import hashlib
-
-    from vonk_control.fleet_profile_contract.definitions import (
-        FleetProfileAssignmentInput,
-        FleetProfileInput,
-    )
-    from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
-
-    from .lifecycle_simulation.reach_world import (
-        MODEL_SELECTOR,
-        WEIGHTS,
-        build_reach_world,
-    )
-    from .lifecycle_simulation.world import SOLO
 
     world = build_reach_world(tmp_path, postgres_engine)
     cache = world.reach.cache
@@ -983,7 +984,8 @@ def test_offline_spark_without_the_model_does_not_block_fleet_removal(
         )
         review = cache.review_fleet_model_removal(selector)
         assert review.fleet is not None
-        assert review.fleet.nas_remove and not review.fleet.observation_issues
+        assert review.fleet.nas_remove
+        assert not review.fleet.observation_issues
         accepted = cache.remove_fleet_model_selector(
             selector,
             actor="operator",

@@ -116,4 +116,5 @@ def test_show_of_an_empty_series_reads_no_roster_and_is_no_contract_document(
     assert client.calls == [
         ("GET", "/api/metrics/series", {"metric": "gpu_temperature", "range": "1h"})
     ]
-    assert document["names"] == {} and "schema_version" not in document
+    assert document["names"] == {}
+    assert "schema_version" not in document

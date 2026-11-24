@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, update
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.fleet_model_removal_contract import FleetRemovalReason
@@ -16,7 +18,6 @@ from vonk_control.model_cache.contract import ModelCacheRemovalResult
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheSet
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
-from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
 from .model_cache_support import _canonical_model
@@ -131,7 +132,8 @@ def test_listed_bytes_kept_for_another_model_are_never_reviewed_as_unused(
         assert service.model_storage()
 
         review = service.review_fleet_model_removal("test/aa")
-        assert review.fleet is not None and review.fleet.nas_remove
+        assert review.fleet is not None
+        assert review.fleet.nas_remove
         assert review.fleet.nas_reason == FleetRemovalReason.SHARED
         assert review.nas_reclaimable_bytes == 0
 
@@ -170,7 +172,8 @@ def test_a_set_another_model_also_serves_is_retained_with_its_bytes(
             assert review.fleet is not None
             assert review.fleet.nas_reason == FleetRemovalReason.SHARED
             result = _removed(service, "test/bb", review.review_digest)
-            assert result.removed_entries == [] and result.reclaimed_bytes == 0
+            assert result.removed_entries == []
+            assert result.reclaimed_bytes == 0
         else:
             accepted = service.remove_model_selector(
                 "test/bb", actor="operator", request_key=str(uuid4())
@@ -209,7 +212,8 @@ def test_a_3_0_model_resolves_the_cache_downloaded_under_its_2_x_revision(
                     CatalogDocumentRevision.slug == "display-split"
                 )
             )
-            assert row is not None and row.content_digest == v3
+            assert row is not None
+            assert row.content_digest == v3
             legacy = {
                 **row.document,
                 "metadata": {"description": "as 2.x published it", "tags": []},

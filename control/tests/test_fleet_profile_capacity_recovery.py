@@ -1,14 +1,19 @@
 """Fleet recovery follows content and current effects, never receipt taxonomy."""
 
+import contextlib
 from datetime import UTC, timedelta
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profiles.capacity import (
     accepted_profile_runtime_image,
@@ -23,6 +28,7 @@ from vonk_control.strict_json import read_stored_model
 
 from .fleet_profiles_support import _uuid
 from .test_fleet_profile_lifecycle import _World
+from .test_fleet_profile_recovery_current import _failed_profile
 from .test_profile_build_memory import _accepted_build_profile, _parent_build_request
 
 
@@ -61,18 +67,17 @@ def test_another_build_receipt_reuses_and_repairs_the_exact_memory_promise(
         repaired = profile_build_memory_claims(
             session, sibling, memory_pool="shared", request_id=request_id, lock=True
         )
-        assert len(repaired) == 1 and repaired[0].id == original_claim_id
+        assert len(repaired) == 1
+        assert repaired[0].id == original_claim_id
         assert repaired[0].owner_id == application_id
         assert repaired[0].state == ReservationState.PROMISED
         # Different output bytes cannot inherit even with identical source inputs.
         sibling.image_digest = "sha256:" + "f" * 64
         accepted_claims = None
-        try:
+        with contextlib.suppress(UnknownOutcomeError):
             accepted_claims = profile_build_memory_claims(
                 session, sibling, memory_pool="shared", request_id=request_id, lock=True
             )
-        except UnknownOutcomeError:
-            pass
         assert accepted_claims is None
         assert repaired[0].owner_id == application_id
         sibling.image_digest = image.image_digest
@@ -278,9 +283,8 @@ def test_unknown_child_outcome_keeps_waiting_and_settles_before_releasing_claims
                 )
             )
         )
-        assert claims and all(
-            claim.state != ReservationState.RELEASED for claim in claims
-        )
+        assert claims
+        assert all(claim.state != ReservationState.RELEASED for claim in claims)
     # Well past the window after which a waiting load used to end itself.
     world.now[0] = accepted_at + timedelta(minutes=30, seconds=1)
     if expiry_path == "retry":
@@ -330,11 +334,6 @@ def test_older_or_historical_retry_sibling_cannot_gate_current_repair(
     tmp_path, sibling_state
 ):
     """Catches same-profile active history and ended retry lineage vetoing repair."""
-    from vonk_control.fleet_profile_contract.applications import (
-        FleetProfileApplicationProgress,
-    )
-
-    from .test_fleet_profile_recovery_current import _failed_profile
 
     sessions, _lifecycle, service, profile, _desired, first, _child, _nodes = (
         _failed_profile(tmp_path)

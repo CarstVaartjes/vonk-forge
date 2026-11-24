@@ -7,7 +7,7 @@ import json
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
-from .contracts import (
+from cluster_profiles.qualification_fixtures.contracts import (
     _DIGEST,
     _MEDIA_TYPE,
     _NAME,
@@ -18,10 +18,16 @@ from .contracts import (
     ServiceRecipe,
     _validate_manifest_contract,
 )
-from .media import _load_content, _validate_magic
-from .recipe_cases import _blocker, _parse_recipe_fixture
-from .service_cases import _parse_service_case, _parse_service_recipe
-from .values import _object, _strict_json_loads
+from cluster_profiles.qualification_fixtures.media import _load_content, _validate_magic
+from cluster_profiles.qualification_fixtures.recipe_cases import (
+    _blocker,
+    _parse_recipe_fixture,
+)
+from cluster_profiles.qualification_fixtures.service_cases import (
+    _parse_service_case,
+    _parse_service_recipe,
+)
+from cluster_profiles.qualification_fixtures.values import _object, _strict_json_loads
 
 
 def _fixture_format(media_type: str) -> str | None:
@@ -141,10 +147,9 @@ class FixtureRegistry:
             except (FixtureError, KeyError, OSError, TypeError, ValueError):
                 continue
         raw_special = _object(document.get("special_fixtures", {}), "special_fixtures")
-        special = {}
-        for key, item in raw_special.items():
-            if isinstance(item, Mapping):
-                special[key] = item
+        special = {
+            key: item for key, item in raw_special.items() if isinstance(item, Mapping)
+        }
         raw_service_cases = _object(
             document.get("service_case_templates", {}), "service_case_templates"
         )

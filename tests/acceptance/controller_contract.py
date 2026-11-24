@@ -30,6 +30,7 @@ from cluster_profiles.observation_transfer_reader import (
     check_observation_deadline,
     receive_observation,
 )
+from scripts.development_slice_client import MAXIMUM_RESPONSE_BYTES
 
 _REFERENCE = "#/components/schemas/"
 _MAXIMUM_DEPTH = 16
@@ -71,7 +72,7 @@ class ObservationResponseContract:
             not isinstance(key, str) for key in value
         ):
             raise ContractSkew(f"{self.label} observation is not an object")
-        return {key: item for key, item in value.items()}
+        return dict(value.items())
 
     def decode(
         self,
@@ -86,7 +87,6 @@ class ObservationResponseContract:
             raise ContractSkew(f"{self.label} observation status or media differs")
         if self.media_type == "application/json":
             # Only historical sources explicitly declaring JSON take this path.
-            from scripts.development_slice_client import MAXIMUM_RESPONSE_BYTES
 
             body = stream.read(MAXIMUM_RESPONSE_BYTES + 1)
             check_observation_deadline(deadline)
@@ -200,11 +200,17 @@ class ControllerContract:
         if body is None:
             return
         route = path.partition("?")[0]
-        for pattern, template, operations in self._operations:
-            if pattern.fullmatch(route):
-                break
-        else:
+        found = next(
+            (
+                (template, operations)
+                for pattern, template, operations in self._operations
+                if pattern.fullmatch(route)
+            ),
+            None,
+        )
+        if found is None:
             raise ContractSkew(f"{self._label} has no operation {method} {route}")
+        template, operations = found
         operation = operations.get(method.lower())
         if not isinstance(operation, dict):
             raise ContractSkew(f"{self._label} has no operation {method} {template}")
@@ -235,11 +241,17 @@ class ControllerContract:
     ) -> None:
         """Validate a receipt against the source of the Controller that sent it."""
         route = path.partition("?")[0]
-        for pattern, template, operations in self._operations:
-            if pattern.fullmatch(route):
-                break
-        else:
+        found = next(
+            (
+                (template, operations)
+                for pattern, template, operations in self._operations
+                if pattern.fullmatch(route)
+            ),
+            None,
+        )
+        if found is None:
             raise ContractSkew(f"{self._label} has no operation {method} {route}")
+        template, operations = found
         operation = operations.get(method.lower())
         if not isinstance(operation, dict):
             raise ContractSkew(f"{self._label} has no operation {method} {template}")

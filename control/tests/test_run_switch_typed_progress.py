@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+
 from vonk_control.lifecycle.run_switch import RunSwitchAdapter, _stored_child
 from vonk_control.lifecycle.types import State
 from vonk_control.models.jobs import Job

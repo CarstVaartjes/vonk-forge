@@ -7,9 +7,9 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
+from vonk_agent_protocol.job_inputs import RecipeJobInputFile, RecipeJobInputManifest
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     RunAdmissionCode,
@@ -19,7 +19,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
-    RecipeJobInputFile,
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,
@@ -28,45 +27,11 @@ from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.state_machines import RunState
-
-from .. import agent_operation_states as aos
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..compiled_artifact_contract import CompiledArtifactContract
-from ..lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
-from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.evidence import (
-    BookkeepingReason,
-    Damaged,
-    Residue,
-    read_or_rebuild,
-    retire_as_unknown,
-)
-from ..lifecycle.job_ranks import order_is_owner
-from ..lifecycle.types import Effect, Outcome, Reported
-from ..models.execution import (
-    ArtifactJob,
-    ArtifactJobBlob,
-    ArtifactJobFile,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
-from ..models.jobs import Job
-from ..models.mapping import ClusterMappingNode
-from ..models.operations import AgentOperation
-from ..owner_liveness import OwnerKind, OwnerRef, owner
-from ..recipe_operations.execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_installation_plan,
-    parse_stored_run_plan,
-)
-from ..recipe_operations.observation_helpers import reinstall_in_flight
-from ..recipe_operations.service import RecipeOperationService
-from ..settings import ARTIFACT_JOB_RETENTION_SECONDS
-from ..strict_json import read_stored_model
-from . import states as ajs
-from .blob_store import ArtifactBlobStore, StoredArtifactBlob
-from .contracts import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import agent_operation_states as aos
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore, StoredArtifactBlob
+from vonk_control.artifact_jobs.contracts import (
     ArtifactFileDeclaration,
     ArtifactJobError,
     ArtifactJobInvalid,
@@ -87,7 +52,47 @@ from .contracts import (
     _recipe_display,
     _record_unservable_run,
 )
-from .evidence import ArtifactJobResultEvidence, read_result_evidence
+from vonk_control.artifact_jobs.evidence import (
+    ArtifactJobResultEvidence,
+    read_result_evidence,
+)
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.compiled_artifact_contract import CompiledArtifactContract
+from vonk_control.lifecycle.agent_operation import (
+    AgentOperationAdapter,
+    retry_scheduled,
+)
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.lifecycle.evidence import (
+    BookkeepingReason,
+    Damaged,
+    Residue,
+    read_or_rebuild,
+    retire_as_unknown,
+)
+from vonk_control.lifecycle.job_ranks import order_is_owner
+from vonk_control.lifecycle.types import Effect, Outcome, Reported
+from vonk_control.models.execution import (
+    ArtifactJob,
+    ArtifactJobBlob,
+    ArtifactJobFile,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMappingNode
+from vonk_control.models.operations import AgentOperation
+from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
+from vonk_control.recipe_operations.execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+    parse_stored_run_plan,
+)
+from vonk_control.recipe_operations.observation_helpers import reinstall_in_flight
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.settings import ARTIFACT_JOB_RETENTION_SECONDS
+from vonk_control.strict_json import read_stored_model
 
 
 class ArtifactJobService:
@@ -325,8 +330,6 @@ class ArtifactJobService:
         def mapped_endpoints() -> set[str] | None:
             # Rebuild from evidence: the cluster mapping names each node's role
             # in the run, independent of the stored run plan.
-            if run.mapping_id is None:
-                return None
             return set(
                 session.scalars(
                     select(ClusterMappingNode.node_id).where(

@@ -10,32 +10,27 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-
+from vonk_control.categorized_errors import InvalidValue, MissingRecord
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import AvailabilityJobPayload, RecipeBuildParent
 from vonk_control.lifecycle.evidence import Residue
-
-from ..categorized_errors import InvalidValue, MissingRecord
-from ..jobs import states as job_states
-from ..jobs.documents import AvailabilityJobPayload, RecipeBuildParent
-from ..model_cache import states as model_cache_states
-from ..models.cache import ModelCacheOperation, RecipeBuild
-from ..models.jobs import Job
-from ..recipe_builds.cancellation import (
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.models.cache import ModelCacheOperation, RecipeBuild
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     current_build_consumers,
     lock_build_dependency,
     request_build_cancellation,
 )
-from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_batches.contract import UPDATE_KIND, RecipeUpdateResponse
-from ..stored.json_values import read_row_column
-from ..strict_json import serialize_json_value
-from .contracts import (
+from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     ModelCacheCancellationOwner,
     RecipeImageAvailabilityInvalid,
@@ -43,15 +38,26 @@ from .contracts import (
     _canonical_cancellation_id,
     _read,
 )
-from .reader_contract import (
+from vonk_control.recipe_image_availability.reader_contract import (
     StoredAvailabilityIdentity,
 )
-from .view_contract import (
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
+from vonk_control.recipe_update_batches.contract import (
+    UPDATE_KIND,
+    RecipeUpdateResponse,
+)
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
 
 def update(
@@ -138,7 +144,7 @@ def _request_cancellation(
     *,
     actor: str,
     request_id: str,
-    reason: str,
+    reason: object,
     authorize: bool,
 ) -> RecipeOperationCancellationResult | Residue:
     if job.kind not in {OPERATION_KIND, UPDATE_KIND}:
@@ -463,7 +469,7 @@ def _model_child_cancellation_pending(
         if getattr(error.orig, "sqlstate", None) == "55P03":
             return True, False
         raise
-    if cancelled_child_id is not None:
+    if cancelled_child_id is not None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
         cache = cast(ModelCacheCancellationOwner, self._model_cache)
         cache.signal_cancelled_operation(cancelled_child_id)
         # The child may still hold an artifact lock in another process.
@@ -528,7 +534,7 @@ def _build_child_cancellation_pending(
                 locked = lock_build_dependency(
                     session,
                     recipe_revision_id=recipe_revision_id
-                    if isinstance(recipe_revision_id, str)
+                    if isinstance(recipe_revision_id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                     else None,
                     builder_node_id=build.builder_node_id,
                     build_input_sha256=build_input_sha256
@@ -571,7 +577,7 @@ def _build_child_cancellation_pending(
                 not isinstance(child_payload, RecipeBuildParent)
                 or child_payload.owner_id != locked.id
                 or (
-                    not isinstance(operation_id, str)
+                    not isinstance(operation_id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                     and child.request_id != request_key
                 )
             ):

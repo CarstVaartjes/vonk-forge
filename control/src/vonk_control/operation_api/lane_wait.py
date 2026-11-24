@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
 
-from sqlalchemy.orm import Session
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-
-from ..models.operations import AgentOperation
-from ..operations.item_contract import OperationItem
-from ..persisted_waits import read_wait
-from ..wait_contract import QueueWait
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operations.item_contract import OperationItem
+from vonk_control.persisted_waits import read_wait
+from vonk_control.wait_contract import QueueWait
 
 
 def apply_queue_wait(item: OperationItem, wait: QueueWait | None) -> OperationItem:
@@ -25,9 +22,7 @@ def apply_queue_wait(item: OperationItem, wait: QueueWait | None) -> OperationIt
     return item
 
 
-def spark_busy_blockers(
-    session: Session, operations: Sequence[AgentOperation], now: datetime
-) -> dict[str, QueueWait]:
+def spark_busy_blockers(operations: Sequence[AgentOperation]) -> dict[str, QueueWait]:
     return {
         operation.id: wait
         for operation in operations

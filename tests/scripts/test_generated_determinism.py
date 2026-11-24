@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from tools import generated_contracts
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -49,7 +51,6 @@ def test_determinism_compares_output_bytes_and_membership(
 
 def test_xdist_workers_import_prepared_clients_without_regenerating(monkeypatch):
     """Workers must not overwrite modules while another worker imports them."""
-    from tools import generated_contracts
 
     monkeypatch.delenv("VONK_TEST_CONTRACT_ROOT", raising=False)
     monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
@@ -63,7 +64,6 @@ def test_xdist_workers_import_prepared_clients_without_regenerating(monkeypatch)
 
 def _stamped_tree(tmp_path: Path, monkeypatch) -> tuple[Path, list[str]]:
     """A tree with one generator input and one output per generator."""
-    from tools import generated_contracts
 
     root = tmp_path / "tree"
     (root / "inputs").mkdir(parents=True)
@@ -99,7 +99,6 @@ def _stamped_tree(tmp_path: Path, monkeypatch) -> tuple[Path, list[str]]:
 def test_preparation_generates_once_until_an_input_changes(tmp_path, monkeypatch):
     """Catches preparation that regenerates on every pytest start, and one
     whose stamp ignores the inputs."""
-    from tools import generated_contracts
 
     root, calls = _stamped_tree(tmp_path, monkeypatch)
 
@@ -119,7 +118,6 @@ def test_preparation_generates_once_until_an_input_changes(tmp_path, monkeypatch
 @pytest.mark.parametrize("damage", ["deleted", "edited"])
 def test_preparation_regenerates_damaged_outputs(tmp_path, monkeypatch, damage):
     """Catches a stamp that trusts outputs a tool or a checkout replaced."""
-    from tools import generated_contracts
 
     root, calls = _stamped_tree(tmp_path, monkeypatch)
     generated_contracts.prepare_generated_contracts(root)
@@ -138,7 +136,6 @@ def test_preparation_regenerates_damaged_outputs(tmp_path, monkeypatch, damage):
 def test_generated_outputs_are_not_their_own_inputs(tmp_path, monkeypatch):
     """Catches a fingerprint that hashes outputs living under an input root,
     which would mark every tree stale right after generating it."""
-    from tools import generated_contracts
 
     root, calls = _stamped_tree(tmp_path, monkeypatch)
     monkeypatch.setattr(generated_contracts, "INPUTS", ("inputs", "out"))

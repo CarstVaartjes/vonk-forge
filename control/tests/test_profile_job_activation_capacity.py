@@ -18,6 +18,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
+
 from vonk_control.models.execution import RecipeRun, ResourceReservation
 
 from .artifact_jobs_support import _configure_artifact_recipe

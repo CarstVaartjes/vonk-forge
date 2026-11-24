@@ -7,18 +7,18 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
+
+from tests.wire_probes import prebuilt_probe
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.host_helper import (
     ConfirmPackageActivationOperation,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
-    RecipeReconciliationIdentity,
     SignedHostHelperGrant,
 )
+from vonk_agent_protocol.recipe_operations import RecipeReconciliationIdentity
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.host_helper_authority import HostHelperGrantIssuer
-
-from tests.wire_probes import prebuilt_probe
 
 from .agent_api_support import (
     NODE_A,

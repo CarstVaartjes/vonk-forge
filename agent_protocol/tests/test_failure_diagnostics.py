@@ -3,17 +3,17 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentResult,
-    canonical_message,
-)
+
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import (
     LOG_TAIL_BYTES,
     FailureDiagnostics,
     FailureLogTail,
 )
+from vonk_agent_protocol.outcome import OutcomeFailed
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
+from vonk_agent_protocol.wire_model import canonical_message
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 
@@ -127,7 +127,10 @@ def test_a_traceback_tail_up_to_the_policy_bound_is_kept():
 
     kept = AgentResult.model_validate(_failed_start_with_tail(LOG_TAIL_BYTES))
     assert kept.evidence_drops == ()
+    assert isinstance(kept.result, OutcomeFailed)
+    assert kept.result.evidence is not None
     diagnostics = kept.result.evidence.diagnostics
+    assert diagnostics is not None
     assert len(diagnostics.stderr.text) == LOG_TAIL_BYTES
     assert diagnostics.stderr.text.endswith(
         "KeyError: 'layers.0.self_attn.conv1d.weight'"
@@ -137,4 +140,8 @@ def test_a_traceback_tail_up_to_the_policy_bound_is_kept():
     assert [drop.location for drop in over.evidence_drops] == [
         "result.evidence.diagnostics.stderr.text"
     ]
+    assert isinstance(over.result, OutcomeFailed)
+    assert over.result.evidence is not None
+    assert isinstance(over.result, OutcomeFailed)
+    assert over.result.evidence is not None
     assert over.result.evidence.diagnostics is None

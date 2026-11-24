@@ -8,25 +8,39 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
+from vonk_control.admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    lock_admission_rows,
+)
+from vonk_control.jobs import states as job_states
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_operations.contracts import ScopeIntentStatus
+from vonk_control.run_switch_operations.errors import (
+    RunSwitchRetryLater,
+    _RunSwitchBuildParentChanged,
+)
+from vonk_control.run_switch_operations.observation_helpers import _phase_request_key
+from vonk_control.run_switch_operations.planning_helpers import (
+    _run_switch_payload,
+    _scope_intent_status,
+    _stored_job_plan,
+)
+from vonk_control.run_switch_operations.provider import _ADAPTER
+from vonk_control.run_switch_operations.result_helpers import (
+    _bound_workload_intent,
+    _read_progress,
+)
 from vonk_control.run_switch_operations.results import _persisted_result
-
-from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
-from ..jobs import states as job_states
-from ..models.fleet import AgentNode
-from ..models.jobs import Job
-from ..recipe_builds.common import RecipeBuildAdmissionBusy
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..stored.json_values import read_row_column
-from .errors import RunSwitchRetryLater, _RunSwitchBuildParentChanged
-from .observation_helpers import _phase_request_key
-from .planning_helpers import _run_switch_payload, _stored_job_plan
-from .provider import _ADAPTER
-from .result_helpers import _bound_workload_intent, _read_progress
+from vonk_control.stored.rows import read_row_column
 
 
 def _lock_phase_owner(
@@ -119,7 +133,6 @@ def _lock_current_build_parent(
     parent, before the lifecycle service locks the build. All acquisition is
     nonblocking and the caller retains these locks through its SQL commit.
     """
-    from .retry_holds import RetryHoldsMixin
 
     if not 0 <= phase_index < len(plan.phases) or (
         plan.phases[phase_index].kind,
@@ -147,11 +160,11 @@ def _lock_current_build_parent(
         )["build-scope-nodes"]
         job = _lock_phase_owner(session, request_key, phase_index, item_index)
     except AdmissionLockBusy as error:
-        raise RecipeBuildAdmissionBusy() from error
+        raise RecipeBuildAdmissionBusy from error
     except DBAPIError as error:
         if getattr(error.orig, "sqlstate", None) != "55P03":
             raise
-        raise RecipeBuildAdmissionBusy() from error
+        raise RecipeBuildAdmissionBusy from error
     if (
         job is None
         or job.kind != ProfileChildJobKind.RUN_SWITCH.value
@@ -178,7 +191,7 @@ def _lock_current_build_parent(
     if (
         not _checkpoint_matches(job, current, phase_index, item_index, child_id)
         or current.cancellation != cancellation
-        or RetryHoldsMixin._scope_intent_status(session, job) != "current"
+        or _scope_intent_status(session, job) != ScopeIntentStatus.CURRENT
     ):
         raise _RunSwitchBuildParentChanged(RunSwitchCode.CONTAINER_BUILD_PARENT_CHANGED)
     return job
@@ -198,6 +211,3 @@ def _checkpoint_matches(
         and progress.item_index == item_index
         and progress.child_operation_id == child_id
     )
-
-
-_UNKNOWN_MEMBER_NODE_ID = "spk_" + "0" * 32

@@ -12,12 +12,14 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.contracts import canonical_message
+from sqlalchemy.orm import Session, sessionmaker
+
+from cluster_profiles.cli_json_contract import DocumentKind
 from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     ObservedAssignmentState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_profile_contract.applications import (
@@ -58,8 +60,6 @@ from vonk_control.models.fleet import (
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.operation_api.durable import durable_operation_services
 
-from cluster_profiles.cli_json_contract import DocumentKind
-
 from .conftest import load_tools_module
 from .fleet_profiles_support import _installed_pair_plan
 from .recipe_routes_support import NOW as ROUTE_NOW
@@ -79,14 +79,17 @@ _CLI_ENDPOINTS = load_tools_module("vonkctl_json_contract").DOCUMENTS[
 
 
 def _api(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     route_root: Path,
     *,
     profiles: FleetProfileService | None = None,
     projection_now: datetime = ROUTE_NOW,
 ) -> tuple[TestClient, TokenCodec]:
     codec = TokenCodec(_TOKEN_KEY)
-    clock = lambda: projection_now
+
+    def clock():
+        return projection_now
+
     profile_service = profiles or FleetProfileService(sessions, clock=clock)
     operations = durable_operation_services(
         sessions,
@@ -216,7 +219,7 @@ def test_installed_cli_first_connection_requires_a_valid_controller_token(
 
 
 def _seed_profile_application_for_run(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     run_id: str,
     *,
     profile_number: int = 1,
@@ -234,12 +237,14 @@ def _seed_profile_application_for_run(
         assert run is not None
         installation = session.get(RecipeInstallation, run.installation_id)
         mapping = session.get(ClusterMapping, run.mapping_id)
-        assert installation is not None and mapping is not None
+        assert installation is not None
+        assert mapping is not None
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         assert revision is not None
         recipe = session.get(CatalogDocument, revision.document_id)
         build = session.get(RecipeBuild, installation.recipe_build_id)
-        assert recipe is not None and build is not None
+        assert recipe is not None
+        assert build is not None
         assignment_alias = (
             None
             if desired_state == DesiredAssignmentState.INSTALLED
@@ -249,10 +254,11 @@ def _seed_profile_application_for_run(
         # The route fixture is intentionally small. Give its installed group the
         # same complete image identity the production owner validates before it
         # will treat a running assignment as current.
-        build.image_digest = "sha256:" + "d" * 64
+        image_digest = "sha256:" + "d" * 64
+        build.image_digest = image_digest
         build.oci_layout_sha256 = "e" * 64
         build.image_bytes = 1_024
-        installation.image_digest = build.image_digest
+        installation.image_digest = image_digest
         installation.plan_digest = "f" * 64
         installation.plan = _installed_pair_plan(
             mapping_id=mapping.id,
@@ -562,7 +568,8 @@ def test_invalid_profile_history_is_reported_without_false_alias_not_found(
     assert "stored document is invalid" in view.projection_issue.detail
     with sessions() as session:
         application = session.get(FleetProfileApplication, application_id)
-        assert application is not None and application.plan == {}
+        assert application is not None
+        assert application.plan == {}
 
 
 @pytest.mark.lane
@@ -594,7 +601,8 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
     assert len(owner_view.assignments) == 1
     loaded_assignment = owner_view.assignments[0]
     endpoint = loaded_assignment.endpoint
-    assert endpoint is not None and loaded_assignment.alias is not None
+    assert endpoint is not None
+    assert loaded_assignment.alias is not None
 
     with _https_api_peer(tmp_path, api, headers) as (url, certificate, peer):
         environment = _credentials_environment(tmp_path, url, certificate, token)

@@ -10,6 +10,7 @@ from pydantic import (
     Field,
     StringConstraints,
 )
+
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileInstallationPolicy,

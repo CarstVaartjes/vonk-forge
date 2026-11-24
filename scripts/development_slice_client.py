@@ -14,7 +14,9 @@ MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024
 ObservationTransport = Callable[
     [str, dict[str, str], float], tuple[int, dict[str, object]]
 ]
-Transport = Callable[[str, str, bytes | None, dict[str, str], float], tuple[int, bytes]]
+Transport = Callable[
+    [str, str, bytes | None, dict[str, str], float], tuple[object, object]
+]
 
 
 class SliceError(RuntimeError):

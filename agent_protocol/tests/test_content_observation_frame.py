@@ -2,8 +2,9 @@
 
 from pathlib import Path
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import RecipeRunInspectionRequest
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightCompletion
+from vonk_agent_protocol.wire_model import canonical_message
 
 
 def test_content_observation_frame_round_trips_with_unused_fields_omitted():
@@ -22,7 +23,6 @@ def test_content_observation_frame_round_trips_with_unused_fields_omitted():
 def test_preflight_completion_cache_uses_the_canonical_shared_document():
     # Wrong implementation: native cache fields drift from their canonical
     # fence and result, so a restarted observer cannot consume the receipt.
-    from vonk_agent_protocol.runtime_preflight import RuntimePreflightCompletion
 
     raw = (
         (Path(__file__).parents[1] / "fixtures/runtime-preflight-completion.json")

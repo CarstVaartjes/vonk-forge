@@ -4,17 +4,44 @@ from __future__ import annotations
 
 import ast
 import functools
+import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
+import sys
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
 
+from scripts.development_slice_client import Client
+from tests.acceptance import artifact_job_canary as job
+from tests.acceptance.controller_contract import ControllerContract
 from tests.spark_lifecycle_runner_support import _module
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_control.auth import TokenCodec
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.compiled_artifact_contract import compile_artifact_contract
+from vonk_control.fleet_profile_contract.assessment import (
+    FleetProfileAdmissionDecision,
+)
+from vonk_control.harnesses.canonical import validate_runtime_policy
+from vonk_control.model_primitives import Base
+from vonk_control.recipe_operations.start_payloads import (
+    RecipeStartPlacement,
+    build_recipe_start_payload,
+)
+from vonk_control.source_bundles import SourceBundleStore
 
 
 @pytest.mark.parametrize("foreign_host", [False, True])
@@ -22,12 +49,6 @@ def test_lost_start_probe_binds_produced_placement_to_owned_interface(
     tmp_path: Path,
     foreign_host: bool,
 ) -> None:
-    from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
-    from vonk_agent_protocol.recipe_operations import RecipeStartPayload
-    from vonk_control.recipe_operations.start_payloads import (
-        RecipeStartPlacement,
-        build_recipe_start_payload,
-    )
 
     lifecycle = _module()
     address = "172.31.42.1"
@@ -114,9 +135,6 @@ def test_artifact_job_stub_writes_its_result_or_fails_with_stderr(
     tmp_path: Path,
 ) -> None:
     """The stub the job canary installs, run with the flags the job harness passes."""
-    import sys
-
-    from tests.acceptance import artifact_job_canary as job
 
     script = tmp_path / job.JOB_SCRIPT_NAME
     script.write_bytes(job.JOB_SCRIPT)
@@ -125,8 +143,14 @@ def test_artifact_job_stub_writes_its_result_or_fails_with_stderr(
 
     def run(exit_code: int) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, script, "--exit-code", str(exit_code)]
-            + ["--output-dir", str(outputs)],
+            [
+                sys.executable,
+                script,
+                "--exit-code",
+                str(exit_code),
+                "--output-dir",
+                str(outputs),
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -155,18 +179,6 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
         "VONK_SYNTHETIC_CANARY_INDEX",
         "tests/fixtures/canonical-synthetic-canary/index.json",
     )
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from vonk_control.auth import TokenCodec
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.compiled_artifact_contract import compile_artifact_contract
-    from vonk_control.harnesses.canonical import validate_runtime_policy
-    from vonk_control.model_primitives import Base
-    from vonk_control.source_bundles import SourceBundleStore
-    from vonk_forge_contracts import RecipeDefinition
 
     lifecycle = _module()
     original = lifecycle._canonical_canary_fixture(Path(library))
@@ -187,7 +199,8 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
     specification = importlib.util.spec_from_file_location(
         "spark_canary_catalog_import", lifecycle.CANARY_CATALOG_IMPORT
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
     index = json.loads(fixture.index_bytes)
@@ -198,7 +211,10 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 10, 15, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 10, 15, tzinfo=UTC)
+
     reader = program.FixtureReader(index, {digest: archive})
     # Copying the original context digest after adding the job used to make
     # candidate acceptance fail at package ingress. Editorial changes reuse it.
@@ -238,13 +254,6 @@ def test_artifact_job_canary_speaks_the_controller_contract() -> None:
     A scripted Controller answers with documents its own OpenAPI accepts; the
     canary must drive two jobs to success and one to failure with evidence.
     """
-    import hashlib
-    import re
-    import uuid
-
-    from scripts.development_slice_client import Client
-    from tests.acceptance import artifact_job_canary as job
-    from tests.acceptance.controller_contract import ControllerContract
 
     # The operator CLI's copy of the Controller contract.
     openapi = (
@@ -373,9 +382,6 @@ def test_preview_diagnostic_names_assignment_level_admission_blockers() -> None:
     pytest.importorskip(
         "fastapi", reason="Controller contract tests run in the control suite"
     )
-    from vonk_control.fleet_profile_contract.assessment import (
-        FleetProfileAdmissionDecision,
-    )
 
     lifecycle = _module()
 
@@ -439,7 +445,6 @@ def _canary_lane_under_withdrawal(
     lane stops at the profile load, the first step after the re-offered serve.
     """
     lifecycle = _module()
-    from vonk_control.library import contract
 
     sha = "a" * 64
     fixture = lifecycle.CanonicalCanaryFixture(
@@ -457,7 +462,7 @@ def _canary_lane_under_withdrawal(
         recipe={},
     )
     monkeypatch.setattr(
-        contract,
+        lifecycle,
         "LibraryRecipeIdentity",
         SimpleNamespace(
             model_validate_json=lambda _value: SimpleNamespace(
@@ -589,8 +594,10 @@ def test_a_canary_the_library_withdrew_is_offered_again_and_served(
         lane._run_synthetic_canary(NODE, carry=lambda: None)
 
     # One re-import, and the second attempt downloads under its own request key.
-    assert len(imported) == 2 and imported[0] != imported[1]
-    assert len(downloads) == 2 and downloads[0] != downloads[1]
+    assert len(imported) == 2
+    assert imported[0] != imported[1]
+    assert len(downloads) == 2
+    assert downloads[0] != downloads[1]
     assert len(lane.loads) == 1
 
 
@@ -605,9 +612,11 @@ def test_a_canary_withdrawn_between_preview_and_load_is_offered_again(
     with pytest.raises(lifecycle.LifecycleError, match="reached the load await"):
         lane._run_synthetic_canary(NODE, carry=lambda: None)
 
-    assert len(imported) == 2 and len(downloads) == 2
+    assert len(imported) == 2
+    assert len(downloads) == 2
     # The second load has its own request key, and only it was awaited.
-    assert len(lane.loads) == 2 and lane.loads[0] != lane.loads[1]
+    assert len(lane.loads) == 2
+    assert lane.loads[0] != lane.loads[1]
     assert lane.awaited == [True]
 
 
@@ -624,7 +633,8 @@ def test_a_canary_withdrawn_twice_fails_with_the_catalog_sync_status(
     message = str(raised.value)
     assert "withdrew the fixture again" in message
     assert "profile.recipe_unavailable" in message
-    assert '"trigger": "automatic"' in message and '"withdrawn_count": 2' in message
+    assert '"trigger": "automatic"' in message
+    assert '"withdrawn_count": 2' in message
     assert len(imported) == 2
 
 
@@ -652,7 +662,6 @@ def test_an_unreadable_sync_status_never_replaces_the_canary_failure(
 
 
 def _calls(node, name: str) -> bool:
-    import ast
 
     return any(
         isinstance(call, ast.Call) and getattr(call.func, "attr", None) == name
@@ -666,7 +675,6 @@ def _serves_without_admission(tree) -> list[str]:
     The Controller previews again when it loads, so a serve that ends at the
     preview leaves a withdrawal between preview and load outside the retry.
     """
-    import ast
 
     functions = {
         node.name: node
@@ -696,8 +704,9 @@ def _serves_without_admission(tree) -> list[str]:
     return missing
 
 
-def _unguarded_fixture_imports(node, enclosing: tuple = ()) -> list[str]:
-    import ast
+def _unguarded_fixture_imports(
+    node, enclosing: tuple[ast.FunctionDef | ast.AsyncFunctionDef, ...] = ()
+) -> list[str]:
 
     found: list[str] = []
     for child in ast.iter_child_nodes(node):
@@ -706,8 +715,7 @@ def _unguarded_fixture_imports(node, enclosing: tuple = ()) -> list[str]:
             continue
         functions = (*enclosing, child)
         if (
-            child.name != "_import_canary_catalog"
-            and child.name != "_import_candidate_library"
+            child.name not in {"_import_canary_catalog", "_import_candidate_library"}
             and _calls(child, "_import_canary_catalog")
             and not any(_calls(f, "_offered_once_more") for f in functions)
         ):
@@ -726,7 +734,6 @@ def test_every_fixture_import_in_the_lane_code_is_offered_once_more() -> None:
     candidate library is only imported: the carry that follows serves the
     workload that already runs.
     """
-    import ast
 
     root = Path(__file__).parent / "acceptance"
     unguarded: list[str] = []
@@ -824,12 +831,12 @@ def test_the_raw_profile_preview_request_lives_only_in_the_admitted_preview() ->
         for function in ast.walk(tree):
             if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
-            for node in ast.walk(function):
-                if (
-                    isinstance(node, ast.Constant)
-                    and node.value == "/api/profile/1/preview"
-                ):
-                    found.append((path.name, function.name))
+            found.extend(
+                (path.name, function.name)
+                for node in ast.walk(function)
+                if isinstance(node, ast.Constant)
+                and node.value == "/api/profile/1/preview"
+            )
         module_level = [
             node
             for node in ast.walk(tree)

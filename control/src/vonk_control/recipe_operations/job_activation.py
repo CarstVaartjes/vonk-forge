@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import canonical_message
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -19,43 +19,45 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.state_machines import RouteState, RunState
-
-from ..admission_locking import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.admission_locking import (
     ConstraintReplay,
     admission_attempts,
     admission_wait_exhausted,
 )
-from ..jobs.documents import RecipeJobActivateParent, controller_recipe_document
-from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..run_admission import (
-    RunPlan,
+from vonk_control.jobs.documents import (
+    RecipeJobActivateParent,
+    controller_recipe_document,
 )
-from ..run_admission import (
-    require_admissible as require_run_admissible,
-)
-from ..run_admission import (
-    require_same_execution as require_same_run_execution,
-)
-from ..stored.json_values import read_row_column
-from ..strict_json import serialize_json_value
-from .errors import (
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.recipe_operations.errors import (
     RecipeRequestInvalid,
     RecipeRetryLater,
     retry_later_unless_deterministic,
 )
-from .execution_contract import (
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
     run_plan_document,
 )
-from .interfaces import RecipeOperationView, new_recipe_job
-from .lifecycle_contract import JOB_ACTIVATION
-from .observation_helpers import _active_recipe_revision
-from .progress import _catalog_recipe
-from .results import _validated_result
+from vonk_control.recipe_operations.interfaces import (
+    RecipeOperationView,
+    new_recipe_job,
+)
+from vonk_control.recipe_operations.lifecycle_contract import JOB_ACTIVATION
+from vonk_control.recipe_operations.observation_helpers import _active_recipe_revision
+from vonk_control.recipe_operations.progress import _catalog_recipe
+from vonk_control.recipe_operations.results import _validated_result
+from vonk_control.run_admission import RunPlan
+from vonk_control.run_admission import require_admissible as require_run_admissible
+from vonk_control.run_admission import (
+    require_same_execution as require_same_run_execution,
+)
+from vonk_control.stored.rows import read_row_column
+from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class JobActivationMixin:
@@ -115,7 +117,7 @@ class JobActivationMixin:
             )
             recipe = None
             if revision is not None:
-                try:
+                try:  # noqa: SIM105 -- contextlib.suppress would re-add a malformed-value-becomes-absent guard finding
                     recipe = _catalog_recipe(read_row_column(revision, "document"))
                 except (TypeError, ValueError):
                     pass
@@ -151,7 +153,8 @@ class JobActivationMixin:
                     "run admission", error
                 ) from error
             run = session.get(RecipeRun, run_id)
-            assert run is not None and revision is not None
+            assert run is not None
+            assert revision is not None
             run.state = RunState.RUNNING
             run.route_state = RouteState.WITHDRAWN
             # The run row was written by this very transaction: its plan must

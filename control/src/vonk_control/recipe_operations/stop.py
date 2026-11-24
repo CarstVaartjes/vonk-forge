@@ -12,9 +12,9 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -23,8 +23,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import RunState
-
-from ..admission_locking import (
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.admission_locking import (
     AdmissionLockBusy,
     ConstraintReplay,
     admission_attempts,
@@ -33,36 +33,38 @@ from ..admission_locking import (
     is_admission_contention,
     set_admission_timeout,
 )
-from ..bounded_json import require_mapping
-from ..failure_classification import disposition
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
-from ..jobs.documents import RecipeStopParent, controller_recipe_document
-from ..logging import redact_text
-from ..models.execution import RecipeRun
-from ..models.jobs import Job
-from ..models.operations import AgentOperation
-from ..persisted_waits import schedule_wait
-from ..recipe_routes.shared import RecipeRouteError, route_publication_transaction
-from ..run_admission import RunAdmissionBusy
-from ..stored.json_values import read_row_column
-from .constants import _STOP_WITHDRAWAL_ATTEMPTS
-from .errors import (
+from vonk_control.bounded_json import require_mapping
+from vonk_control.failure_classification import disposition
+from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
+from vonk_control.jobs.documents import RecipeStopParent, controller_recipe_document
+from vonk_control.logging import redact_text
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.constants import _STOP_WITHDRAWAL_ATTEMPTS
+from vonk_control.recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
     RecipeRetryLater,
     _RouteNotWithdrawn,
     _ServiceStopReplay,
 )
-from .impact_plans import (
-    StopPlan,
+from vonk_control.recipe_operations.impact_plans import StopPlan
+from vonk_control.recipe_operations.intent import _bound_workload_intent
+from vonk_control.recipe_operations.interfaces import (
+    RecipeOperationView,
+    UndispatchedStopView,
 )
-from .intent import _bound_workload_intent
-from .interfaces import RecipeOperationView, UndispatchedStopView
+from vonk_control.recipe_routes.shared import (
+    RecipeRouteError,
+    route_publication_transaction,
+)
+from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.stored.rows import read_row_column
 
 if TYPE_CHECKING:
-    from .service import RecipeOperationService
+    from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 class StopMixin:
@@ -294,7 +296,6 @@ class StopMixin:
             try:
                 job = service._dispatch_stop_after_withdrawal(
                     run_id,
-                    plan_digest=plan_digest,
                     actor=actor,
                     request_id=request_id,
                     workload_intent_ordinal=workload_intent_ordinal,

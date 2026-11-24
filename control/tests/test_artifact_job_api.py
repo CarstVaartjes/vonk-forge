@@ -7,17 +7,29 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http import HTTPStatus
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from starlette.responses import Response
+
+from cluster_profiles.generated_control.models.artifact_job_response import (
+    ArtifactJobResponse as ClientArtifactJobResponse,
+)
+from vonk_control.artifact_jobs import inputs
 from vonk_control.artifact_jobs.api import (
     ArtifactJobCreate,
     install_artifact_job_routes,
 )
-from vonk_control.artifact_jobs.contracts import ArtifactJobResponse, ArtifactJobView
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.contracts import (
+    ArtifactFileDeclaration,
+    ArtifactJobResponse,
+    ArtifactJobView,
+    ArtifactOutputFile,
+    OutputLimits,
+)
 from vonk_control.artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
@@ -25,12 +37,15 @@ from vonk_control.artifact_jobs.evidence import (
 )
 from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.auth import Actor
+from vonk_control.bounded_retry import bounded_attempts
 from vonk_control.compiled_artifact_contract import CompiledArtifactContract
 from vonk_control.models.execution import ArtifactJobBlob, ArtifactJobFile
-from vonk_control.strict_json import ControllerAPIRoute
+from vonk_control.operator_acceptance import ControllerAPIRoute
 
-from cluster_profiles.generated_control.models.artifact_job_response import (
-    ArtifactJobResponse as ClientArtifactJobResponse,
+from .artifact_jobs_support import (
+    artifact_create_request,
+    create_artifact_job,
+    running_artifact_service,
 )
 
 JOB_ID = "00000000-0000-4000-8000-000000000001"
@@ -90,18 +105,18 @@ class _ArtifactJobView(ArtifactJobView):
     )
     input_manifest_sha256: str = "b" * 64
     input_total_bytes: int = 0
-    input_declarations: tuple[dict[str, object], ...] = ()
-    input_files: tuple[dict[str, object], ...] = ()
-    output_limits: dict[str, object] = field(
-        default_factory=lambda: {
-            "max_files": 1,
-            "max_file_bytes": 1024,
-            "max_total_bytes": 1024,
-            "allowed_media_types": ["image/png"],
-        }
+    input_declarations: tuple[ArtifactFileDeclaration, ...] = ()
+    input_files: tuple[ArtifactFileDeclaration, ...] = ()
+    output_limits: OutputLimits | None = field(
+        default_factory=lambda: OutputLimits(
+            max_files=1,
+            max_file_bytes=1024,
+            max_total_bytes=1024,
+            allowed_media_types=["image/png"],
+        )
     )
     output_manifest_sha256: str | None = None
-    output_files: tuple[dict[str, object], ...] = ()
+    output_files: tuple[ArtifactOutputFile, ...] = ()
     result_evidence: ArtifactJobResultEvidence | None = None
     status_reason: str | None = None
     timeout_seconds: int = 60
@@ -340,7 +355,6 @@ def test_artifact_job_boundary_rejects_unknown_top_level_and_scalar_coercion(
 def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
     tmp_path: Path,
 ) -> None:
-    from .artifact_jobs_support import artifact_create_request, running_artifact_service
 
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
@@ -419,7 +433,8 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
     )
     assert uploaded.status_code == 200
     assert uploaded.json()["input_files"] == [
-        {**item, "media_type": "image/png"} for item in cast(list, body["inputs"])
+        {**item, "media_type": "image/png"}
+        for item in cast(list[dict[str, Any]], body["inputs"])
     ]
     finalized = client.post(f"/api/artifact-jobs/{draft_id}/finalize")
     assert finalized.status_code == 200
@@ -450,7 +465,8 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
             )
         )
         blob = session.get(ArtifactJobBlob, digest)
-        assert file is not None and blob is not None
+        assert file is not None
+        assert blob is not None
         assert (file.media_type, file.size_bytes, file.blob_sha256) == (
             "image/png",
             len(content),
@@ -459,7 +475,8 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
         blob_path = service._blob_store.resolve(
             blob.storage_key, blob.sha256, blob.size_bytes
         )
-    assert blob_path is not None and blob_path.read_bytes() == content
+    assert blob_path is not None
+    assert blob_path.read_bytes() == content
 
 
 def test_result_evidence_preserves_current_values_without_field_presence() -> None:
@@ -480,13 +497,6 @@ def test_result_evidence_preserves_current_values_without_field_presence() -> No
 
 def test_capacity_unknown_releases_upload_and_fresh_draft_is_admitted(tmp_path):
     """Catches translating storage shortage into a conflict at the HTTP boundary."""
-    from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
-
-    from .artifact_jobs_support import (
-        artifact_create_request,
-        create_artifact_job,
-        running_artifact_service,
-    )
 
     _, _, _, service, run_id, _ = running_artifact_service(tmp_path)
     store = ArtifactBlobStore(tmp_path / "quota", max_stored_bytes=4)
@@ -543,15 +553,6 @@ def test_library_upload_reobserves_capacity_after_releasing_holds(
     tmp_path, monkeypatch
 ):
     """Catches an ended library upload with no automatic bounded observation."""
-    from vonk_control.artifact_jobs import inputs
-    from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
-    from vonk_control.bounded_retry import bounded_attempts
-
-    from .artifact_jobs_support import (
-        artifact_create_request,
-        create_artifact_job,
-        running_artifact_service,
-    )
 
     _, _, _, service, run_id, _ = running_artifact_service(tmp_path)
     store = ArtifactBlobStore(tmp_path / "quota", max_stored_bytes=4)

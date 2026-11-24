@@ -108,7 +108,7 @@ def _safe_object_bytes(
 ) -> tuple[bytes | None, str]:
     directory_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
     file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
-    root = Path(os.path.abspath(os.fspath(object_root)))
+    root = Path(os.path.abspath(os.fspath(object_root)))  # noqa: PTH100 -- abspath is lexical; resolve() would follow symlinks in a no-follow verifier
     relative = Path(relative_path)
     relative_parts = relative.parts
     if (
@@ -190,7 +190,7 @@ def _safe_release_document(
         document = model.model_validate_json(raw).model_dump(mode="json", by_alias=True)
     except (UnicodeDecodeError, ValueError) as error:
         raise ContractError(f"{label} is invalid") from error
-    if not isinstance(document, dict) or raw != _canonical(document):
+    if not isinstance(document, dict) or raw != _canonical(document):  # pyright: ignore[reportUnnecessaryIsInstance]  # the canonical-JSON check also covers the dump
         raise ContractError(f"{label} is not canonical JSON")
     return document
 
@@ -235,7 +235,7 @@ def recompute_publication_graphs(
     generation: str,
 ) -> dict[str, dict[str, Any]]:
     """Verify immutable authority objects and return exact per-platform graphs."""
-    from vonk_agent_protocol.installer_release import (
+    from vonk_agent_protocol.installer_release import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
         InstallerAcceptanceBaselineRelease,
         InstallerCandidateRelease,
     )
@@ -243,12 +243,12 @@ def recompute_publication_graphs(
     release_prefix = f"artifacts/{channel}/releases/{generation}"
     candidate_relative = f"{release_prefix}/release.json"
     baseline_relative = f"{release_prefix}/acceptance-baseline/release.json"
-    root = Path(os.path.abspath(os.fspath(object_root)))
+    root = Path(os.path.abspath(os.fspath(object_root)))  # noqa: PTH100 -- abspath is lexical; resolve() would follow symlinks in a no-follow verifier
     expected_candidate = root / candidate_relative
     expected_baseline = root / baseline_relative
     if (
-        Path(os.path.abspath(os.fspath(candidate_release))) != expected_candidate
-        or Path(os.path.abspath(os.fspath(baseline_release))) != expected_baseline
+        Path(os.path.abspath(os.fspath(candidate_release))) != expected_candidate  # noqa: PTH100 -- abspath is lexical; resolve() would follow symlinks in a no-follow verifier
+        or Path(os.path.abspath(os.fspath(baseline_release))) != expected_baseline  # noqa: PTH100 -- abspath is lexical; resolve() would follow symlinks in a no-follow verifier
     ):
         raise ContractError(
             "publication release paths do not match the candidate generation"
@@ -300,7 +300,7 @@ def recompute_publication_graphs(
         not images
         or baseline.get("images") != images
         or any(
-            not isinstance(name, str)
+            not isinstance(name, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # image names are re-checked as strings
             or not name
             or not isinstance(image, str)
             or PINNED_IMAGE.fullmatch(image) is None
@@ -439,7 +439,8 @@ def _version_tuple(
     match = pattern.fullmatch(value)
     if match is None:
         raise ContractError(f"{label} is invalid")
-    return tuple(int(part) for part in match.groups()[:3])
+    major, minor, patch = (int(part) for part in match.groups()[:3])
+    return major, minor, patch
 
 
 def _validate_graph(

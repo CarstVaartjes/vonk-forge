@@ -15,12 +15,13 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts import ModelDefinition
+from vonk_forge_contracts.model import ModelReference
+
 from vonk_control.bounded_json import text
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
-from vonk_forge_contracts import ModelDefinition
-from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
@@ -37,7 +38,8 @@ def _first_manifest_artifact(document: dict[str, object]) -> dict[str, object]:
     """Return a mutable copy of the first artifact of a manifest document."""
 
     artifacts = document["artifacts"]
-    assert isinstance(artifacts, list) and artifacts
+    assert isinstance(artifacts, list)
+    assert artifacts
     first = artifacts[0]
     assert isinstance(first, dict)
     return dict(first)
@@ -124,7 +126,7 @@ def _watch_services_on(sessions):
     try:
         yield
     finally:
-        ModelCacheService.__init__ = original  # type: ignore[method-assign]
+        ModelCacheService.__init__ = original
         started = [
             service
             for service in built

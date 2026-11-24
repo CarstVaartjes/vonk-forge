@@ -12,49 +12,59 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileSwitchChildKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
-from vonk_control.run_switch_operations.results import _persisted_result
-
-from ..bounded_json import require_integer
-from ..failure_classification import error_code, is_security_failure
-from ..jobs import states as job_states
-from ..lifecycle.run_switch import end_unclaimed_children
-from ..models.execution import RecipeRun
-from ..models.jobs import Job
-from ..operations.blockers import OperationBlocker, bound_blockers
-from ..persisted_waits import schedule_wait
-from ..recipe_operations.errors import RecipeRequestInvalid
-from ..recipe_operations.interfaces import RecipeOperationView
-from ..reservation_owners import release_dead_owner_reservations
-from ..run_switch_contract.operations import (
+from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
+from vonk_control.bounded_json import require_integer
+from vonk_control.distribution_executor.receipts import _ChildView
+from vonk_control.failure_classification import error_code, is_security_failure
+from vonk_control.jobs import states as job_states
+from vonk_control.lifecycle.run_switch import end_unclaimed_children
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.operations.blockers import OperationBlocker, bound_blockers
+from vonk_control.persisted_waits import schedule_wait
+from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.reservation_owners import release_dead_owner_reservations
+from vonk_control.run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
 )
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.progress_view import (
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
+from vonk_control.run_switch_contract.progress_view import (
     RECOVERY_STALL_WINDOW,
     _merge_progress_evidence,
 )
-from ..stall_window import Verdict, stall_deadline
-from ..stored.json_values import read_row_column
-from .awaited_children import start_request_key
-from .errors import RunSwitchOperationConflict
-from .observation_window import checkpoint_deadline, checkpoint_verdict
-from .ownership import _checkpoint_matches, _complete_cancellation
-from .planning_helpers import _aware, _now, _stored_job_plan
-from .provider import _ADAPTER
-from .result_helpers import _read_progress
+from vonk_control.run_switch_operations.awaited_children import start_request_key
+from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.run_switch_operations.observation_window import (
+    checkpoint_deadline,
+    checkpoint_verdict,
+)
+from vonk_control.run_switch_operations.ownership import (
+    _checkpoint_matches,
+    _complete_cancellation,
+)
+from vonk_control.run_switch_operations.planning_helpers import (
+    _aware,
+    _now,
+    _stored_job_plan,
+)
+from vonk_control.run_switch_operations.provider import _ADAPTER
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stall_window import Verdict, stall_deadline
+from vonk_control.stored.rows import read_row_column
 
 #: How soon an ended owner offers again the work another writer held.
 _REOFFER_INTERVAL = timedelta(seconds=5)
 
 if TYPE_CHECKING:
-    from ..distribution_executor.receipts import _ChildView
-    from .service import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 class EndingsMixin:
@@ -67,9 +77,6 @@ class EndingsMixin:
         remote effects are retained without withdrawing routes.
         """
         service = typing_cast("RunSwitchOperationService", self)
-        from vonk_agent_protocol.agent_words import ProfileChildPhase
-
-        from ..agent_jobs.retirement import release_owned_reservations_in_session
 
         with service._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
@@ -175,9 +182,8 @@ class EndingsMixin:
         corrupt receipts, re-planning or a worker restart. Ending observation
         neither Stops a child nor withdraws a serving route.
         """
-        if (
-            progress.cancellation is not None
-            or progress.profile_application_id is not None
+        if progress.cancellation is not None or (
+            progress.profile_application_id is not None
             and (plan := _stored_job_plan(job)) is not None
             and plan.action == ProfileSwitchChildKind.STOP
         ):
@@ -267,7 +273,6 @@ class EndingsMixin:
         self, operation_id: str
     ) -> RecipeOperationView | _ChildView | RunSwitchOperation | None:
         service = typing_cast("RunSwitchOperationService", self)
-        from ..distribution_executor.receipts import _ChildView
 
         getter = getattr(service._phase_executor, "get", None)
         if callable(getter):
@@ -340,7 +345,7 @@ class EndingsMixin:
                     job.result = _persisted_result(progress)
                     job.updated_at = now
                 return
-            elif (
+            if (
                 not definite
                 and not is_security_failure(failure_code)
                 and checkpoint is not None

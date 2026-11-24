@@ -10,6 +10,7 @@ words (the preparation stages live in their own column).
 from __future__ import annotations
 
 from sqlalchemy import inspect, text
+
 from vonk_control.db.schema import reconcile_schema
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import ArtifactJob
@@ -52,7 +53,8 @@ def test_an_old_artifact_job_table_is_reconciled_in_place(postgres_engine):
         columns = {
             item["name"]: item for item in inspect(connection).get_columns(TABLE)
         }
-        assert "preparation" in columns and "cancel_requested_at" in columns
+        assert "preparation" in columns
+        assert "cancel_requested_at" in columns
         assert columns["state"]["nullable"] is True
         check = next(
             item["sqltext"]

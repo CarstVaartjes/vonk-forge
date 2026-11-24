@@ -4,10 +4,11 @@ import logging
 from pathlib import Path
 
 import pytest
-import vonk_control
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
+
+import vonk_control
 from vonk_control.api import production
 from vonk_control.api.common import _LOGGER
 

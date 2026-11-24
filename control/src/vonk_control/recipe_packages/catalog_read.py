@@ -21,7 +21,6 @@ from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 
 from pydantic import BaseModel
-from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_forge_contracts import CatalogModelEntry, CatalogRecipeEntry
 from vonk_forge_contracts.catalog_reader import (
     CatalogProblem,
@@ -31,10 +30,11 @@ from vonk_forge_contracts.catalog_reader import (
     UnrecognisedWordReport,
 )
 
-from ..catalog.revision_contract import PublishedDocument
-from ..catalog.sync_contract import ManagedCatalogSyncProblem
-from .contracts import RecipePackageError
-from .known_words import BlockWithheld, known_block
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
+from vonk_control.catalog.revision_contract import PublishedDocument
+from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
+from vonk_control.recipe_packages.contracts import RecipePackageError
+from vonk_control.recipe_packages.known_words import BlockWithheld, known_block
 
 # Entries named in one note; the count names them all.
 _NAMED = 3

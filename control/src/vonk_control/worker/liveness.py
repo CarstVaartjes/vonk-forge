@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import re
@@ -8,15 +7,16 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
-from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-from vonk_agent_protocol.outcome import UnknownOutcomeError
+from sqlalchemy import select, text, update
 
-from ..logging import log_event
-from ..stall_window import Verdict
-from ..worker_healthcheck import (
+from vonk_control import build_identity
+from vonk_control.identity_insert import insert_identity
+from vonk_control.logging import log_event
+from vonk_control.models.jobs import ControlProcessHeartbeat
+from vonk_control.stall_window import Verdict
+from vonk_control.worker_healthcheck import (
     WORKER_READINESS_WINDOW_SECONDS,
     WORKER_STEP_WINDOW_SECONDS,
 )
@@ -176,23 +176,6 @@ def _publisher(
     return publish
 
 
-def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
-    """Identify one Linux process lifetime without persistent mutable state."""
-    boot_id = (proc_root / "sys/kernel/random/boot_id").read_text().strip()
-    process_stat = (proc_root / str(pid) / "stat").read_text().strip()
-    closing_parenthesis = process_stat.rfind(")")
-    fields_after_name = process_stat[closing_parenthesis + 2 :].split()
-    if closing_parenthesis < 1 or len(fields_after_name) < 20:
-        raise UnknownOutcomeError(
-            "worker process identity is unavailable",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        )
-    start_ticks = fields_after_name[19]
-    pid_namespace = (proc_root / str(pid) / "ns/pid").stat().st_ino
-    material = f"{boot_id}\n{pid}\n{pid_namespace}\n{start_ticks}\n".encode()
-    return hashlib.sha256(material).hexdigest()
-
-
 class WorkerHeartbeatRecorder:
     """Persist readiness for the currently running scheduler process."""
 
@@ -211,11 +194,8 @@ class WorkerHeartbeatRecorder:
         self._register_process_start()
 
     def _register_process_start(self) -> None:
-        from ..build_identity import packaged_runtime_identity
-        from ..identity_insert import insert_identity
-        from ..models.jobs import ControlProcessHeartbeat
 
-        identity = packaged_runtime_identity()
+        identity = build_identity.packaged_runtime_identity()
 
         with self._sessions.begin() as session:
             heartbeat, created = insert_identity(
@@ -242,9 +222,6 @@ class WorkerHeartbeatRecorder:
 
     def record_running_step(self, step: str, started_at: datetime) -> None:
         """Publish the step that is still running, so a slow one is named."""
-        from sqlalchemy import text, update
-
-        from ..models.jobs import ControlProcessHeartbeat
 
         with self._sessions.begin() as session:
             if session.get_bind().dialect.name == "postgresql":
@@ -265,13 +242,10 @@ class WorkerHeartbeatRecorder:
             )
 
     def completed_loop(self) -> None:
-        from sqlalchemy import select
-
-        from ..models.jobs import ControlProcessHeartbeat
 
         completed_at = self._clock()
         if (
-            not isinstance(completed_at, datetime)
+            not isinstance(completed_at, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             or completed_at.tzinfo is None
             or completed_at.utcoffset() is None
         ):

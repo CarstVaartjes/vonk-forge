@@ -8,13 +8,13 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 
-from ..cli_outcome import (
+from cluster_profiles.cli_outcome import (
     ObservationStatus,
     Submission,
     SubmissionAcceptance,
 )
-from ..cli_states_generated import PROFILE_REFUSAL_CODES
-from ..control_client.errors import (
+from cluster_profiles.cli_states_generated import PROFILE_REFUSAL_CODES
+from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlConflict,
     ControlHTTPError,
@@ -24,31 +24,21 @@ from ..control_client.errors import (
     ControlResponseTooLarge,
     ControlTransportError,
 )
-from ..error_reporting import ErrorContext, protocol_context, transport_context
-from .common import ControllerClient
+from cluster_profiles.controller_cli.common import (
+    ControllerClient,
+    _known_http_refusal_status,
+)
+from cluster_profiles.controller_cli.observation import _poll_path
+from cluster_profiles.error_reporting import (
+    ErrorContext,
+    protocol_context,
+    transport_context,
+)
 
 
 def _accepted_submission(args: argparse.Namespace, operation_id: str) -> None:
     args.submission.acceptance = SubmissionAcceptance.ACCEPTED
     args.submission.operation_id = operation_id
-
-
-def _known_http_refusal_status(error: ControlClientError) -> int | None:
-    status = (
-        error.status_code
-        if isinstance(error, ControlHTTPError)
-        else (error.context.http_status if error.context else None)
-    )
-    # HTTP evidence on a malformed body is not an owner decision.
-    return (
-        status
-        if status is not None
-        and (
-            status in {401, 403}
-            or (isinstance(error, ControlHTTPError) and 400 <= status <= 499)
-        )
-        else None
-    )
 
 
 def _submit_idempotent_request(
@@ -80,8 +70,6 @@ def _submit_idempotent_request(
     )
 
     def end_unknown(*, interrupted: bool = False) -> None:
-        from .observation import _poll_path
-
         _poll_path(
             client, lookup, {}, args, deadline=time.monotonic(), fetch_initial=True
         )
@@ -197,10 +185,7 @@ def _submit_idempotent_request(
             isinstance(error, ControlHTTPError) and 500 <= error.status_code <= 599
         ):
             may_replay = True
-            if (
-                isinstance(error, (ControlHTTPError, ControlTransportError))
-                and error.retry_after_seconds is not None
-            ):
+            if error.retry_after_seconds is not None:
                 retry_error = error
                 now = time.monotonic()
                 # A delay beyond this invocation's budget needs no timer and
@@ -215,16 +200,14 @@ def _submit_idempotent_request(
             # not a second admission decision.
             may_replay = False
 
+    def reconcile(_remaining: float) -> object:
+        return request("GET", lookup, "lookup", receipt_validator=lookup_validate)
+
     if lookup == path:
         # This endpoint owns idempotency; one exact same-key replay also
         # reconciles an unreadable receipt without authorizing another effect.
         may_replay = True
     else:
-        from .observation import _poll_path
-
-        def reconcile(_remaining: float) -> object:
-            return request("GET", lookup, "lookup", receipt_validator=lookup_validate)
-
         try:
             return request("GET", lookup, "lookup", receipt_validator=lookup_validate)
         except ControlNotFound:
@@ -235,7 +218,7 @@ def _submit_idempotent_request(
                 # request under this key: it was refused, not unknown. Its
                 # answer reaches the caller, which may plan again.
                 submission.acceptance = SubmissionAcceptance.REFUSED
-                raise submit_error
+                raise submit_error  # noqa: B904 -- re-raises an existing error; from would overwrite the __cause__ failure classification walks
             else:
                 return _poll_path(
                     client,

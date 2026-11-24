@@ -6,7 +6,7 @@ import threading
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,12 +18,19 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
+from vonk_agent_protocol.agent_operations import ArtifactDistributionResult
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import ArtifactDistributionPayload, canonical_message
+from vonk_agent_protocol.contracts import AgentResult, ArtifactDistributionPayload
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
-from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol.wire_model import (
+    OperationMemberProgress,
+    OperationProgress,
+    canonical_message,
+)
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
@@ -33,7 +40,7 @@ from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution.wiring import build_distribution_service_from_components
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import children as executor_module
-from vonk_control.distribution_executor import durable as durable_executor_module
+from vonk_control.distribution_executor import receipts as receipts_module
 from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
@@ -48,6 +55,7 @@ from vonk_control.model_cache.contract import (
     ModelCacheCounters,
     ModelCacheDownloadResult,
 )
+from vonk_control.model_cache.errors import ModelCacheNotFound
 from vonk_control.model_cache.progress import cache_progress, progress_document
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
@@ -87,13 +95,14 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import read_stored_model
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .agent_jobs_support import distribution_payload
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import _runtime_receipt
+from .runtime_identity_support import claim_agent
 from .runtime_image_fixtures import place_test_image
+from .test_distribution import _assignment
 
 
 def _receipt_json(receipt: BaseModel | None) -> dict[str, object]:
@@ -209,13 +218,22 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
         "verified_image_digest": "sha256:" + "d" * 64,
         "verified_oci_layout_sha256": "e" * 64,
         "cached_nodes": list(nodes),
-        "cached_target_totals": {node: 11 for node in nodes},
+        "cached_target_totals": dict.fromkeys(nodes, 11),
     }
 
 
 def test_partial_child_replays_and_aggregates_cached_target(
     agent_system,  # noqa: F811
-    measured_receipt: bool = True,
+) -> None:
+    _partial_child_replays_and_aggregates_cached_target(
+        agent_system, measured_receipt=True
+    )
+
+
+def _partial_child_replays_and_aggregates_cached_target(
+    agent_system,  # noqa: F811
+    *,
+    measured_receipt: bool,
 ) -> None:
     _client, services, _tokens, clock = agent_system
     with services.sessions.begin() as session:
@@ -242,7 +260,7 @@ def test_partial_child_replays_and_aggregates_cached_target(
     class StubExecutor(DurableDistributionPhaseExecutor):
         source_available = True
 
-        def _model_objects(self, _plan, _progress):
+        def _model_objects(self, plan, progress):
             if not self.source_available:
                 raise RuntimeError("NAS source is temporarily unavailable")
             return (model, config), "d" * 64, 15
@@ -480,7 +498,8 @@ def test_partial_child_replays_and_aggregates_cached_target(
     assert view.result.progress.total_bytes == 30
     with services.sessions() as session:
         persisted = session.get(Job, first.operation_id)
-        assert persisted is not None and persisted.result is not None
+        assert persisted is not None
+        assert persisted.result is not None
         persisted_receipt = read_stored_model(
             RunSwitchDistributionChildResult, persisted.result
         )
@@ -537,7 +556,8 @@ def test_partial_child_replays_and_aggregates_cached_target(
                 AgentOperationAttempt.attempt == stored.current_attempt,
             )
         )
-        assert attempt is not None and attempt.result is not None
+        assert attempt is not None
+        assert attempt.result is not None
         attempt.result = {**attempt.result, "downloaded_bytes": 14}
     mismatch = executor.get(first.operation_id)
     assert mismatch is not None
@@ -556,7 +576,8 @@ def test_partial_child_replays_and_aggregates_cached_target(
         attempt.result = {"downloaded_bytes": 15}
     repaired = executor.get(first.operation_id)
     assert repaired is not None
-    assert repaired.progress is not None and repaired.progress.total_bytes == 30
+    assert repaired.progress is not None
+    assert repaired.progress.total_bytes == 30
     with services.sessions.begin() as session:
         child = session.get(Job, first.operation_id)
         assert child is not None
@@ -579,7 +600,10 @@ def test_stored_runtime_identity_reuses_content_without_producer_history(
     tmp_path: Path, build_id: str | None
 ) -> None:
     """A provenance query fails here: the database has no producer tables."""
-    clock = lambda: datetime.now(UTC)
+
+    def clock():
+        return datetime.now(UTC)
+
     sessions, operations, _distribution = _unused_executor_services(clock)
     source = RecipeBuildObjectSource(sessions, tmp_path)
     storage = FilesystemRuntimeImageStorage(tmp_path)
@@ -590,10 +614,7 @@ def test_stored_runtime_identity_reuses_content_without_producer_history(
         sessions, operations, DistributionService(source), clock=clock
     )
     image = executor._archive(
-        image_digest=image_digest,
-        layout_digest=address,
-        image_bytes=11,
-        build_id=build_id,
+        image_digest=image_digest, layout_digest=address, image_bytes=11
     )
     assert image.image_digest == image_digest
     assert image.address == address
@@ -602,18 +623,12 @@ def test_stored_runtime_identity_reuses_content_without_producer_history(
     (storage.layout.root / "blobs" / "sha256" / address).unlink()
     with pytest.raises(Exception) as _ending:
         executor._archive(
-            image_digest=image_digest,
-            layout_digest=address,
-            image_bytes=11,
-            build_id=build_id,
+            image_digest=image_digest, layout_digest=address, image_bytes=11
         )
     place_test_image(storage, address, 11)
     assert (
         executor._archive(
-            image_digest=image_digest,
-            layout_digest=address,
-            image_bytes=11,
-            build_id=build_id,
+            image_digest=image_digest, layout_digest=address, image_bytes=11
         )
         == image
     )
@@ -1122,8 +1137,6 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
 
         def get_operation(self, operation_id):
             if operation_id != cache_view.id:
-                from vonk_control.model_cache.errors import ModelCacheNotFound
-
                 raise ModelCacheNotFound("model_cache.operation_missing", "missing")
             return cache_view
 
@@ -1770,7 +1783,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         progress=RunSwitchOperationResult(),
     )
     cached_id = cached_model.operation_id
-    assert cached_id is not None and cached_id == seeded.id
+    assert cached_id is not None
+    assert cached_id == seeded.id
     assert cache.run_pending() == 0
     reused = executor.get(cached_id)
     assert reused is not None
@@ -2089,7 +2103,7 @@ def test_child_persistence_retains_in_place_default_members(
     initial,
 ):
     """Both child writers must retain mutations nested in their typed receipt."""
-    writer_module = executor_module if initial else durable_executor_module
+    writer_module = executor_module if initial else receipts_module
     original = writer_module._child_receipt
     member = OperationMemberProgress(member_id=NODE_A, phase=ProgressPhase.TRANSFER)
     writes = []
@@ -2120,7 +2134,7 @@ def test_child_persistence_retains_in_place_default_members(
     sessions = agent_system[1].sessions
     event.listen(sessions, "after_flush", check_written_receipt)
     try:
-        test_partial_child_replays_and_aggregates_cached_target(
+        _partial_child_replays_and_aggregates_cached_target(
             agent_system, measured_receipt=False
         )
     finally:
@@ -2130,12 +2144,6 @@ def test_child_persistence_retains_in_place_default_members(
 
 def test_expired_distribution_fence_cannot_revive_or_block_fresh_transfer(agent_system):  # noqa: F811
     """Issued transfer expiry releases dispatch while retaining late evidence."""
-    from datetime import timedelta
-
-    from vonk_agent_protocol.contracts import AgentResult, ArtifactDistributionResult
-
-    from .runtime_identity_support import claim_agent
-    from .test_distribution import _assignment
 
     _client, services, _tokens, clock = agent_system
     source = MemoryObjectSource()
@@ -2202,7 +2210,8 @@ def test_expired_distribution_fence_cannot_revive_or_block_fresh_transfer(agent_
     )
     assert fresh != old
     next_claim = claim_agent(services.operations, NODE_A, "serial-a")
-    assert next_claim is not None and next_claim.fence != claim.fence
+    assert next_claim is not None
+    assert next_claim.fence != claim.fence
     services.operations.record_result(
         AgentResult(
             fence=next_claim.fence,

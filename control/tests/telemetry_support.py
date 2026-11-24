@@ -3,8 +3,8 @@
 import hashlib
 import uuid
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.models.telemetry import (
     NodeInventoryResourceSnapshot,
     NodeTelemetrySample,
@@ -14,7 +14,7 @@ from vonk_control.models.telemetry import (
 def telemetry_with_resources(
     row: NodeTelemetrySample, resources: HostResourceSample
 ) -> NodeTelemetrySample:
-    if row.id is None:
+    if row.id is None:  # pyright: ignore[reportUnnecessaryComparison]  # a new, unflushed row has no id yet
         row.id = str(uuid.uuid4())
     row.resource_snapshot = NodeInventoryResourceSnapshot(
         node_id=row.node_id,

@@ -14,11 +14,16 @@ import re
 from datetime import UTC, datetime, timedelta
 from importlib import metadata
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 import pytest
 from sqlalchemy import Engine, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import (
+    ModelDisplay,
+    RecipeDisplay,
+)
+
 from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
@@ -38,10 +43,6 @@ from vonk_control.models.catalog import (
 )
 from vonk_control.recipe_packages.client import RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import (
-    ModelDisplay,
-    RecipeDisplay,
-)
 
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from .test_recipe_package_transport import _canonical_package_fixture
@@ -71,7 +72,7 @@ class World:
             self.sessions, cursors=cursors, clock=self.clock
         )
         index, row, package = _canonical_package_fixture()
-        self.index: dict = json.loads(index)
+        self.index: dict[str, Any] = json.loads(index)
         self.packages = {row["package"]["path"]: package}  # type: ignore[index]
         self.release = SignedRecipeRelease(self.index, self.packages)
         self.cache = root / "packages"
@@ -85,13 +86,18 @@ class World:
             self.sessions, catalog=self.catalog, reader=reader, clock=self.clock
         )
 
-    def publish(self, *, recipe: dict | None = None, model: dict | None = None) -> None:
+    def publish(
+        self,
+        *,
+        recipe: dict[str, Any] | None = None,
+        model: dict[str, Any] | None = None,
+    ) -> None:
         """Republish the same documents and packages with other display."""
         index = copy.deepcopy(self.index)
         if recipe is not None:
-            index["recipes"][0]["display"].update(recipe)  # type: ignore[index]
+            index["recipes"][0]["display"].update(recipe)
         if model is not None:
-            index["catalog_entities"][0]["display"].update(model)  # type: ignore[index]
+            index["catalog_entities"][0]["display"].update(model)
         self.release.publish(index, self.packages)
 
     def sync(self, reader: RecipePackageClient | None = None):
@@ -116,7 +122,7 @@ class World:
                 ).all()
             )
 
-    def documents(self) -> dict[str, tuple[str, datetime, dict | None]]:
+    def documents(self) -> dict[str, tuple[str, datetime, dict[str, Any] | None]]:
         with self.sessions() as session:
             return {
                 row.kind: (row.title, row.updated_at, row.display)
@@ -145,7 +151,8 @@ def test_a_display_only_release_changes_the_library_text_and_creates_no_revision
     world: World,
 ) -> None:
     first = world.sync()
-    assert first.state == CatalogSyncState.CURRENT and first.imported_count == 1
+    assert first.state == CatalogSyncState.CURRENT
+    assert first.imported_count == 1
     before = world.revisions()
     assert len(before) == 2
     recipe = world.library_recipe()
@@ -163,7 +170,8 @@ def test_a_display_only_release_changes_the_library_text_and_creates_no_revision
     second = world.sync()
 
     assert second.state == CatalogSyncState.CURRENT
-    assert second.unchanged_count == 1 and second.imported_count == 0
+    assert second.unchanged_count == 1
+    assert second.imported_count == 0
     recipe = world.library_recipe()
     assert recipe.identity.title == "Tiny Recipe, retitled"
     assert recipe.identity.description == "Reworded for people."
@@ -181,7 +189,8 @@ def test_a_release_with_unchanged_display_writes_nothing(world: World) -> None:
 
     again = world.sync()
 
-    assert again.state == CatalogSyncState.CURRENT and again.unchanged_count == 1
+    assert again.state == CatalogSyncState.CURRENT
+    assert again.unchanged_count == 1
     assert world.documents() == settled
 
 
@@ -346,12 +355,14 @@ def test_a_persisted_snapshot_without_display_keeps_the_text_until_the_next_fetc
 
     assert [item.display for item in snapshot.items] == [None]
     assert [model.entry.display for model in snapshot.catalog_entities] == [None]
-    assert snapshot.problems == () and len(snapshot.display_notes) == 2
+    assert snapshot.problems == ()
+    assert len(snapshot.display_notes) == 2
     assert result.withdrawn_count == 0
     assert world.revisions() == before
     assert world.documents() == texts
     heads = world.sessions().scalars(select(CatalogDocumentHead)).all()
-    assert len(heads) == 2 and all(head.active_revision_id for head in heads)
+    assert len(heads) == 2
+    assert all(head.active_revision_id for head in heads)
 
     # The contract version is part of what a stored sync receipt must match,
     # so the Controller that can read display fetches again.
@@ -396,7 +407,8 @@ def test_startup_reconcile_adds_the_display_column_and_keeps_the_rows(
         recipe = session.scalar(
             select(CatalogDocument).where(CatalogDocument.kind == "recipe")
         )
-        assert recipe is not None and recipe.recipe_display() is None
+        assert recipe is not None
+        assert recipe.recipe_display() is None
     assert world.library_recipe().recipe_display is None
 
     world.sync()
@@ -532,5 +544,6 @@ def test_a_failed_display_write_is_that_documents_problem_and_the_next_tick_heal
 
     healed = world.sync()
 
-    assert healed.state == CatalogSyncState.CURRENT and healed.problems == ()
+    assert healed.state == CatalogSyncState.CURRENT
+    assert healed.problems == ()
     assert world.library_recipe().identity.title == "Retitled on the wire"

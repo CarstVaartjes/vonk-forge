@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 import pytest
+
 from vonk_control.bounded_json import (
     BoundedJSONError,
     integer,

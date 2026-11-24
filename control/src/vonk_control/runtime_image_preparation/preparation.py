@@ -8,16 +8,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
-from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
-from ..content_identity import ImageContent, same_image
-from ..models.cache import RecipeBuild
-from ..operations.contract import AvailabilityRecoveryAction
-from ..runtime.adapters import RuntimeAdapter, resolve_runtime_adapter
-from ..runtime.spec_contract import RuntimeSpec
-from .contracts import (
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
+from vonk_control.content_identity import ImageContent, same_image
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.operations.contract import AvailabilityRecoveryAction
+from vonk_control.runtime.adapters import RuntimeAdapter, resolve_runtime_adapter
+from vonk_control.runtime.spec_contract import RuntimeSpec
+from vonk_control.runtime_image_preparation.contracts import (
     _IMAGE_DIGEST,
     _RUNTIME_ARCHITECTURE,
     _RUNTIME_INTERFACE,
@@ -36,7 +36,10 @@ from .contracts import (
     _wire_architecture,
     _with_provenance,
 )
-from .transport import OciLayoutImageTransport, _validate_evidence
+from vonk_control.runtime_image_preparation.transport import (
+    OciLayoutImageTransport,
+    _validate_evidence,
+)
 
 
 def prepare_runtime_image(
@@ -177,12 +180,11 @@ def stored_runtime_image_resolver(
         _document: object, image_digest: str, runtime_spec: RuntimeSpec
     ) -> RuntimeImageReceipt | None:
         expectations = runtime_image_expectations(runtime_spec.runtime)
-        receipt = storage.find_verified(
+        return storage.find_verified(
             image_digest,
             expected_architecture=expectations["architecture"],
             expected_runtime_interface=expectations["interface"],
         )
-        return receipt
 
     return resolve
 
@@ -308,7 +310,7 @@ def _prepare_from_build(
             "image transport observation is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
-    _validate_evidence(observed, expected_architecture, expected_interface_label)
+    _validate_evidence(observed)
     if observed.archive_sha256 != archive_sha or observed.archive_bytes != image_bytes:
         raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.EVIDENCE_INVALID,
@@ -343,7 +345,7 @@ def _prepare_from_build(
         architecture=architecture,
         runtime_interface=runtime_interface,
         runtime_interface_label=runtime_interface_label,
-        archive_path=str(getattr(storage, "root", Path("")) / archive_sha),
+        archive_path=str(getattr(storage, "root", Path()) / archive_sha),
         recorded_at=_timestamp(now),
         build_id=build_id,
         build_input_sha256=recorded_build_input,

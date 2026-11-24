@@ -14,18 +14,18 @@ from collections.abc import Collection
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import GIB
-
-from .models.execution import RecipeRun, RunNode
-from .recipe_operations.execution_contract import (
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredRunPlan,
     parse_stored_run_plan,
 )
-from .resource_planning.types import SwapCapacity, SwapHolder
-from .run_states import HOLDING_RUN_STATES, STARTING_RUN_STATES
-from .swap import selected_swap
+from vonk_control.resource_planning.types import SwapCapacity, SwapHolder
+from vonk_control.run_states import HOLDING_RUN_STATES, STARTING_RUN_STATES
+from vonk_control.swap import selected_swap
 
 
 def readable_run_plan(run: RecipeRun) -> StoredRunPlan | None:

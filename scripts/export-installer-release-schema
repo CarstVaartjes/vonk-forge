@@ -16,7 +16,7 @@ if __name__ == "__main__":
     run_in_protocol(ROOT)
 sys.path.insert(0, str(ROOT / "agent_protocol/src"))
 
-from vonk_agent_protocol.installer_release import (
+from vonk_agent_protocol.installer_release import (  # noqa: E402 -- the project imports follow run_in_protocol, which re-executes in the protocol environment
     CliReleaseProjection,
     InstallerReleaseManifest,
 )

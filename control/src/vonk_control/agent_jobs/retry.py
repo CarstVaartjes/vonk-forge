@@ -10,42 +10,52 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, object_session
 from sqlalchemy.sql.elements import ColumnElement
-from vonk_agent_protocol.agent_words import Disposition, FailureStage
+
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentOperation
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentOperation,
     canonical_payload,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.state_machines import DistributionAssignmentState
 from vonk_agent_protocol.wire_model import WireModel
-
-from .. import agent_operation_states
-from ..agent_operation_facts import (
+from vonk_control import agent_operation_states
+from vonk_control.agent_jobs.contracts import (
+    _ABANDONABLE_OPERATIONS,
+    _ENDED_PARENT_STATES,
+    _GRANT_LIFETIME,
+)
+from vonk_control.agent_jobs.stored import (
+    column_field,
+    column_is_document,
+    column_value,
+)
+from vonk_control.agent_operation_facts import (
     AGENT_UPGRADE_RECOVERY_FENCE,
     SUPERSEDED_CANCELLATION_SECONDS,
+    job_attempt_did_not_launch,
 )
-from ..agent_operation_facts import (
+from vonk_control.agent_operation_facts import (
     RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
 )
-from ..agent_operation_facts import aware as _aware
-from ..agent_upgrades.status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
-from ..failure_classification import disposition, is_security_failure
-from ..lifecycle.agent_operation import (
+from vonk_control.agent_operation_facts import aware as _aware
+from vonk_control.agent_upgrades.status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
+from vonk_control.failure_classification import disposition, is_security_failure
+from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
     retry_scheduled,
     set_parent_state,
 )
-from ..lifecycle.types import CancelRequested, Reported
-from ..models.jobs import Job
-from ..models.operations import AgentOperation as StoredOperation
-from ..models.operations import AgentOperationAttempt, ArtifactDistributionAssignment
-from ..recovery_policy import kind_for_failure_fields
-from .contracts import _ABANDONABLE_OPERATIONS, _ENDED_PARENT_STATES, _GRANT_LIFETIME
-from .stored import column_field, column_is_document, column_value
+from vonk_control.lifecycle.types import CancelRequested, Reported
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import (
+    AgentOperationAttempt,
+    ArtifactDistributionAssignment,
+)
+from vonk_control.recovery_policy import kind_for_failure_fields
 
 
 def superseded_cancellation_deadline(result: object) -> datetime | None:
@@ -74,42 +84,6 @@ def superseded_cancellation_deadline(result: object) -> datetime | None:
     if requested_at.tzinfo is None:
         return None
     return requested_at + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
-
-
-#: The stages a job run reports only before it dispatches its process:
-#: delivering its artifacts and image, preparing its installation and model,
-#: and laying out its storage, inputs and launch. A failure reported there
-#: proves this attempt never launched the job. ``job-state``,
-#: ``output-storage``, the runtime adapter and the stop stages also occur after
-#: dispatch and are never in this set.
-JOB_PRE_LAUNCH_STAGES = frozenset(
-    stage.value
-    for stage in (
-        FailureStage.ARTIFACT_DISTRIBUTION,
-        FailureStage.IMAGE_VERIFICATION,
-        FailureStage.INSTALLATION_DIRECTORY,
-        FailureStage.INSTALLATION_METADATA,
-        FailureStage.INSTALLATION_PATH,
-        FailureStage.JOB_INPUTS,
-        FailureStage.LIFECYCLE_METADATA,
-        FailureStage.MODEL_MATERIALIZATION,
-        FailureStage.RUN_STORAGE,
-        FailureStage.RUNTIME_CACHE,
-        FailureStage.RUNTIME_METADATA,
-        FailureStage.RUNTIME_PROJECTION,
-    )
-)
-
-
-def job_attempt_did_not_launch(result: object) -> bool:
-    """A job run's failure report proves this attempt never ran the job: it
-    stopped at a pre-launch stage and carries no process receipt.  The report
-    is a typed result or its stored document."""
-    return (
-        isinstance(result, Mapping)
-        and not isinstance(result, RecipeJobRunResult)
-        and result.get("stage") in JOB_PRE_LAUNCH_STAGES
-    )
 
 
 def result_disposition(kind: str, state: str, result: WireModel) -> Disposition:
@@ -150,7 +124,7 @@ def result_disposition(kind: str, state: str, result: WireModel) -> Disposition:
         kind_for_failure_fields(
             failure_kind if isinstance(failure_kind, str) else None,
             error_code if isinstance(error_code, str) else None,
-            result.get("uncertain") is True,
+            uncertain=result.get("uncertain") is True,
         )
     )
     if (

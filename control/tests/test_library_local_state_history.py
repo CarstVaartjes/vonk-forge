@@ -28,6 +28,8 @@ from sqlalchemy import (
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts.model import ModelReference
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelAccessReason
 from vonk_agent_protocol.wire_model import OperationProgress
@@ -52,7 +54,6 @@ from vonk_control.operations.blockers import make_blocker
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.strict_json import serialize_json_value
-from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 10, 24, 12, tzinfo=UTC)
 _KINDS = ("download", "download", "repair", "remove")
@@ -502,7 +503,8 @@ def _plan_work(node: dict[str, object]) -> int:
 
     loops = node.get("Actual Loops", 0)
     rows = node.get("Actual Rows", 0)
-    assert isinstance(loops, int | float) and isinstance(rows, int | float)
+    assert isinstance(loops, int | float)
+    assert isinstance(rows, int | float)
     work = int(loops + rows * loops)
     for key in ("Rows Removed by Filter", "Rows Removed by Join Filter"):
         removed = node.get(key, 0)

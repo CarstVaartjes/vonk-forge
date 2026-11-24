@@ -13,6 +13,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256
+
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.jobs.queue import JobService
@@ -30,7 +32,6 @@ from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import document_sha256
 
 from .recipe_image_availability_support import (
     ARCHIVE,
@@ -184,7 +185,8 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         finally:
             peer.release_held_response.set()
 
-        assert stdout is not None and stderr is not None
+        assert stdout is not None
+        assert stderr is not None
         assert process.returncode == 0, stdout + stderr
         first_receipt = json.loads(stdout)
         assert first_receipt["request_key"] == _REMOVE_KEY
@@ -200,7 +202,7 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
             for call, _ in groupby(
                 (method, path)
                 for method, path, _ in peer.calls
-                if path == request_path or path == remove_path
+                if path in (request_path, remove_path)
             )
         ] == [
             ("GET", request_path),
@@ -295,7 +297,8 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         assert operation.state == "succeeded"
         assert operation.actor == actor.subject
         assert operation.authority_revision == revision_id
-        assert head is not None and head.active_revision_id == revision_id
+        assert head is not None
+        assert head.active_revision_id == revision_id
         owner = RecipeCacheRemovalOwner.model_validate(operation.payload)
         assert owner.plan.intent.request_key == _REMOVE_KEY
         assert owner.plan.intent.actor == actor.subject

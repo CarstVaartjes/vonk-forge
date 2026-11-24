@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
@@ -88,7 +89,8 @@ def test_a_retryable_failure_backs_off_with_its_evidence_and_its_retry_succeeds(
             break
     (retry,) = _others(sessions, first.id)
     ended = service.application(first.id)
-    assert ended.state == "superseded" and ended.superseded_by == retry.id
+    assert ended.state == "superseded"
+    assert ended.superseded_by == retry.id
     assert _CAUSE in (ended.status_reason or "")
 
     for _ in range(6):
@@ -122,6 +124,7 @@ def test_repeated_failure_recovers_without_a_new_load(tmp_path: Path) -> None:
     assert cause in (waiting.status_reason or "")
     # The runtime fault clears. The standing owner retries the same intent;
     # there is no second apply or explicit retry request.
+    succeeded = None
     for _ in range(12):
         clock["now"] += timedelta(hours=2)
         service.tick()

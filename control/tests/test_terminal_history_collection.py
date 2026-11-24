@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control import terminal_history_collection
@@ -264,7 +265,8 @@ def test_one_pass_judges_every_row_against_one_reference_inventory(
         assert collector.collect()["jobs"] == len(rows)
     finally:
         event.remove(engine, "after_cursor_execute", count_reference_scans)
-    assert one_inventory and len(reference_scans) == one_inventory
+    assert one_inventory
+    assert len(reference_scans) == one_inventory
     with history_sessions() as session:
         assert session.scalar(select(Job.id)) is None
 

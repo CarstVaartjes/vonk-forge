@@ -7,14 +7,32 @@ import importlib.util
 import json
 import os
 import subprocess
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import TypedDict
 
 import pytest
+import yaml
+from sqlalchemy import create_engine, insert, text
+from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import CONTRACT_MAJOR
 
+from cluster_profiles.control_client.schema import validate_control_document
+from control.tests.index_envelope import index_envelope
 from scripts.canary_package import canary_package_path
 from tests.spark_lifecycle_runner_support import ENTRY_POINT, _module
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_control.auth import TokenCodec
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.fleet_projection.common import FleetSnapshot
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.presence import ManagementAddressPolicy, PresenceError
+from vonk_control.source_bundles import SourceBundleStore
 
 
 class _Observed(TypedDict):
@@ -94,8 +112,6 @@ def test_acceptance_controller_configuration_preserves_fixed_ca_and_generation(
         + "    volumes:\n      - caddy-data:/data\n"
         + "networks:\n  ingress: {}\n  cluster-egress: {}\n"
     )
-
-    import yaml
 
     compose_path = bundle / "docker-compose.yaml"
     compose_document = yaml.safe_load(compose_path.read_text())
@@ -211,7 +227,6 @@ def test_acceptance_controller_configuration_preserves_fixed_ca_and_generation(
     assert captured.read_text().splitlines() == service["command"][1:]
     selected = captured.read_text().splitlines()
     assert selected[selected.index("--config") + 1] == "/etc/caddy/Caddyfile"
-    from vonk_control.presence import ManagementAddressPolicy, PresenceError
 
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.synthetic_fabric_octet = 42
@@ -270,8 +285,6 @@ def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = Control()
 
-    from vonk_control.fleet_projection.common import FleetSnapshot
-
     expected = FleetSnapshot.model_validate_json(json.dumps(expected_payload))
     assert run._fleet_snapshot() == expected.model_dump(mode="json")
 
@@ -283,13 +296,6 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
 ) -> None:
     """Catches an identity read that depends on a table one side of the upgrade
     carry lacks: the baseline Controller keeps contact facts on agent_nodes."""
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine, insert, text
-    from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_agent_protocol.state_machines import NodeIdentityState
-    from vonk_control.model_primitives import Base
-    from vonk_control.models.fleet import AgentCertificate, AgentNode
 
     lifecycle = _module()
     node_id = "spk_" + "1" * 32
@@ -398,7 +404,6 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
 
 
 def test_synthetic_canary_download_uses_the_current_operator_request_shape() -> None:
-    from cluster_profiles.control_client.schema import validate_control_document
 
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
@@ -485,20 +490,12 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     library = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
     if not library:
         pytest.skip("set VONK_RECIPE_LIBRARY_ROOT to the canonical recipe library")
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from vonk_control.auth import TokenCodec
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.model_primitives import Base
-    from vonk_control.source_bundles import SourceBundleStore
 
     specification = importlib.util.spec_from_file_location(
         "spark_canary_catalog_import", _module().CANARY_CATALOG_IMPORT
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
     index_path = Path(library) / "tests/fixtures/canonical-synthetic-canary/index.json"
@@ -512,7 +509,10 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 9, 28, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 9, 28, tzinfo=UTC)
+
     reader = program.FixtureReader(index, {digest: archive})
     sync = ManagedRecipeCatalogSyncService(
         sessions,
@@ -542,9 +542,6 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
 
 def _release_index(recipes: list[object]) -> dict[str, object]:
     """A release-shaped library index this Controller's parser accepts."""
-    from vonk_forge_contracts import CONTRACT_MAJOR
-
-    from control.tests.index_envelope import index_envelope
 
     return index_envelope(
         contract_version=f"{CONTRACT_MAJOR}.0.0",
@@ -561,7 +558,8 @@ def test_canary_import_refuses_an_index_the_installed_controller_skips() -> None
         "canary_import_refusal",
         ENTRY_POINT.with_name("spark_canary_catalog_import.py"),
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
     unreadable = {"document": {"kind": "recipe"}, "package": {}}
@@ -575,27 +573,22 @@ def test_canary_catalog_path_calls_the_installed_service_contract(tmp_path):
 
     The real service runs its acceptance and durable sync path; no stub.
     """
-    import uuid
-    from datetime import UTC, datetime
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from vonk_control.auth import TokenCodec
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.model_primitives import Base
 
     specification = importlib.util.spec_from_file_location(
         "canary_import_contract",
         ENTRY_POINT.with_name("spark_canary_catalog_import.py"),
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
     engine = create_engine(f"sqlite:///{tmp_path / 'sync.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: datetime(2026, 10, 9, tzinfo=UTC)
+
+    def clock():
+        return datetime(2026, 10, 9, tzinfo=UTC)
+
     reader = program.FixtureReader(_release_index([]), {})
     snapshot = reader.snapshot
     service = ManagedRecipeCatalogSyncService(
@@ -618,11 +611,12 @@ def test_canary_catalog_path_calls_the_installed_service_contract(tmp_path):
     fresh = program.sync_canary_catalog(
         installed, request_key=str(uuid.uuid4()), snapshot=snapshot
     )
-    assert first.completed_at is not None and not first.problems
+    assert first.completed_at is not None
+    assert not first.problems
     assert replay.id == first.id
-    assert (
-        fresh.id != first.id and fresh.completed_at is not None and not fresh.problems
-    )
+    assert fresh.id != first.id
+    assert fresh.completed_at is not None
+    assert not fresh.problems
 
 
 def test_synthetic_device_is_resolved_by_the_native_docker_daemon(

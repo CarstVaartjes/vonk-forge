@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import select
+
 from vonk_control.model_cache.contract import (
     ModelCacheDownloadPayload,
     ModelCacheRemovalPayload,
@@ -40,7 +41,8 @@ def test_terminal_crash_recovered_removal_allows_new_exact_download(
         removed = session.scalar(
             select(ModelCacheOperation).where(ModelCacheOperation.kind == "remove")
         )
-        assert removed is not None and removed.state == "succeeded"
+        assert removed is not None
+        assert removed.state == "succeeded"
         original_id, original_key = removed.id, removed.request_key
         terminal_bytes = copy.deepcopy(removed.payload)
         removal = parse_model_cache_payload("remove", removed.payload)
@@ -83,14 +85,17 @@ def test_terminal_crash_recovered_removal_allows_new_exact_download(
             artifacts=[artifact],
             selector=removal.selector,
         )
-        assert accepted.id != original_id and accepted.request_key != original_key
+        assert accepted.id != original_id
+        assert accepted.request_key != original_key
         assert accepted.state == "queued"
         claimed = service._claim_operations(limit=1, respect_backoff=False)
         assert claimed == [(accepted.id, "download")]
         with sessions() as session:
             fresh = session.get(ModelCacheOperation, accepted.id)
-            assert fresh is not None and fresh.state == "running"
-            assert fresh.request_key == fresh_key and fresh.fence is not None
+            assert fresh is not None
+            assert fresh.state == "running"
+            assert fresh.request_key == fresh_key
+            assert fresh.fence is not None
             payload = parse_model_cache_payload("download", fresh.payload)
             assert isinstance(payload, ModelCacheDownloadPayload)
             assert payload.artifact_set_sha256 == removed_set
@@ -100,15 +105,18 @@ def test_terminal_crash_recovered_removal_allows_new_exact_download(
         assert object_path.read_bytes() == data
         with sessions() as session:
             restored = session.get(ModelCacheSet, removed_set)
-            assert restored is not None and restored.state == "cached"
+            assert restored is not None
+            assert restored.state == "cached"
             assert restored.verified_bytes == len(data)
             memberships = tuple(session.scalars(select(ModelCacheSetArtifact)))
             assert len(memberships) == 1
             assert memberships[0].artifact_set_sha256 == removed_set
             assert memberships[0].artifact_sha256 == object_digest
             old = session.get(ModelCacheOperation, original_id)
-            assert old is not None and old.state == "succeeded"
-            assert old.request_key == original_key and old.payload == terminal_bytes
+            assert old is not None
+            assert old.state == "succeeded"
+            assert old.request_key == original_key
+            assert old.payload == terminal_bytes
             assert not tuple(
                 session.scalars(
                     select(ArtifactLifecycleGate).where(

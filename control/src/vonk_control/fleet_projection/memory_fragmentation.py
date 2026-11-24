@@ -17,8 +17,7 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.host_tuning import MemoryFragmentation
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-
-from .common import ProjectionReason
+from vonk_control.fleet_projection.common import ProjectionReason
 
 #: The margin: 512 leftover page-table pages. Each can pin one 2 MiB block of
 #: free memory, so 512 pages put 1 GiB at risk: under 1% of a 128 GiB Spark,

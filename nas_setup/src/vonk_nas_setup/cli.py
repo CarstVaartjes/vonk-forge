@@ -8,16 +8,18 @@ import re
 import stat
 import sys
 from pathlib import Path
-from typing import NoReturn, TextIO
+from typing import NoReturn, TextIO, override
+
+from pydantic import ValidationError
 
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
-
-from .filesystem import MAX_MEMBER_BYTES, MAX_TEMPLATE_BYTES, SetupError
-from .prompts import PromptIo
-from .setup import prepare
+from vonk_nas_setup.filesystem import MAX_MEMBER_BYTES, MAX_TEMPLATE_BYTES, SetupError
+from vonk_nas_setup.prompts import PromptIo
+from vonk_nas_setup.setup import prepare
 
 
 class PrivateArgumentParser(argparse.ArgumentParser):
+    @override
     def error(self, message: str) -> NoReturn:
         # argparse otherwise echoes unknown values. An accidental secret in
         # an unsupported option must not turn the refusal into a disclosure.
@@ -64,7 +66,7 @@ def run(argv: list[str] | None = None) -> None:
         allow_abbrev=False,
     )
     parser.add_argument("--template", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("."))
+    parser.add_argument("--output", type=Path, default=Path())
     parser.add_argument("--upgrade", action="store_true")
     parser.add_argument("--answers-file", type=Path)
     args = parser.parse_args(argv)
@@ -99,7 +101,6 @@ def run(argv: list[str] | None = None) -> None:
 
 
 def main() -> None:
-    from pydantic import ValidationError
 
     try:
         run()

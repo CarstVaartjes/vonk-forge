@@ -13,9 +13,10 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
-from vonk_agent_protocol.contracts import AgentOperation as WireOperation
-from vonk_agent_protocol.contracts import canonical_message
+
+from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
 from vonk_control.inventory.repository import (
@@ -126,7 +127,8 @@ def stopped_build_releases_its_resources(tmp_path, engine):
     operations.record_node_result(cancelled.id, node_id, succeeded=False, evidence={})
     with sessions() as session:
         parent = session.get(Job, cancelled.id)
-        assert parent is not None and parent.state == "running"
+        assert parent is not None
+        assert parent.state == "running"
     assert operations.reconcile_cancelled_builds() is False
 
     assert _counted(sessions, node_id) == 0
@@ -177,7 +179,8 @@ def stopped_build_releases_its_resources(tmp_path, engine):
     later = now + OWNER_SETTLE_GRACE
     with sessions() as session:
         owner = reservation_owner(session, "recipe-build", plan.build_id, now=later)
-    assert owner.dead and "orders have ended" in owner.describe()
+    assert owner.dead
+    assert "orders have ended" in owner.describe()
     _reconcile(sessions, later)
     assert _held_kinds(sessions, plan.build_id) == set()
     assert _held_kinds(sessions, other_plan.build_id) == {"disk", "host-memory"}

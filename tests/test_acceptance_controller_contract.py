@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
+from typing import Any
+
 import pytest
 
 from tests.acceptance.controller_contract import ContractSkew, ControllerContract
 
 
 def _contract(
-    schema: dict, *, path: str = "/api/things/{number}"
+    schema: dict[str, Any], *, path: str = "/api/things/{number}"
 ) -> ControllerContract:
     return ControllerContract(
         {
@@ -47,10 +50,8 @@ def test_unknown_caller_field_has_no_effect_and_a_fresh_valid_request_is_admitte
         contract.check("POST", "/api/things/1", body)
         accepted.append(body)
 
-    try:
+    with contextlib.suppress(ContractSkew):
         submit(b'{"request_key":"k","unexpected":null}')
-    except ContractSkew:
-        pass
     assert accepted == []
     submit(b'{"request_key":"fresh"}')
     assert accepted == [b'{"request_key":"fresh"}']

@@ -27,13 +27,13 @@ def scan_source(source: str) -> list[int]:
             function.name
         ):
             continue
-        for node in ast.walk(function):
-            if (
-                isinstance(node, ast.Compare)
-                and isinstance(node.left, ast.Call)
-                and isinstance(node.left.func, ast.Name)
-                and node.left.func.id == "len"
-                and [ast.unparse(arg) for arg in node.left.args] == ["value"]
-            ):
-                lines.append(node.lineno)
+        lines.extend(
+            node.lineno
+            for node in ast.walk(function)
+            if isinstance(node, ast.Compare)
+            and isinstance(node.left, ast.Call)
+            and isinstance(node.left.func, ast.Name)
+            and node.left.func.id == "len"
+            and [ast.unparse(arg) for arg in node.left.args] == ["value"]
+        )
     return lines

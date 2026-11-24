@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
@@ -55,7 +56,8 @@ def test_terminal_transfer_child_ends_parent_with_evidence(
     )
     assert service.tick()
     pending = service.get(accepted.operation_id)
-    assert pending.result is not None and pending.result.child_operation_id is not None
+    assert pending.result is not None
+    assert pending.result.child_operation_id is not None
     child_id = pending.result.child_operation_id
     _replace_child(
         executor,
@@ -78,10 +80,8 @@ def test_terminal_transfer_child_ends_parent_with_evidence(
     assert ended.result.retryable is uncertain
     assert ended.result.child_operation_id == child_id
     assert ended.next_attempt_at is None
-    assert (
-        ended.status_reason is not None
-        and WaitReason.OBSERVATION_UNAVAILABLE in ended.status_reason
-    )
+    assert ended.status_reason is not None
+    assert WaitReason.OBSERVATION_UNAVAILABLE in ended.status_reason
     now[0] += timedelta(hours=2)
     service = worker()
     assert not service.tick()
@@ -142,7 +142,8 @@ def test_a_transfer_child_cancelled_by_another_consumer_is_asked_for_again(
     assert service.tick()
     waiting = service.get(accepted.operation_id)
     assert waiting.state != LifecycleState.FAILED.value, waiting.status_reason
-    assert waiting.result is not None and waiting.result.child_operation_id is None
+    assert waiting.result is not None
+    assert waiting.result.child_operation_id is None
     # The re-request is due within the dependency window, not after it.
     for _ in range(6):
         now[0] += timedelta(minutes=5)

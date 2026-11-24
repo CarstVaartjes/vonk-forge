@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
@@ -125,6 +126,7 @@ def test_a_job_member_stop_superseded_before_acceptance_is_not_failed(
             (stop,) = session.scalars(select(Job).where(Job.kind == "recipe.stop.v2"))
             assert stop.state == "cancelled", stop.status_reason
             run_after = session.get(RecipeRun, run_id)
-            assert run_after is not None and run_after.state == "running"
+            assert run_after is not None
+            assert run_after.state == "running"
     finally:
         world.close()

@@ -11,6 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from tests.test_platform_observation import Jobs
+from tests.test_profile_load_installed_cli import _https_api_peer, _process_environment
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -19,9 +22,6 @@ from vonk_control.model_primitives import Base
 from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObserver
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
-
-from tests.test_platform_observation import Jobs
-from tests.test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 

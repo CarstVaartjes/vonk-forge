@@ -5,11 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from enum import StrEnum
 
-from ..cli_states_generated import PROFILE_NOTHING_TO_CHANGE
-from ..generated_control.models.fleet_profile_gpu_clock_effect import (
-    FleetProfileGpuClockEffect,
-)
-from .common import (
+from cluster_profiles.cli_render.common import (
     _bytes,
     _field,
     _headroom,
@@ -20,7 +16,11 @@ from .common import (
     _text,
     _words,
 )
-from .library import _option_choices
+from cluster_profiles.cli_render.library import _option_choices
+from cluster_profiles.cli_states_generated import PROFILE_NOTHING_TO_CHANGE
+from cluster_profiles.generated_control.models.fleet_profile_gpu_clock_effect import (
+    FleetProfileGpuClockEffect,
+)
 
 
 class ReviewVerdict(StrEnum):
@@ -184,13 +184,13 @@ def _preview(payload: Mapping[str, object]) -> None:
                 _field(
                     "Disk after placement", _headroom(node.get("disk_free_after_bytes"))
                 )
-                for reason_kind, label in (
+                for reason_kind, reason_label in (
                     ("blockers", "blocker"),
                     ("warnings", "warning"),
                 ):
                     _reasons(
                         node.get(reason_kind),
-                        subject=f"{_text(node_id)} capacity {label}",
+                        subject=f"{_text(node_id)} capacity {reason_label}",
                     )
         condition = _optional(
             assessment.get("post_stop_memory_check"), "post-stop memory check"

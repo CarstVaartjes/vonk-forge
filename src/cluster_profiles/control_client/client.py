@@ -21,42 +21,52 @@ from typing import TYPE_CHECKING, Any, Never, Self
 
 import httpx2
 
+from cluster_profiles.cli_states import FAILED_JOB_STATES
 from cluster_profiles.cli_states_generated import NEEDS_OPERATOR, SUCCEEDED
-
-from ..cli_states import FAILED_JOB_STATES
-from ..control_transport import open_https
-from ..error_reporting import (
+from cluster_profiles.control_transport import open_https
+from cluster_profiles.error_reporting import (
     ClientCode,
     protocol_context,
     safe_endpoint,
     safe_request_id,
     transport_context,
 )
-from ..generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
-from ..observation_transfer_reader import (
+from cluster_profiles.generated_control.api.default import (
+    get_job,
+    get_metrics_catalogue,
+    get_profile_endpoints,
+)
+from cluster_profiles.generated_control.client import AuthenticatedClient
+from cluster_profiles.generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
+from cluster_profiles.generated_control.models.fleet_snapshot import FleetSnapshot
+from cluster_profiles.observation_transfer_reader import (
     ObservationTransferInvalid,
     ObservationTransferUnavailable,
     receive_observation,
 )
-from ..runtime_identity import stamped_runtime_identity
+from cluster_profiles.runtime_identity import stamped_runtime_identity
 
 if TYPE_CHECKING:
-    # Importing any generated model runs the generated package initializer,
-    # which imports all of its models; that alone was most of every vonkctl
-    # invocation's start-up time. Load them where a request needs them.
-    from ..generated_control.client import AuthenticatedClient
-    from ..generated_control.models.fleet_profile_endpoints_view import (
+    from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
         FleetProfileEndpointsView,
     )
-    from ..generated_control.models.fleet_snapshot import FleetSnapshot
-    from ..generated_control.models.job_detail_response import JobDetailResponse
-    from ..generated_control.models.metric_spec import MetricSpec
-    from ..generated_control.types import Response as GeneratedResponse
+    from cluster_profiles.generated_control.models.job_detail_response import (
+        JobDetailResponse,
+    )
+    from cluster_profiles.generated_control.models.metric_spec import MetricSpec
+    from cluster_profiles.generated_control.types import Response as GeneratedResponse
 
 
-from .common import observation_delay, observation_unknown
-from .connection import expiry_warning, resolve_credential, validated_origin
-from .errors import (
+from cluster_profiles.control_client.common import (
+    observation_delay,
+    observation_unknown,
+)
+from cluster_profiles.control_client.connection import (
+    expiry_warning,
+    resolve_credential,
+    validated_origin,
+)
+from cluster_profiles.control_client.errors import (
     _STATUS_ERRORS,
     ControlClientError,
     ControlContractMismatch,
@@ -74,7 +84,7 @@ from .errors import (
     _retry_after_seconds,
     _structured_http_error_fields,
 )
-from .schema import (
+from cluster_profiles.control_client.schema import (
     _request_contract,
     _response_contract,
     _response_definition,
@@ -82,7 +92,7 @@ from .schema import (
     _validate_schema,
     validate_control_document,
 )
-from .transport import (
+from cluster_profiles.control_client.transport import (
     _observation_payload,
     _OpenerTransport,
     _read_control_response,
@@ -140,7 +150,6 @@ class ControlClient:
         *,
         timeout_seconds: float | None = None,
     ) -> AuthenticatedClient:
-        from ..generated_control.client import AuthenticatedClient
 
         return AuthenticatedClient(
             base_url=self._base,
@@ -795,20 +804,17 @@ class ControlClient:
         return self.request("GET", path)
 
     def fleet(self) -> FleetSnapshot:
-        from ..generated_control.models.fleet_snapshot import FleetSnapshot
 
         return FleetSnapshot.from_dict(self.request("GET", "/api/fleet"))
 
     def metrics_catalogue(self) -> list[MetricSpec]:
         """The metric descriptions (a JSON list, so not a ``request`` document)."""
-        from ..generated_control.api.default import get_metrics_catalogue
 
         return self._call_generated(get_metrics_catalogue.sync_detailed)  # type: ignore[return-value]
 
     def job(
         self, job_id: str, *, timeout_seconds: float | None = None
     ) -> JobDetailResponse:
-        from ..generated_control.api.default import get_job
 
         return self._call_generated(
             get_job.sync_detailed, job_id, timeout_seconds=timeout_seconds
@@ -868,7 +874,6 @@ class ControlClient:
     def profile_endpoints(
         self, number: int, alias: str | None = None
     ) -> FleetProfileEndpointsView:
-        from ..generated_control.api.default import get_profile_endpoints
 
         return self._call_generated(
             get_profile_endpoints.sync_detailed, number, alias=alias

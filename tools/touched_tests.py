@@ -20,6 +20,8 @@ from collections import defaultdict
 from functools import cache
 from pathlib import Path
 
+from control.tests.added_line_guards.patch import added_lines
+
 ROOT = Path(__file__).resolve().parents[1]
 TEST_TREES = ("tests", "control/tests", "agent_protocol/tests", "deploy/compose/tests")
 SUITE_OF = {
@@ -121,12 +123,12 @@ def _resolve(name: str, own_dir: str, root: Path) -> set[str]:
 
 
 def _tree_files(root: Path) -> list[str]:
-    files = []
-    for tree in TEST_TREES:
-        for path in sorted((root / tree).rglob("*.py")):
-            if "__pycache__" not in path.parts:
-                files.append(path.relative_to(root).as_posix())
-    return files
+    return [
+        path.relative_to(root).as_posix()
+        for tree in TEST_TREES
+        for path in sorted((root / tree).rglob("*.py"))
+        if "__pycache__" not in path.parts
+    ]
 
 
 def select(touched: list[str], root: Path = ROOT) -> list[tuple[str, str]]:
@@ -182,9 +184,6 @@ def _tree_files_under(root: Path, directory: str) -> list[str]:
 
 
 def touched_paths(patch: str) -> list[str]:
-    sys.path.insert(0, str(ROOT))
-    from control.tests.added_line_guards.patch import added_lines
-
     return sorted(added_lines(patch))
 
 
