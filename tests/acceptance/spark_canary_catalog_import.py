@@ -50,7 +50,7 @@ from vonk_control.settings import Settings
 from vonk_control.source_bundles import DatabaseSourceBundleStore
 
 if TYPE_CHECKING:
-    from vonk_control.recipe_library_types import (
+    from vonk_control.recipe_packages.library_types import (
         RecipeLibraryItem,
         RecipeLibrarySnapshot,
     )

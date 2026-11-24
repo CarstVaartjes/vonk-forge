@@ -23,7 +23,10 @@ from vonk_control.catalog.sync_contract import (
 )
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
+from vonk_control.recipe_packages.library_types import (
+    RecipeLibraryItem,
+    RecipeLibrarySnapshot,
+)
 
 from .display_fixtures import display_of_recipe
 from .test_catalog_revision_collection import Catalog

@@ -22,7 +22,7 @@ from vonk_forge_contracts import (
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.catalog.revision_contract import PublishedDocument
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_control.recipe_library_types import CatalogModel
+from vonk_control.recipe_packages.library_types import CatalogModel
 
 _EXAMPLES = resources.files("vonk_forge_contracts") / "examples"
 

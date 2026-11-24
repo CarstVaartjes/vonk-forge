@@ -27,7 +27,7 @@ from vonk_control.catalog.sync_contract import (
 )
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_control.recipe_library_types import RecipeLibrarySnapshot
+from vonk_control.recipe_packages.library_types import RecipeLibrarySnapshot
 
 from .test_catalog_entities import _model, _recipe
 from .test_catalog_sync_topology import _item

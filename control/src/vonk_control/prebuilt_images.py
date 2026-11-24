@@ -66,7 +66,6 @@ from vonk_control.recipe_builds.common import (
     derive_build_input_identity,
     inspect_package_source_policy,
 )
-from vonk_control.recipe_library_types import RecipeLibraryItem
 from vonk_control.recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredBuildPolicyReport,
@@ -74,6 +73,7 @@ from vonk_control.recipe_operations.execution_contract import (
 )
 from vonk_control.recipe_operations.observation_helpers import record_build_evidence
 from vonk_control.recipe_packages.client import load_recipe_package
+from vonk_control.recipe_packages.library_types import RecipeLibraryItem
 from vonk_control.runtime.adapters import (
     RUNTIME_ADAPTER_DIGEST_LABEL,
     RUNTIME_ADAPTER_LABEL,

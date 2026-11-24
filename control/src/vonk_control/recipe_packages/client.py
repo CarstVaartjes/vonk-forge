@@ -37,15 +37,6 @@ from vonk_forge_contracts.resolver import validate_recipe_models
 
 from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
-from vonk_control.recipe_library_types import (
-    CatalogModel,
-    RecipeLibraryError,
-    RecipeLibraryItem,
-    RecipeLibraryRelease,
-    RecipeLibrarySnapshot,
-    RecipePackageEntry,
-    _snapshot_content,
-)
 from vonk_control.recipe_packages import catalog_read
 from vonk_control.recipe_packages.archive import (
     _BoundedTarInfo,
@@ -66,7 +57,16 @@ from vonk_control.recipe_packages.contracts import (
     _select_release,
     _VerifiedRelease,
 )
-from vonk_control.recipe_release import (
+from vonk_control.recipe_packages.library_types import (
+    CatalogModel,
+    RecipeLibraryError,
+    RecipeLibraryItem,
+    RecipeLibraryRelease,
+    RecipeLibrarySnapshot,
+    RecipePackageEntry,
+    _snapshot_content,
+)
+from vonk_control.recipe_packages.release import (
     MAX_BUNDLE_BYTES,
     MAX_CHECKSUMS_BYTES,
     RELEASE_BUNDLE,
