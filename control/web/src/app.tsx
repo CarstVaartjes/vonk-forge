@@ -14,6 +14,7 @@ import { LibraryPage } from "./pages/library";
 import { WorkloadsPage } from "./pages/workloads";
 import { sparkPath, sparkRouteId } from "./lib/spark-route";
 import { interceptPlainClick } from "./lib/plain-click";
+import { trackInputModality } from "./lib/input-modality";
 
 function pageTitle(pathname: string): string {
   if (/^\/library\/recipes\//.test(pathname)) return "Recipe · Library · Vonk Forge";
@@ -48,6 +49,7 @@ export function App({ api }: { api: ControlApi }) {
   const pathname = new URL(url, location.origin).pathname;
   const page = currentPage(pathname);
   const sparkId = sparkRouteId(pathname);
+  useEffect(() => trackInputModality(), []);
   useEffect(() => {
     document.title = pageTitle(pathname);
   }, [pathname]);

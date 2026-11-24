@@ -1,7 +1,7 @@
+import { NoReading } from "./no-reading";
 import { useEffect, useState } from "react";
 import type { CatalogSyncStatus, ControlApi, PlatformObservation } from "../../api/types";
 import { lastSyncAt } from "../../lib/catalog-sync";
-import { NOT_REPORTED_TEXT } from "../../lib/fleet";
 import { exactTime } from "../../lib/time";
 import { utcTime } from "../../lib/utc-time";
 
@@ -41,8 +41,8 @@ export function VersionLine({
   return (
     // biome-ignore lint/a11y/useAriaPropsSupportedByRole: the footer is outside <main>, so it is the page contentinfo and takes a name
     <footer className="version-line" aria-label="Versions">
-      <span>Controller build: {build ? <code>{build.slice(0, 12)}</code> : NOT_REPORTED_TEXT}</span>
-      <span>Library version: {sync?.library_version ?? NOT_REPORTED_TEXT}</span>
+      <span>Controller build: {build ? <code>{build.slice(0, 12)}</code> : <NoReading />}</span>
+      <span>Library version: {sync?.library_version ?? <NoReading />}</span>
       <span>
         Last sync:{" "}
         {sync === null ? (
@@ -55,7 +55,7 @@ export function VersionLine({
             ({sync?.state})
           </>
         ) : (
-          NOT_REPORTED_TEXT
+          <NoReading />
         )}
       </span>
     </footer>

@@ -62,7 +62,7 @@ test("a Spark that reports no power or uptime says Not reported instead of a val
       index={1}
     />,
   );
-  expect(screen.getByText("Uptime: Not reported")).toBeInTheDocument();
+  expect(screen.getByText(/^Uptime:/)).toHaveTextContent("Not reported");
   expect(screen.getByText("GPU power").nextSibling).toHaveTextContent("Not reported");
 });
 
@@ -79,7 +79,7 @@ test("a stale sample reads Not reported on every tile, as the table does", () =>
   const stale = spark();
   (stale.telemetry as { freshness: string }).freshness = "stale";
   render(<SparkCard api={api} node={stale} now={NOW} index={0} />);
-  expect(screen.getByText("Uptime: Not reported")).toBeInTheDocument();
+  expect(screen.getByText(/^Uptime:/)).toHaveTextContent("Not reported");
   for (const title of ["GPU", "GPU temperature", "GPU power", "GPU clock"])
     expect(screen.getByText(title).nextSibling).toHaveTextContent("Not reported");
 });

@@ -1,3 +1,4 @@
+import { NoReading } from "../ui/no-reading";
 import {
   addWire,
   compareWire,
@@ -23,7 +24,7 @@ import { modelKey, modelLibraryPath, recipeLibraryPath } from "../../lib/library
 import { formatBytes } from "../../lib/fleet";
 import { EmptyState } from "../ui/empty-state";
 import { LibraryRecipeActions } from "./library-recipe-actions";
-import { NOT_REPORTED, useCapabilityWords } from "./library-vocabulary";
+import { useCapabilityWords } from "./library-vocabulary";
 import {
   RecipeQualificationBadge,
   RecipeQualificationEvidence,
@@ -624,7 +625,7 @@ export function LibraryWorkcell({
                       <em>
                         {(model.modelCapabilities ?? model.capabilities)
                           .map(words.label)
-                          .join(" · ") || NOT_REPORTED}
+                          .join(" · ") || <NoReading />}
                       </em>
                     </span>
                   </NavigateLink>
@@ -663,7 +664,7 @@ export function LibraryWorkcell({
                   )}
                   {(selectedModel.modelCapabilities ?? selectedModel.capabilities)
                     .map(words.label)
-                    .join(" · ") || NOT_REPORTED}
+                    .join(" · ") || <NoReading />}
                 </span>
                 {selectedVariants <= 1 && selectedModel.cacheUsage && (
                   <span>

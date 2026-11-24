@@ -1,0 +1,11 @@
+.no-reading {
+  color: var(--faint);
+  font-weight: 400;
+}
+.no-reading-hint {
+  display: block;
+  margin: 0.1rem 0 0 !important;
+  color: var(--muted);
+  font-size: 0.8125rem !important;
+  font-weight: 400;
+}

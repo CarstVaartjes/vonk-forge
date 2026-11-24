@@ -616,12 +616,17 @@ export function nodeMemorySplit(node: VisualFleetNode): MemorySplit | null {
   };
 }
 
-/** One Fleet vital: its fill (null draws no meter), the words beside it, and the amber warning. */
-type Vital = { percent: number | null; text: string; amber: boolean };
+/** One Fleet vital: its fill (null draws no meter), the words beside it (null: no reading, with an optional reason), and the amber warning. */
+export type Vital = {
+  percent: number | null;
+  text: string | null;
+  amber: boolean;
+  reason?: string;
+};
 
 /** What every reading says when the Spark did not report it. */
 export const NOT_REPORTED_TEXT = "Not reported";
-const NOT_REPORTED: Vital = { percent: null, text: NOT_REPORTED_TEXT, amber: false };
+const NOT_REPORTED: Vital = { percent: null, text: null, amber: false };
 
 /** Free disk and its total: the inventory's pair, else the live sample's. */
 function diskPair(node: VisualFleetNode): { free: WireNumber; total: WireNumber } | null {
@@ -690,7 +695,7 @@ export function nodeVitals(node: VisualFleetNode): { memory: Vital; disk: Vital;
           text: readings.join(", "),
           amber: false,
         }
-      : { ...NOT_REPORTED, text: reason ? `${NOT_REPORTED_TEXT} (${reason})` : NOT_REPORTED_TEXT },
+      : { ...NOT_REPORTED, ...(reason ? { reason } : {}) },
   };
 }
 
