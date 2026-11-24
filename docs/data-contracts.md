@@ -103,9 +103,9 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/components/artifact-job/artifact-hash.worker.ts` | `HashRequest` | browser-local upload hashing progress and worker messages; not API data |
 | `control/web/src/components/artifact-job/artifact-hash.worker.ts` | `WorkerScope` | browser-local upload hashing progress and worker messages; not API data |
 | `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `ActiveRun` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `CancelRecovery` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `InputPayload` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `RecipeParameter` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/artifact-job/artifact-job-submission.tsx` | `CancelRecovery` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/artifact-job/artifact-job-submission.tsx` | `InputPayload` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/artifact-job/artifact-job-form.tsx` | `RecipeParameter` | UI-only view model derived from generated API types for one screen; not an API document |
 | `control/web/src/components/ui/confirm-dialog.tsx` | `ConfirmDialogProps` | component props: UI-only, not API data |
 | `control/web/src/components/ui/empty-state.tsx` | `EmptyStateProps` | component props: UI-only, not API data |
 | `control/web/src/components/library/library-availability-feedback.tsx` | `AvailabilityFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |

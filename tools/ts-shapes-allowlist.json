@@ -108,17 +108,17 @@
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-submission.tsx",
       "type": "CancelRecovery",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-form.tsx",
       "type": "ContractState",
       "reason": "UI-only discriminated union for one screen or hook; not an API document"
     },
     {
-      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-submission.tsx",
       "type": "InputPayload",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
