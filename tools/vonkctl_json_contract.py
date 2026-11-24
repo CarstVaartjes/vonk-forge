@@ -25,7 +25,17 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, Any, Literal, Optional, Union, cast, get_args
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    Optional,
+    Required,
+    TypedDict,
+    Union,
+    cast,
+    get_args,
+)
 
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, Field, TypeAdapter, create_model
@@ -336,14 +346,26 @@ def _open(schema: object) -> object:
     return schema
 
 
+# The JSON Schema keywords this tool reads or sets; every other keyword of a
+# schema node passes through untouched.
+JsonSchema = TypedDict(
+    "JsonSchema",
+    {
+        "$schema": str,
+        "$defs": "Required[dict[str, JsonSchema]]",
+        "title": str,
+    },
+    total=False,
+)
+
 DEFINITIONS_FILENAME = "definitions.schema.json"
 _DEFS_PREFIX = "#/$defs/"
 
 
-def _bundled_schema(kind: DocumentKind) -> dict[str, Any]:
+def _bundled_schema(kind: DocumentKind) -> JsonSchema:
     """One kind as pydantic exports it: its root plus every definition it uses."""
 
-    schema = cast(dict[str, Any], _open(DOCUMENTS[kind].json_schema()))
+    schema = cast(JsonSchema, _open(DOCUMENTS[kind].json_schema()))
     schema["$schema"] = JSON_SCHEMA_DIALECT
     schema["title"] = f"vonkctl {kind} document (schema_version {schema_version(kind)})"
     return schema
@@ -366,10 +388,10 @@ def _retarget(schema: object, old: str, new: str) -> object:
     return schema
 
 
-def definitions_schema() -> dict[str, Any]:
+def definitions_schema() -> JsonSchema:
     """Every definition of every kind, once. A name means one definition."""
 
-    definitions: dict[str, dict[str, Any]] = {}
+    definitions: dict[str, JsonSchema] = {}
     for kind in DOCUMENTS:
         for name, definition in _bundled_schema(kind).get("$defs", {}).items():
             if definitions.setdefault(name, definition) != definition:
@@ -381,22 +403,22 @@ def definitions_schema() -> dict[str, Any]:
     }
 
 
-def document_schema(kind: DocumentKind) -> dict[str, Any]:
+def document_schema(kind: DocumentKind) -> JsonSchema:
     """The published JSON Schema of one kind: its root, definitions by reference."""
 
     schema = _bundled_schema(kind)
     schema.pop("$defs", None)
     return cast(
-        dict[str, Any],
+        JsonSchema,
         _retarget(schema, _DEFS_PREFIX, f"{DEFINITIONS_FILENAME}{_DEFS_PREFIX}"),
     )
 
 
-def bundled(published: dict[str, Any], definitions: dict[str, Any]) -> dict[str, Any]:
+def bundled(published: JsonSchema, definitions: JsonSchema) -> JsonSchema:
     """A published kind with its definitions inlined as local ``$defs``."""
 
     schema = cast(
-        dict[str, Any],
+        JsonSchema,
         _retarget(published, f"{DEFINITIONS_FILENAME}{_DEFS_PREFIX}", _DEFS_PREFIX),
     )
     return {**schema, "$defs": definitions["$defs"]}
@@ -431,7 +453,7 @@ def definitions_text() -> str:
     return _text(definitions_schema())
 
 
-def _text(schema: dict[str, Any]) -> str:
+def _text(schema: JsonSchema) -> str:
     return json.dumps(schema, indent=2, sort_keys=True) + "\n"
 
 

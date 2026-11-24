@@ -18,6 +18,13 @@ import sys
 import tomllib
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
+# The sibling helper, however this file is loaded.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_environment import (  # noqa: E402 -- imports follow this entry point's sys.path setup
+    pyright_environment,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 TYPECHECK_TIMEOUT_SECONDS = 600
 
@@ -70,7 +77,7 @@ def main(arguments: list[str]) -> int:
             ],
             cwd=ROOT,
             env={
-                **os.environ,
+                **pyright_environment(),
                 "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1",
                 # The whole scope exceeds Node's default ~2 GB heap.
                 "NODE_OPTIONS": " ".join(
