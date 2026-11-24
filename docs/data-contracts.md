@@ -253,6 +253,35 @@ module defines its own.
 | `control/src/vonk_control/stored/documents.py` | controller-contract | 2 | Typed documents stored in plan, run and installation JSON columns. |
 | `control/src/vonk_control/strict_json.py` | declared | 1 | Controller JSON models and their field-presence serialization policy. |
 | `control/src/vonk_control/worker/memory_contract.py` | controller-contract | 5 | Typed memory report the worker publishes and the Controller API exports. |
+| `agent_protocol/src/vonk_agent_protocol/capability_reply.py` | agent-protocol | 1 | The reply a route gives while an independently recoverable capability is down. |
+| `agent_protocol/src/vonk_agent_protocol/display_memory.py` | agent-protocol | 2 | Observed display reservation; unknown is never a memory estimate. |
+| `agent_protocol/src/vonk_agent_protocol/error_response.py` | agent-protocol | 5 | The bounded error envelope every Controller route can answer with. |
+| `agent_protocol/src/vonk_agent_protocol/gpu_clock.py` | agent-protocol | 7 | GPU clock intent, hardware observations and the owner's safety policy. |
+| `agent_protocol/src/vonk_agent_protocol/grant_requests.py` | agent-protocol | 6 | The Controller's host-helper and package grant requests, and the grant reply. |
+| `agent_protocol/src/vonk_agent_protocol/host_tuning.py` | agent-protocol | 5 | Spark host tuning as the agent measures it: the facts behind the host checks. |
+| `agent_protocol/src/vonk_agent_protocol/page_cache.py` | agent-protocol | 4 | Page-cache drops the privileged helper performs while a workload loads. |
+| `agent_protocol/src/vonk_agent_protocol/run_inspect_target.py` | agent-protocol | 7 | What one read-only run inspection asks the root helper about. |
+| `agent_protocol/src/vonk_agent_protocol/store_cleanup.py` | agent-protocol | 3 | Local retention delegation; no arbitrary privileged filesystem paths. |
+| `agent_protocol/src/vonk_agent_protocol/swap.py` | agent-protocol | 4 | Spark swap size: the owner's policy, the desired intent and what the helper did. |
+| `tools/vonkctl_json_contract.py` | controller-contract | 13 | The ``vonkctl --json`` client contract: one model per published document. |
+| `control/src/vonk_control/fleet_projection/host_checks.py` | declared | 1 | Spark host checks: plain advice derived from the agent's measured host tuning. |
+| `control/src/vonk_control/metrics/contract.py` | controller-contract | 7 | Shared operator contracts for bounded Prometheus reads. |
+| `control/src/vonk_control/metrics/prometheus_api.py` | declared | 9 | Read-only fixed-query adapter to the internal Prometheus service. |
+| `control/src/vonk_control/run_switch_operations/contracts.py` | controller-contract | 1 | Typed records owned by Run/Switch orchestration. |
+| `control/src/vonk_control/source_bundle_contract.py` | controller-contract | 1 | Durable source-ingress proof bound to an exact managed file copy. |
+| `control/src/vonk_control/wait_contract.py` | controller-contract | 2 | One persisted wait observation; the owner's SQL due column owns its clock. |
+| `control/src/vonk_control/capability_contract.py` | controller-contract | 1 | Availability of independently recoverable Controller capabilities. |
+| `control/src/vonk_control/runtime/asset_contract.py` | controller-contract | 1 | Complete public-kit membership produced while assembling the Controller image. |
+| `control/src/vonk_control/operator_receipt_contract.py` | controller-contract | 4 | Canonical public operator acceptance references and existing-Job decisions. |
+| `control/src/vonk_control/fleet_model_removal_contract.py` | controller-contract | 6 | Reviewed, content-addressed effects of a request to remove a fleet model. |
+| `control/src/vonk_control/coordinator_contract.py` | controller-contract | 2 | Failures of worker coordinators that have not claimed an operation. |
+| `tools/client_compatibility_report.py` | declared | 8 | Report what a published vonkctl would refuse from this Controller. |
+| `tools/contract_scans.py` | declared | 3 | Static scans that keep every data class defined once, in its Pydantic contract. |
+| `tools/single_source_values.py` | declared | 3 | Owner-adjacent registrations for handwritten literal families, without debt allowances. |
+| `control/src/vonk_control/inventory/items_contract.py` | controller-contract | 2 | Typed current agent facts retained as inventory items, never command history. |
+| `control/src/vonk_control/repeated_evidence_contract.py` | controller-contract | 1 | Repeated observations owned by contact or the operation they describe. |
+| `control/src/vonk_control/inventory/repository.py` | controller-contract | 2 | Append-only authenticated GPU node inventory evidence. |
+| `control/src/vonk_control/telemetry/samples.py` | controller-contract | 1 | Bounded, ordered persistence for authenticated node telemetry. |
 
 `stored/json_values.py` and `stored/columns.py` hold no wire models (`stored/rows.py` loads both for row reads and the write guard): they bind every JSON column of `models.py` to its typed contract (36 of 36), and `tests/test_json_column_contracts.py` fails on an untyped level. The only open values are the declared `ExternalPassthrough` annotations (engine argument values, generic job queue documents), each with a reason.
 
