@@ -773,6 +773,9 @@ def test_a_submission_after_a_lost_job_is_admitted_without_operator_action(
         world.close()
 
 
+# A full PostgreSQL load, lost job, stop and second load: about 7 s of calls on
+# the vonk-ci VM, the same at main; it outgrows the 10 s budget on a loaded runner.
+@pytest.mark.slow(30)
 def test_a_switch_from_a_job_member_with_a_lost_job_stops_it_and_serves_the_new_member(
     tmp_path: Path, postgres_engine
 ) -> None:
