@@ -193,6 +193,4 @@ A row records its digest when it is written; comparing a stored `*_digest` /
 document (added-line mode `identity`, "stored row re-hashed") refuses the row
 whenever a newer Controller reads it back differently. Digests are verified at
 ingress only (`REHASH_INGRESS`). The guard also catches a `payload_digest`
-column compared with any `*_digest(...)` call, not only `sha256`. Change
-detection against another row or a new input (the live profile document versus
-the digest a review recorded) is not this class.
+column compared with any `*_digest(...)` call, not only `sha256`.
