@@ -111,10 +111,10 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/components/library/library-availability-feedback.tsx` | `AvailabilityFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-availability-progress.tsx` | `AvailabilityProgress` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-models-view.tsx` | `LibraryModelsViewProps` | component props: UI-only, not API data |
-| `control/web/src/components/library/library-profiles-view.tsx` | `AssignmentDraft` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/library/library-profiles-view.tsx` | `FleetEntry` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/library/library-profiles-view.tsx` | `PendingProfileLoad` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/library/library-profiles-view.tsx` | `ProfileDraft` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-profile-drafts.tsx` | `AssignmentDraft` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-profile-drafts.tsx` | `FleetEntry` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/library/library-profile-load.tsx` | `PendingProfileLoad` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-profile-drafts.tsx` | `ProfileDraft` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/components/library/library-recipe-files.ts` | `SelectedRecipeFiles` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-technical-details.tsx` | `TechnicalValue` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-workcell.tsx` | `LibraryRecipeRecord` | UI-only view model derived from generated API types for one screen; not an API document |
