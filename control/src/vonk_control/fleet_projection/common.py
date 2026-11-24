@@ -43,7 +43,7 @@ from vonk_control.fleet_projection.host_checks import (
     Text1024,
 )
 from vonk_control.identifiers import UuidId
-from vonk_control.installation_transitions import IN_FLIGHT
+from vonk_control.installations.transitions import IN_FLIGHT
 from vonk_control.machine_states import (
     CertificateStateField,
     InstallationStateField,

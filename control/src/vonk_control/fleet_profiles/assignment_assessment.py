@@ -23,7 +23,7 @@ from vonk_control.fleet_profiles.contracts import _AssignmentState
 from vonk_control.fleet_profiles.dependencies import _ACTIVE_INSTALL_STATES
 from vonk_control.fleet_profiles.persistence import _stored_recipe
 from vonk_control.fleet_profiles.projection_support import _effective_option_choices
-from vonk_control.installation_transitions import IN_FLIGHT
+from vonk_control.installations.transitions import IN_FLIGHT
 from vonk_control.machine_states import rank_installed
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision

@@ -37,7 +37,7 @@ from vonk_control.agent_operation_facts import (
 )
 from vonk_control.agent_operation_facts import aware as _aware
 from vonk_control.categorized_errors import InvalidValue, MissingRecord
-from vonk_control.installation_transitions import end_unfinished_installation
+from vonk_control.installations.transitions import end_unfinished_installation
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,

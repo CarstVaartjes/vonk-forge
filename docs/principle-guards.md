@@ -158,7 +158,7 @@ Lock and ordering guards:
   revocations nobody is told about (`attempt_residues.py`, `pki/local_ca.py`) are
   out of scope and stay asynchronous.
 - `control/tests/test_agent_node_lock_tree.py` proves telemetry, inventory,
-  contact, `installed_bytes.py` and `agent_api` modules never lock `agent_nodes` (the `optimistic`
+  contact, `installations/installed_bytes.py` and `agent_api` modules never lock `agent_nodes` (the `optimistic`
   scan, `scan_agent_node_locks`).
 - `fixed_tick_polls` (added-line mode `tick-polls`, in
   `control/tests/added_line_guards/`) refuses a test that calls

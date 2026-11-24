@@ -75,8 +75,10 @@ from vonk_agent_protocol.state_machines import (
     RunState,
 )
 from vonk_control.agent_operation_facts import aware as _aware
-from vonk_control.covered_installation_claims import release_covered_installation_claims
-from vonk_control.installation_transitions import end_orphaned_installation
+from vonk_control.installations.covered_claims import (
+    release_covered_installation_claims,
+)
+from vonk_control.installations.transitions import end_orphaned_installation
 from vonk_control.jobs import states as job_states
 from vonk_control.logging import log_event
 from vonk_control.machine_states import DISTRIBUTION_HELD, rank_installed

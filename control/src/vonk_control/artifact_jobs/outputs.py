@@ -48,7 +48,7 @@ from vonk_control.artifact_jobs.inputs import ArtifactJobService as InputService
 from vonk_control.bounded_retry import bounded_attempts
 from vonk_control.categorized_errors import MissingRecord
 from vonk_control.compiled_artifact_contract import CompiledArtifactContract
-from vonk_control.installed_bytes import demote_ranks_on_lost_image
+from vonk_control.installations.installed_bytes import demote_ranks_on_lost_image
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.lifecycle.artifact_job import (
     ArtifactJobAdapter,

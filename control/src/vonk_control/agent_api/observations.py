@@ -48,6 +48,12 @@ from vonk_control.download_contract import download_responses
 from vonk_control.enrollment.responses import _now
 from vonk_control.http_errors import temporary_http_answer
 from vonk_control.identifiers import UuidId
+from vonk_control.installations.untracked import (
+    run_wanted_here,
+    untracked_installations,
+    untracked_runs,
+    wanted_run_ids,
+)
 from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
@@ -74,12 +80,6 @@ from vonk_control.run_switch_operations.evidence_waits import wake_evidence_wait
 from vonk_control.source_bundles import SourceBundleError
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.telemetry.samples import TelemetryRepository
-from vonk_control.untracked_installations import (
-    run_wanted_here,
-    untracked_installations,
-    untracked_runs,
-    wanted_run_ids,
-)
 from vonk_control.waits.persisted import schedule_wait
 
 

@@ -37,7 +37,7 @@ from vonk_control.fleet_profiles.application_cancel_api import (
     install_profile_application_cancel_route,
 )
 from vonk_control.gateway.keys import GatewayKeyService, install_gateway_key_routes
-from vonk_control.installation_reconciliation_api import (
+from vonk_control.installations.reconciliation_api import (
     install_installation_reconciliation_routes,
 )
 from vonk_control.metrics.prometheus_api import PrometheusReader

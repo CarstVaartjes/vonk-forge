@@ -61,6 +61,7 @@ from vonk_control.host_runtime_plan_authority import (
     RuntimePlanUnsatisfiable,
     derive_runtime_plan_binding,
 )
+from vonk_control.installations.untracked import run_wanted_here
 from vonk_control.jobs import states as job_states
 from vonk_control.logging import log_event
 from vonk_control.models.fleet import AgentCertificate, AgentNode
@@ -72,7 +73,6 @@ from vonk_control.own_cleanup import CLEANUP_ACTIONS
 from vonk_control.owner_liveness import run_has_live_operation
 from vonk_control.strict_json import read_stored_model
 from vonk_control.swap import selected_swap
-from vonk_control.untracked_installations import run_wanted_here
 
 _LOGGER = logging.getLogger("vonk_control.host_helper_authority")
 

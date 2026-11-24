@@ -32,7 +32,7 @@ from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states
 from vonk_control.admission_locking import admission_attempts, admission_wait_exhausted
 from vonk_control.cancelled_runtime import cancellation_stop_current
-from vonk_control.installed_bytes import demote_ranks_on_lost_image
+from vonk_control.installations.installed_bytes import demote_ranks_on_lost_image
 from vonk_control.jobs.documents import RecipeBuildCleanupParent
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter

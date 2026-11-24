@@ -25,10 +25,10 @@ from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
+from vonk_control.installations.untracked import run_wanted_here
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentCertificate
 from vonk_control.models.jobs import Job
-from vonk_control.untracked_installations import run_wanted_here
 
 from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 

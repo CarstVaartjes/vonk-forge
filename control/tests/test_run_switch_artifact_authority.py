@@ -16,10 +16,10 @@ from vonk_agent_protocol.state_machines import (
     ReservationState,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.covered_installation_claims import (
+from vonk_control.disk_reservations import runtime_images_named_on_nodes
+from vonk_control.installations.covered_claims import (
     release_covered_installation_claims,
 )
-from vonk_control.disk_reservations import runtime_images_named_on_nodes
 from vonk_control.inventory.repository import (
     INVENTORY_MAX_AGE,
     InventoryRepository,

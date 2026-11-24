@@ -23,7 +23,7 @@ from vonk_agent_protocol.state_machines import (
     RunState,
 )
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.installed_bytes import refresh_installed_bytes
+from vonk_control.installations.installed_bytes import refresh_installed_bytes
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
