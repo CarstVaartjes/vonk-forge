@@ -57,9 +57,9 @@ path = "tools/hatch_build.py"
 target-version = "py314"
 # agent_protocol runs on the Sparks, which have Python 3.12. Files another
 # interpreter runs stay at 3.13 syntax: container scripts under deploy/ (the
-# LiteLLM image's Python), and scripts and tests/nodes that a runner's or
-# host's system python3 starts.
-per-file-target-version = { "agent_protocol/**" = "py312", "deploy/**" = "py313", "scripts/**" = "py313", "tests/nodes/**" = "py313" }
+# LiteLLM image's Python), scripts and tests/nodes that a runner's or host's
+# system python3 starts, and the stdlib-only tools module such scripts import.
+per-file-target-version = { "agent_protocol/**" = "py312", "deploy/**" = "py313", "scripts/**" = "py313", "tests/nodes/**" = "py313", "tools/generated_contracts.py" = "py313" }
 # Every extensionless executable in scripts/ and bin/ is Python unless excluded
 # here by name: a new shell script that is not listed fails Ruff loudly (a parse
 # error) instead of a new Python script being skipped silently.

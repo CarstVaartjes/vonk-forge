@@ -114,7 +114,7 @@ def is_current(root: Path = ROOT) -> bool:
     """Whether the stamped outputs still match the current inputs."""
     try:
         recorded = json.loads((root / STAMP).read_text(encoding="utf-8"))
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return False
     if (
         not isinstance(recorded, dict)
