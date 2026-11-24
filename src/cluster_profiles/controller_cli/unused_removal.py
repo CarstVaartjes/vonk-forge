@@ -19,6 +19,7 @@ from typing import NotRequired, TypedDict
 
 from cluster_profiles.cli_outcome import SubmissionAcceptance
 from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.cli_states import PARTIAL_FIELD
 from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlConflict,
@@ -294,5 +295,5 @@ def _remove_unused(
     )
     document["submissions"] = submissions
     if any(item["failure"] is not None for item in submissions):
-        document["partial"] = True
+        document[PARTIAL_FIELD] = True
     return document
