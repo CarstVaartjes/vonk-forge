@@ -2,7 +2,7 @@
 
 from vonk_agent_protocol.inventory import NetworkInterface
 from vonk_control.fleet_projection.common import ProjectionReason
-from vonk_control.nas_route_notice import nas_route_notice
+from vonk_control.fleet_projection.nas_route_notice import nas_route_notice
 
 
 def test_notice_roundtrips_through_the_projection_consumer() -> None:

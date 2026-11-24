@@ -30,6 +30,8 @@ from vonk_control.fleet_projection.common import (
     RunPresenceRow,
     _utc,
 )
+from vonk_control.fleet_projection.model_layout_notice import model_layout_notices
+from vonk_control.fleet_projection.nas_transfer_rate import slow_nas_transfers
 from vonk_control.fleet_projection.nodes import (
     _connection,
     _inventory,
@@ -43,7 +45,6 @@ from vonk_control.inventory.repository import (
     INVENTORY_MAX_AGE_SECONDS,
     newest_snapshot_ids,
 )
-from vonk_control.model_layout_notice import model_layout_notices
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
@@ -60,7 +61,6 @@ from vonk_control.models.fleet import (
 )
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_control.nas_transfer_rate import slow_nas_transfers
 from vonk_control.observation.capture import begin_observation_capture
 from vonk_control.operations.blockers import PHASE_RETRY_CODE, read_blockers
 from vonk_control.owner_liveness import SPARK_PRESENCE_WINDOW
