@@ -316,20 +316,22 @@ def _control_error(
         and not unreadable
         else message
     )
-    result = failure_document(
-        message,
-        CliErrorType.LOCAL if local else CliErrorType.CONTROL_API,
-        code=code,
-        detail=_sanitize_text(detail),
-        recovery_actions=list(getattr(error, "recovery", ()) or ()),
-        retryable=getattr(error, "retryable", False) is True,
-        retry_time=getattr(error, "retry_time", None),
-        retry_after_seconds=getattr(error, "retry_after_seconds", None),
-        preserved=getattr(error, "preserved", None),
-        required_bytes=getattr(error, "required_bytes", None),
-        free_bytes=getattr(error, "free_bytes", None),
-        shortfall_bytes=getattr(error, "shortfall_bytes", None),
-        log_excerpt=getattr(error, "log_excerpt", None),
+    result = dict(
+        failure_document(
+            message,
+            CliErrorType.LOCAL if local else CliErrorType.CONTROL_API,
+            code=code,
+            detail=_sanitize_text(detail),
+            recovery_actions=list(getattr(error, "recovery", ()) or ()),
+            retryable=getattr(error, "retryable", False) is True,
+            retry_time=getattr(error, "retry_time", None),
+            retry_after_seconds=getattr(error, "retry_after_seconds", None),
+            preserved=getattr(error, "preserved", None),
+            required_bytes=getattr(error, "required_bytes", None),
+            free_bytes=getattr(error, "free_bytes", None),
+            shortfall_bytes=getattr(error, "shortfall_bytes", None),
+            log_excerpt=getattr(error, "log_excerpt", None),
+        )
     )
     observation = getattr(args, "observation", None)
     if (
@@ -799,7 +801,7 @@ def _main(
             cache_update_notice(result)
             status = 0
         except (CliUpdateError, ControlClientError, OSError) as error:
-            result = failure_document(_sanitize_text(error), CliErrorType.UPDATE)
+            result = dict(failure_document(_sanitize_text(error), CliErrorType.UPDATE))
             status = 2
         if args.global_json or getattr(args, "json", False):
             print(_json_text(stamp_document(args, result, error=status != 0)))

@@ -25,6 +25,7 @@ from cluster_profiles.controller_cli.observation import _bounded_timeout, _poll_
 from cluster_profiles.controller_cli.profile_options import (
     _apply_option_choices,
     _configure_option_target,
+    _option_target_index,
 )
 from cluster_profiles.controller_cli.selection import (
     _read_concurrently,
@@ -32,6 +33,9 @@ from cluster_profiles.controller_cli.selection import (
     _resolve_spark_selectors,
     _selection_remaining,
     _skipped_read,
+)
+from cluster_profiles.generated_control.models.fleet_profile_definition import (
+    FleetProfileDefinition,
 )
 
 
@@ -85,7 +89,7 @@ def _read_saved_definition(
     args: argparse.Namespace,
     *,
     deadline: float | None = None,
-    check: Callable[..., None] | None = None,
+    check: Callable[[FleetProfileDefinition], None] | None = None,
 ):
     """The saved definition view (revision and definition), readable or retried."""
 
@@ -96,7 +100,7 @@ def _read_saved_definition(
                 "FleetProfileDefinition", document["definition"]
             )
             if check is not None:
-                check(definition)
+                check(FleetProfileDefinition.from_dict(definition))
         except ControlClientError, KeyError, TypeError, ValueError:
             raise ControlMalformedResponse(
                 "saved profile definition is unavailable"
@@ -187,10 +191,11 @@ def _profile_authoring(
 
     deadline = selection_deadline or (time.monotonic() + _bounded_timeout(args))
 
-    def check(definition) -> None:
+    def check(definition: FleetProfileDefinition) -> None:
         if action == "configure" and args.option:
-            _configure_option_target(
-                cast(list, definition["assignments"]),  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+            assignments = definition.assignments or []
+            _option_target_index(
+                [assignment.assignment_name or "" for assignment in assignments],
                 args.assignment,
             )
 
@@ -222,7 +227,7 @@ def _profile_authoring(
             else _skipped_read
         ),
     )
-    current = cast(dict, definition_outcome.get())  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+    current = definition_outcome.get()
     if args.observation.status != "complete":
         return current
     current_revision = cast(int, current["revision"])

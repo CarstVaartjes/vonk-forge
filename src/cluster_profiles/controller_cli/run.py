@@ -105,7 +105,7 @@ def _run(
         if spark_names
         else lambda: _observe_selection(roster, deadline=deadline),
     )
-    selector = cast(str, recipe.get())
+    selector = recipe.get()
     if not spark_names:
         spark_names = cast(list[str], fleet.get())
 
@@ -129,8 +129,8 @@ def _run(
         lambda: _resolve_spark_selectors(client, spark_names, deadline=deadline),
         lambda: _read_saved_definition(client, args),
     )
-    recipe_selector = cast(str, recipe_outcome.get())
-    spark_ids = cast(list[str], spark_outcome.get())
+    recipe_selector = recipe_outcome.get()
+    spark_ids = spark_outcome.get()
     prefetched = [first_read]
     flags = list(edit_args.option)
     flag_names = {flag.partition("=")[0] for flag in flags}
@@ -146,18 +146,18 @@ def _run(
                 return assignment.get("option_choices") or {}
         return {}
 
-    def draft() -> ReviewedDraft | dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+    def draft() -> ReviewedDraft | None:
         """This run's edit on the newest saved profile; nothing is written yet.
 
-        A read that did not complete is returned as its observation instead.
+        None when the read did not complete: its observation ends the run.
         """
         current = (
-            cast(dict, prefetched.pop().get())  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+            prefetched.pop().get()
             if prefetched
             else _read_saved_definition(client, args)
         )
         if args.observation.status != "complete":
-            return current
+            return None
         base = validate_control_document(
             "FleetProfileDefinition", current["definition"]
         )

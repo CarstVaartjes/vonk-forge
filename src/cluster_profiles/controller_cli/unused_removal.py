@@ -15,11 +15,10 @@ import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
-from dataclasses import asdict, dataclass, field
+from typing import NotRequired, TypedDict
 
 from cluster_profiles.cli_outcome import SubmissionAcceptance
 from cluster_profiles.cli_render.dispatch import render_payload
-from cluster_profiles.cli_states import PARTIAL_FIELD
 from cluster_profiles.control_client.errors import (
     ControlClientError,
     ControlConflict,
@@ -33,10 +32,9 @@ from cluster_profiles.controller_cli.cache_removal import (
 from cluster_profiles.controller_cli.common import (
     ControllerClient,
     _cache_operation_id,
-    _query,
 )
 from cluster_profiles.controller_cli.confirmation import _can_prompt, _confirm_action
-from cluster_profiles.controller_cli.selection import _library_pages
+from cluster_profiles.controller_cli.selection import LibraryQuery, _library_pages
 from cluster_profiles.generated_control.models.cache_removal_review import (
     CacheRemovalReview,
 )
@@ -49,8 +47,7 @@ _REVIEW_WORKERS = 4
 _NOTHING_TO_FREE = "Nothing to free: every file is shared with another cached model."
 
 
-@dataclass(frozen=True)
-class ReviewedModel:
+class ReviewedModel(TypedDict):
     """One cached model as its fleet removal review answered."""
 
     selector: str
@@ -61,33 +58,29 @@ class ReviewedModel:
     review_digest: str
 
 
-@dataclass(frozen=True)
-class Unreviewed:
+class Unreviewed(TypedDict):
     selector: str
     failure: str
 
 
-@dataclass(frozen=True)
-class Outcome:
+class Outcome(TypedDict):
     """What became of one removable model after consent."""
 
     selector: str
-    request_key: str | None = None
-    operation_id: str | None = None
-    retained: str | None = None
-    failure: str | None = None
+    request_key: str | None
+    operation_id: str | None
+    retained: str | None
+    failure: str | None
     # Set only when the Controller's answer is not known (not refused).
-    reconnect: str | None = None
+    reconnect: str | None
 
 
-@dataclass(frozen=True)
-class Totals:
+class Totals(TypedDict):
     nas_bytes: int
     sparks: dict[str, int]
 
 
-@dataclass(frozen=True)
-class UnusedRemoval:
+class UnusedRemoval(TypedDict):
     """The one document of ``model remove --unused`` (unpublished, like the review)."""
 
     unused_removal: bool
@@ -95,23 +88,40 @@ class UnusedRemoval:
     retained: list[ReviewedModel]
     unreviewed: list[Unreviewed]
     totals: Totals
-    submissions: list[Outcome] | None = field(default=None)
+    submissions: NotRequired[list[Outcome]]
+    # ``cli_states.PARTIAL_FIELD``: a refused removal must not read as
+    # success, so the command exits non-zero.
+    partial: NotRequired[bool]
 
-    def to_dict(self) -> dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
-        document = asdict(self)
-        if self.submissions is None:
-            del document["submissions"]
-        elif any(item.failure is not None for item in self.submissions):
-            # A refused removal must not read as success: exit non-zero.
-            document[PARTIAL_FIELD] = True
-        return document
+
+def _outcome(
+    selector: str,
+    request_key: str,
+    *,
+    operation_id: str | None = None,
+    retained: str | None = None,
+    failure: str | None = None,
+    reconnect: str | None = None,
+) -> Outcome:
+    return Outcome(
+        selector=selector,
+        request_key=request_key,
+        operation_id=operation_id,
+        retained=retained,
+        failure=failure,
+        reconnect=reconnect,
+    )
 
 
 def _cached_selectors(client: ControllerClient) -> list[str]:
     deadline = time.monotonic() + _LIST_BUDGET_SECONDS
     selectors: list[str] = []
     for rows in _library_pages(
-        client, "/api/model/library", "models", _query(cached=True), deadline=deadline
+        client,
+        "/api/model/library",
+        "models",
+        LibraryQuery(cached=True),
+        deadline=deadline,
     ):
         for row in rows:
             selector = row.get("selector") if isinstance(row, Mapping) else None
@@ -123,8 +133,7 @@ def _cached_selectors(client: ControllerClient) -> list[str]:
     return list(dict.fromkeys(selectors))
 
 
-def _reviewed(selector: str, document: dict) -> ReviewedModel:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
-    review = CacheRemovalReview.from_dict(document)
+def _reviewed(selector: str, review: CacheRemovalReview) -> ReviewedModel:
     fleet = review.fleet
     if not isinstance(fleet, FleetModelRemovalEffects):
         raise ControlMalformedResponse("Fleet removal review has no Spark effects")
@@ -159,10 +168,10 @@ def _reviewed(selector: str, document: dict) -> ReviewedModel:  # pyright: ignor
 
 
 def _review_one(client: ControllerClient, selector: str) -> ReviewedModel:
-    return _reviewed(
-        selector,
+    review = CacheRemovalReview.from_dict(
         _cache_removal_review(client, "model", selector, with_model=None, fleet=True),
     )
+    return _reviewed(selector, review)
 
 
 def _combined_review(client: ControllerClient) -> UnusedRemoval:
@@ -174,22 +183,23 @@ def _combined_review(client: ControllerClient) -> UnusedRemoval:
         except (ControlClientError, OSError) as error:
             # A model that cannot be reviewed is kept and reported; running
             # the command again reviews it afresh.
-            return Unreviewed(selector, str(error))
+            return Unreviewed(selector=selector, failure=str(error))
 
     with ThreadPoolExecutor(max_workers=_REVIEW_WORKERS) as pool:
         entries = list(pool.map(review, selectors))
-    reviewed = [e for e in entries if isinstance(e, ReviewedModel)]
-    removals = [e for e in reviewed if e.removable]
-    nodes = sorted({node for e in removals for node in e.sparks})
+    reviewed = [e for e in entries if "review_digest" in e]
+    removals = [e for e in reviewed if e["removable"]]
+    nodes = sorted({node for e in removals for node in e["sparks"]})
     return UnusedRemoval(
         unused_removal=True,
         removals=removals,
-        retained=[e for e in reviewed if not e.removable],
-        unreviewed=[e for e in entries if isinstance(e, Unreviewed)],
+        retained=[e for e in reviewed if not e["removable"]],
+        unreviewed=[e for e in entries if "failure" in e],
         totals=Totals(
-            nas_bytes=sum(e.nas_bytes or 0 for e in removals),
+            nas_bytes=sum(e["nas_bytes"] or 0 for e in removals),
             sparks={
-                node: sum(e.sparks.get(node) or 0 for e in removals) for node in nodes
+                node: sum(e["sparks"].get(node) or 0 for e in removals)
+                for node in nodes
             },
         ),
     )
@@ -202,11 +212,11 @@ def _submit_one(
     entry: ReviewedModel,
 ) -> Outcome:
     one = argparse.Namespace(**vars(args))
-    one.selector = entry.selector
+    one.selector = entry["selector"]
     one.fleet = True
     # The key exists before the submit so a refusal still names it.
     one.request_key = key = factory()
-    one.fleet_review_digest = entry.review_digest
+    one.fleet_review_digest = entry["review_digest"]
     try:
         return _submit_planned(client, one, factory, entry, key)
     except (ControlClientError, OSError) as error:
@@ -216,11 +226,11 @@ def _submit_one(
             submission is not None
             and submission.acceptance is SubmissionAcceptance.UNKNOWN
         )
-        return Outcome(
-            entry.selector,
-            request_key=key,
+        return _outcome(
+            entry["selector"],
+            key,
             failure=str(error),
-            reconnect=_model_removal_reconnect(entry.selector, key, fleet=True)
+            reconnect=_model_removal_reconnect(entry["selector"], key, fleet=True)
             if unknown
             else None,
         )
@@ -238,17 +248,17 @@ def _submit_planned(
     except ControlConflict:
         # An earlier removal changed what this model shares: plan again with
         # the same rule and submit only if it is still unused.
-        fresh = _review_one(client, entry.selector)
-        if not fresh.removable:
-            return Outcome(entry.selector, request_key=key, retained=fresh.reason)
-        if fresh.review_digest == entry.review_digest:
+        fresh = _review_one(client, entry["selector"])
+        if not fresh["removable"]:
+            return _outcome(entry["selector"], key, retained=fresh["reason"])
+        if fresh["review_digest"] == entry["review_digest"]:
             # Nothing changed, so an identical body would be refused again.
             raise
-        one.fleet_review_digest = fresh.review_digest
+        one.fleet_review_digest = fresh["review_digest"]
         receipt = _submit_model_removal(client, one, factory)
-    return Outcome(
-        entry.selector,
-        request_key=key,
+    return _outcome(
+        entry["selector"],
+        key,
         operation_id=_cache_operation_id("model", receipt),
     )
 
@@ -257,7 +267,7 @@ def _remove_unused(
     client: ControllerClient,
     args: argparse.Namespace,
     factory: Callable[[], str],
-) -> dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+) -> UnusedRemoval:
     if args.selector is not None or args.request_key is not None:
         raise ValueError("model remove --unused takes no selector or request key")
     if getattr(args, "fleet", False):
@@ -267,26 +277,22 @@ def _remove_unused(
         if args.yes or args.detach:
             raise ValueError("model remove --review cannot be combined with consent")
         args.outcome_context = "read"
-        return document.to_dict()
+        return document
     if not args.yes and not _can_prompt(args):
         raise ValueError("model remove --unused requires --yes in noninteractive mode")
-    if not document.removals:
-        return document.to_dict()
+    if not document["removals"]:
+        return document
     if not args.yes:
         with redirect_stdout(sys.stderr):
-            render_payload(document.to_dict(), "model", action="preview")
-        _confirm_action(args, f"Remove {len(document.removals)} unused models?")
+            render_payload(document, args.command, action="preview")
+        _confirm_action(args, f"Remove {len(document['removals'])} unused models?")
     submissions: list[Outcome] = []
     # Sequential on purpose: Controller acceptance holds the cache lock and
     # shared objects make the order matter (a later review sees the earlier).
     submissions.extend(
-        _submit_one(client, args, factory, entry) for entry in document.removals
+        _submit_one(client, args, factory, entry) for entry in document["removals"]
     )
-    return UnusedRemoval(
-        document.unused_removal,
-        document.removals,
-        document.retained,
-        document.unreviewed,
-        document.totals,
-        submissions,
-    ).to_dict()
+    document["submissions"] = submissions
+    if any(item["failure"] is not None for item in submissions):
+        document["partial"] = True
+    return document
