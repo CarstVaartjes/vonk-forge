@@ -62,7 +62,7 @@ from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, Recipe
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.operations.progress import project_progress_for_state
-from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.operator_acceptance.receipt_contract import ReceiptOwner
 from vonk_control.revision_images import revision_images
 from vonk_control.stored.rows import read_row_column
 from vonk_control.stored.states import CatalogRevisionState, RecipeBuildState

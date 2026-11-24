@@ -47,12 +47,12 @@ from vonk_control.operation_api.responses import (
     decode_offset,
     job_response,
 )
-from vonk_control.operator_acceptance import operator_acceptance
-from vonk_control.operator_receipt_contract import (
+from vonk_control.operator_acceptance.receipt_contract import (
     JobOperatorReceipt,
     ReceiptCode,
     ReceiptPolicy,
 )
+from vonk_control.operator_acceptance.resolution import operator_acceptance
 from vonk_control.strict_json import warn_unreadable_once
 
 

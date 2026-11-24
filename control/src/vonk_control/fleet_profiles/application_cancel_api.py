@@ -20,11 +20,11 @@ from vonk_control.fleet_profiles.contracts import (
 from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
-from vonk_control.operator_acceptance import (
+from vonk_control.operator_acceptance.receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.resolution import (
     OperatorReceiptResolver,
     operator_acceptance,
 )
-from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 _CANCEL_PATH = "/api/profile/applications/{application_id}/cancel"
 _CANCEL_RECEIPT_PATH = (

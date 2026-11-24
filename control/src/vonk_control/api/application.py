@@ -48,7 +48,10 @@ from vonk_control.operation_api.contracts import (
     OperationApiServices,
     bounded_error_responses,
 )
-from vonk_control.operator_acceptance import ControllerAPIRoute, OperatorReceiptResolver
+from vonk_control.operator_acceptance.resolution import (
+    ControllerAPIRoute,
+    OperatorReceiptResolver,
+)
 from vonk_control.operator_projection_api.services import FleetOperatorServices
 from vonk_control.recipe_image_availability.api import install_recipe_operator_routes
 from vonk_control.run_switch_operations.service import RunSwitchOperationService

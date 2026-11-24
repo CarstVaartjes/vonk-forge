@@ -38,8 +38,8 @@ from vonk_control.enrollment.types import (
     RenewalIssuanceUncertain,
 )
 from vonk_control.operation_api.contracts import bounded_error_responses
-from vonk_control.operator_acceptance import operator_acceptance
-from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.resolution import operator_acceptance
 from vonk_control.route_declarations import raw_json_body
 
 

@@ -37,7 +37,7 @@ from vonk_control.operations.contract import (
     OperationRecovery,
 )
 from vonk_control.operations.item_contract import OperationOwnerReference, OperationRow
-from vonk_control.operator_receipt_contract import JobOperatorReceipt
+from vonk_control.operator_acceptance.receipt_contract import JobOperatorReceipt
 from vonk_control.strict_json import StrictModel
 from vonk_control.waits.contract import QueueWait
 

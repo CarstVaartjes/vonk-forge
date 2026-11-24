@@ -272,7 +272,7 @@ module defines its own.
 | `control/src/vonk_control/waits/contract.py` | controller-contract | 2 | One persisted wait observation; the owner's SQL due column owns its clock. |
 | `control/src/vonk_control/capability_contract.py` | controller-contract | 1 | Availability of independently recoverable Controller capabilities. |
 | `control/src/vonk_control/runtime/asset_contract.py` | controller-contract | 1 | Complete public-kit membership produced while assembling the Controller image. |
-| `control/src/vonk_control/operator_receipt_contract.py` | controller-contract | 4 | Canonical public operator acceptance references and existing-Job decisions. |
+| `control/src/vonk_control/operator_acceptance/receipt_contract.py` | controller-contract | 4 | Canonical public operator acceptance references and existing-Job decisions. |
 | `control/src/vonk_control/model_cache/fleet_removal_contract.py` | controller-contract | 6 | Reviewed, content-addressed effects of a request to remove a fleet model. |
 | `control/src/vonk_control/failures/coordinator_contract.py` | controller-contract | 2 | Failures of worker coordinators that have not claimed an operation. |
 | `tools/client_compatibility_report.py` | declared | 8 | Report what a published vonkctl would refuse from this Controller. |

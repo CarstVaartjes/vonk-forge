@@ -25,11 +25,11 @@ from vonk_control.categorized_errors import MissingRecord
 from vonk_control.gateway.keys_contract import GatewayKeyRevoked
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base
-from vonk_control.operator_acceptance import (
+from vonk_control.operator_acceptance.receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.resolution import (
     AcceptanceArguments,
     OperatorReceiptResolver,
 )
-from vonk_control.operator_receipt_contract import ReceiptPolicy
 from vonk_control.recipe_image_availability import requests
 from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,

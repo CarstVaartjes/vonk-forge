@@ -108,7 +108,7 @@ from vonk_control.model_cache.contract import (
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
 )
-from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.operator_acceptance.receipt_contract import ReceiptOwner
 from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
 from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalOwner,

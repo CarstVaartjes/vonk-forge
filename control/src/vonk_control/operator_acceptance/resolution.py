@@ -29,7 +29,6 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.state_machines import EnrollmentGrantState
-from vonk_control.agent_acceptance import AGENT_POLICIES, resolve_agent_receipt
 from vonk_control.api_availability import AVAILABILITY_ERRORS
 from vonk_control.artifact_jobs.contracts import ArtifactJobResponse
 from vonk_control.auth import Actor
@@ -45,15 +44,21 @@ from vonk_control.observation.platform_errors import (
     observation_capture_unavailable_response,
 )
 from vonk_control.operation_api.contracts import JobResumeRequest, JobResumeResponse
-from vonk_control.operator_projection_api.contracts import FleetActionResponse
-from vonk_control.operator_receipt_contract import (
+from vonk_control.operator_acceptance.agent import AGENT_POLICIES, resolve_agent_receipt
+from vonk_control.operator_acceptance.receipt_checks import (
+    _available,
+    _identity,
+    _refused,
+    _require,
+)
+from vonk_control.operator_acceptance.receipt_contract import (
     AcceptanceReceipt,
     ReceiptCode,
     ReceiptOwner,
     ReceiptPolicy,
     SecurityEdge,
 )
-from vonk_control.receipt_checks import _available, _identity, _refused, _require
+from vonk_control.operator_projection_api.contracts import FleetActionResponse
 from vonk_control.recipe_image_availability.removal_contract import (
     RecipeRemovalUnavailableView,
 )

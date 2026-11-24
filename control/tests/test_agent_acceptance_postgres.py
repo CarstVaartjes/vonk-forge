@@ -23,7 +23,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, WaitReaso
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control import operator_acceptance
 from vonk_control.agent_api.common import AgentApiServices
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
@@ -37,7 +36,11 @@ from vonk_control.models.execution import ArtifactJobFile, InstallationNode, Run
 from vonk_control.models.fleet import AgentCertificate, LoginSession, User
 from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
-from vonk_control.operator_receipt_contract import AcceptanceReceipt, ReceiptCode
+from vonk_control.operator_acceptance import resolution as operator_acceptance
+from vonk_control.operator_acceptance.receipt_contract import (
+    AcceptanceReceipt,
+    ReceiptCode,
+)
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.security.browser_auth import BrowserAuthService
 from vonk_control.source_bundles import SourceBundleStore

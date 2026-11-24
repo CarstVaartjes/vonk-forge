@@ -15,8 +15,8 @@ from vonk_control.auth import ADMIN_ROLE, Actor, AdministratorRole, TokenCodec
 from vonk_control.http_errors import temporary_http_answer
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
-from vonk_control.operator_acceptance import security_edge
-from vonk_control.operator_receipt_contract import SecurityEdge
+from vonk_control.operator_acceptance.receipt_contract import SecurityEdge
+from vonk_control.operator_acceptance.resolution import security_edge
 from vonk_control.security.browser_auth import (
     BrowserAuthenticationError,
     BrowserAuthenticationThrottledError,

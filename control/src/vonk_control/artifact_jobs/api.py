@@ -57,11 +57,11 @@ from vonk_control.compiled_artifact_contract import ParameterScalar
 from vonk_control.download_contract import download_responses, upload_request_body
 from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.operation_api.contracts import bounded_error_responses
-from vonk_control.operator_acceptance import (
+from vonk_control.operator_acceptance.receipt_contract import ReceiptPolicy
+from vonk_control.operator_acceptance.resolution import (
     OperatorReceiptResolver,
     operator_acceptance,
 )
-from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 _NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _MEDIA_TYPE = r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"

@@ -43,7 +43,7 @@ from vonk_control.library.contract import (
 )
 from vonk_control.machine_states import RUN_LIVE
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
-from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.operator_acceptance.receipt_contract import ReceiptOwner
 from vonk_control.request_fault import RequestFault
 from vonk_control.strict_json import serialize_json_value
 from vonk_control.unreadable_rows import LOGGED_UNREADABLE, note_unreadable

@@ -88,7 +88,7 @@ from vonk_control.operations.contract import OperationRecoveryAction
 from vonk_control.operations.item_contract import OperationItem, OperationOwnerReference
 from vonk_control.operations.progress import aggregate_progress, member_progress
 from vonk_control.operations.summary import workload_aliases
-from vonk_control.operator_receipt_contract import JobOperatorReceipt
+from vonk_control.operator_acceptance.receipt_contract import JobOperatorReceipt
 from vonk_control.state_filters import state_filter
 from vonk_control.waits.contract import QueueWait
 

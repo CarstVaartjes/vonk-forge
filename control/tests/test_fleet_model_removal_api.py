@@ -12,7 +12,10 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
-from vonk_control.operator_receipt_contract import AcceptanceReceipt, ReceiptOwner
+from vonk_control.operator_acceptance.receipt_contract import (
+    AcceptanceReceipt,
+    ReceiptOwner,
+)
 
 from .test_model_removal_worker_postgres import _prepare_removal_target
 from .test_operator_acceptance_postgres import DropFirstResponse, _api

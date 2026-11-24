@@ -15,7 +15,7 @@ legacy compatibility.
 ## Operator acceptance receipts
 
 A successful operator mutation carries `X-Vonk-Receipt`, the JSON-encoded
-`AcceptanceReceipt` from `vonk_control.operator_receipt_contract`, and a `Link` with
+`AcceptanceReceipt` from `vonk_control.operator_acceptance.receipt_contract`, and a `Link` with
 `rel="receipt"`. Its owner, record identity, lookup URL and applicable request,
 revision and content identity resolve through the existing owner after commit.
 There is no separate receipt database. Job resume and retirement retain a typed

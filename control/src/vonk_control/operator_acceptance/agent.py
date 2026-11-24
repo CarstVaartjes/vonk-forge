@@ -38,16 +38,21 @@ from vonk_control.models.execution import RunNode
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
-from vonk_control.operator_receipt_contract import (
+from vonk_control.operator_acceptance.receipt_checks import (
+    _available,
+    _identity,
+    _refused,
+    _require,
+)
+from vonk_control.operator_acceptance.receipt_contract import (
     AcceptanceReceipt,
     ReceiptOwner,
     ReceiptPolicy,
 )
-from vonk_control.receipt_checks import _available, _identity, _refused, _require
 from vonk_control.telemetry.samples import _same_sample
 
 if TYPE_CHECKING:
-    from vonk_control.operator_acceptance import (
+    from vonk_control.operator_acceptance.resolution import (
         AcceptanceArguments,
         OperatorReceiptResolver,
     )
