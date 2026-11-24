@@ -29,7 +29,7 @@ from vonk_agent_protocol.state_machines import ReservationState, RouteState, Run
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
 from vonk_control.categorized_errors import UnsettledOutcome
-from vonk_control.distributed_lifecycle import DistributedRecoveryInvalid
+from vonk_control.distributed_recovery.lifecycle import DistributedRecoveryInvalid
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.jobs.documents import (
     DistributedRecoveryMarker,

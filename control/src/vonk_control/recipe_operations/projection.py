@@ -32,8 +32,8 @@ from vonk_control.admission_locking import (
     lock_admission_rows,
 )
 from vonk_control.agent_operation_facts import aware
-from vonk_control.distributed_lifecycle import DistributedLifecycleError
 from vonk_control.distributed_recovery.common import enforce_recovery_deadline
+from vonk_control.distributed_recovery.lifecycle import DistributedLifecycleError
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.lifecycle.evidence import (
     BookkeepingReason,

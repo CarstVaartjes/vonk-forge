@@ -13,7 +13,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.distributed_lifecycle import canonical_distributed_readiness
 from vonk_control.distributed_recovery.common import (
     _DAMAGED,
     _MISMATCH,
@@ -27,6 +26,7 @@ from vonk_control.distributed_recovery.common import (
     _RecoveryJobQueue,
     _unproven,
 )
+from vonk_control.distributed_recovery.lifecycle import canonical_distributed_readiness
 from vonk_control.jobs.documents import (
     DistributedRecoveryMarker,
     RecipeStartParent,

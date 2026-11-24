@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from vonk_forge_contracts.recipe import RecipeTopology
 
-from vonk_control.distributed_lifecycle import (
+from vonk_control.distributed_recovery.lifecycle import (
     canonical_distributed_readiness,
 )
 

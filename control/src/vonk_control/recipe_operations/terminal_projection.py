@@ -13,12 +13,12 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import InstallationState, RouteState, RunState
-from vonk_control.distributed_lifecycle import DistributedLifecycleError
 from vonk_control.distributed_recovery.common import (
     ended_run_state,
     enforce_recovery_deadline,
     recovery_start_plan,
 )
+from vonk_control.distributed_recovery.lifecycle import DistributedLifecycleError
 from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
 from vonk_control.jobs.documents import (
     ProfilePartialStop,

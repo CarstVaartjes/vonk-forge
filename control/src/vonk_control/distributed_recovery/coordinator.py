@@ -16,7 +16,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     OperatorActionName,
 )
 from vonk_agent_protocol.state_machines import RouteState, RunState
-from vonk_control.distributed_lifecycle import DistributedLifecycleError
 from vonk_control.distributed_recovery.authority import (
     _enqueue_recovery_stop,
     _recovery_authority,
@@ -45,6 +44,7 @@ from vonk_control.distributed_recovery.common import (
     release_inactive_run_claims_in_session,
     settle_observed_absent_runs_in_session,
 )
+from vonk_control.distributed_recovery.lifecycle import DistributedLifecycleError
 from vonk_control.distributed_recovery.run_reaper import (
     RunEndings,
     end_orphaned_runs_in_session,
