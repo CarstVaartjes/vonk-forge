@@ -574,7 +574,7 @@ wheel and no global Node, so hook and CI cannot use different pyright builds.
 
 New syntax is checked by `scripts/check-added-lines [PATCH_FILE|-]`, which consumes
 an externally supplied unified diff. CI creates that patch against its explicit
-PR/merge-group base. Only added lines can fail. The adapter, scanners and fixture
+PR/merge-group base over `control agent_protocol src scripts rust deploy packaging tests .github tools nas_setup` (the pathspec in `ci.yml`, which the hook reads, so the two cannot drift). Only added lines can fail. The adapter, scanners and fixture
 tests never read Git.
 The pre-commit hook (`scripts/check-staged-code`) runs the same guards on the
 staged diff with the same path set as CI, preparing the control environment
