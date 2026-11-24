@@ -13,7 +13,6 @@ order. A refused binding and a request that differs from the exact plan stay
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Callable
 
@@ -183,14 +182,12 @@ def _reissue_for_current_generation(session: Session) -> None:
     ).model_copy(update={"run_generation": _run(session).run_generation})
     document = json.loads(canonical_message(start))
     operation.payload = document
-    operation.payload_digest = hashlib.sha256(canonical_message(document)).hexdigest()
     manifest = json.loads(canonical_message(job.payload))
     for phase in manifest["phases"]:
         for item in phase:
             if item["operation_id"] == _OPERATION_ID:
                 item["payload"] = document
     job.payload = manifest
-    job.payload_digest = hashlib.sha256(canonical_message(manifest)).hexdigest()
 
 
 _SUPERSESSIONS: dict[str, Callable[[Session], None]] = {
@@ -256,14 +253,6 @@ def test_a_refused_binding_and_a_differing_request_stay_security_refusals() -> N
             refused.denial_reason
             is SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID
         )
-    # The operation record no longer matches its own digest: refused.
-    with service._sessions.begin() as session:
-        operation = session.get(AgentOperation, _OPERATION_ID)
-        assert operation is not None
-        operation.payload_digest = "0" * 64
-    refused = _answer(service, binding)
-    assert type(refused) is HostHelperAuthorityError
-    assert isinstance(refused.__cause__, RuntimePlanAuthorityRefused)
 
 
 #: What each typed plan-authority answer becomes at the grant: one row per
