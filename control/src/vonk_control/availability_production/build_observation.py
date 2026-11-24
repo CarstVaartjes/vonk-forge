@@ -281,7 +281,7 @@ def _observe_build(
             failure = read_stored_model(
                 AgentFailureResult, canonical_message(raw_failure), from_json=True
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return BuildUnsettled(
                 RecipeImageCode.BUILD_INVALID,
                 "canonical Recipe build failure evidence is missing or invalid",
@@ -355,7 +355,7 @@ def _observe_build(
             json.dumps(dict(raw_evidence)),
             from_json=True,
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return BuildUnsettled(
             RecipeImageCode.BUILD_INVALID,
             "canonical Recipe build evidence is invalid",

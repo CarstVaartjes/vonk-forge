@@ -35,7 +35,6 @@ from vonk_forge_contracts.api import (
     ApiReasoningAlwaysOn,
     ApiReasoningSwitch,
     ApiRemainingContext,
-    ApiTokenArgument,
     ApiTokenValue,
 )
 
@@ -68,7 +67,7 @@ def _always_on_budget(
         return True, None
     if isinstance(default, ApiTokenValue):
         budget: int | None = default.value
-    elif isinstance(default, ApiTokenArgument) and argument_value is not None:  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+    elif argument_value is not None:
         budget = argument_value(default.argument)
     else:
         budget = None

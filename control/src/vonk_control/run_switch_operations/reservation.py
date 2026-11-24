@@ -30,7 +30,6 @@ from vonk_control.jobs.documents import (
     RunSwitchCleanupIntent,
     RunSwitchIntent,
     RunSwitchJobPayload,
-    RunSwitchProfileStopIntent,
     RunSwitchRunIntent,
     RunSwitchStopIntent,
 )
@@ -351,15 +350,11 @@ class ReservationMixin:
                 refreshed = service.preview_stop(intent)
             elif isinstance(intent, RunSwitchCleanupIntent):
                 refreshed = service.preview_cleanup(intent)
-            elif isinstance(intent, RunSwitchProfileStopIntent):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            else:
                 refreshed = service.preview_stop(
                     intent.run_id,
                     profile_stop_scope=intent.profile_stop_scope,
                 )
-            else:
-                # An intent this plan cannot be refreshed from is read as no
-                # refreshed plan; the waiting operation backs off below.
-                refreshed = None
         except UnknownOutcomeError as error:
             service._hold_after_advance_failure(operation_id, error)
             return True

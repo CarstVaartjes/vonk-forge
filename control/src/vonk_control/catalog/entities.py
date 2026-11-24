@@ -235,7 +235,7 @@ class CatalogEntityService:
                     canonical_message(projected)
                 )
                 continue
-            except (CatalogRevisionContractError, TypeError, ValueError):
+            except CatalogRevisionContractError, TypeError, ValueError:
                 pass
             try:
                 with self._write() as session:
@@ -860,7 +860,7 @@ def _build_policy_current(
         stored = RecipeRevisionProjection.model_validate_json(
             canonical_message(row.projected)
         )
-    except (CatalogRevisionContractError, TypeError, ValueError):
+    except CatalogRevisionContractError, TypeError, ValueError:
         return False
     refreshed = RecipeRevisionProjection.model_validate(
         {**stored.model_dump(mode="json"), **build_policy_projection(recipe)}

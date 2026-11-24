@@ -310,7 +310,7 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
                 if parent.kind == ProfileChildJobKind.RUN_SWITCH.value
                 else _availability_consumer(parent, build)
             )
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             current = None
         if current is None:
             # Unknown ownership never authorizes releasing an issued build: the
@@ -337,7 +337,7 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
     for application in profiles:
         try:
             current = _profile_consumer(session, application, build)
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             current = None
         if current is None:
             raise BuildConsumerError(

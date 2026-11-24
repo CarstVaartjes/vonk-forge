@@ -22,7 +22,7 @@ class EligibilityMixin:
 
         try:
             return read_stored_model(AgentUpgradePackage, value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise AgentUpgradeInvalid(
                 "agent upgrade package is invalid",
                 reason=InvalidRequestReason.MALFORMED,

@@ -1197,7 +1197,6 @@ class LocalBrowserController:
         if (
             not hostname
             or any(character in hostname for character in "\0\r\n /:")
-            or not isinstance(port, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             or isinstance(port, bool)
             or not 1 <= port <= 65535
         ):
@@ -1286,13 +1285,10 @@ class LocalBrowserController:
             or method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}
             or not path.startswith("/")
             or any(character in path for character in "\0\r\n")
-            or (body is not None and not isinstance(body, bytes))  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             or (body is not None and len(body) > MAXIMUM_RESPONSE_BYTES)
             or (method == "GET" and body is not None)
             or any(
-                not isinstance(name, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
-                or not isinstance(value, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
-                or not name
+                not name
                 or name.lower() in {"connection", "content-length", "host"}
                 or any(character in name for character in "\0\r\n:")
                 or any(character in value for character in "\0\r\n")
@@ -1599,7 +1595,7 @@ class SparkLifecycle:
                 timeout=30,
                 check=False,
             )
-        except (OSError, subprocess.SubprocessError):
+        except OSError, subprocess.SubprocessError:
             return None
 
     def _controller_startup_diagnostics(self) -> str:
@@ -3413,7 +3409,7 @@ class SparkLifecycle:
         """
         try:
             return serve("")
-        except (LifecycleError, SliceError):
+        except LifecycleError, SliceError:
             withdrawal = self._library_withdrawal()
             if withdrawal is None:
                 raise
@@ -3877,7 +3873,6 @@ class SparkLifecycle:
             completed.append("uninstalled")
             if (
                 completed != list(SYNTHETIC_CANARY_STATES)
-                or not isinstance(response_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # the digest is re-checked before it is reported
                 or SHA256.fullmatch(response_digest) is None
             ):
                 raise LifecycleError("synthetic canary evidence is incomplete")
@@ -4280,7 +4275,7 @@ class SparkLifecycle:
         try:
             rows = self._psql(query) + self._psql(pending_query)
             return [json.loads(row[0]) for row in rows if len(row) == 1]
-        except (AcceptanceError, OSError, ValueError, subprocess.SubprocessError):
+        except AcceptanceError, OSError, ValueError, subprocess.SubprocessError:
             return [{"diagnostic": "preflight evidence unavailable"}]
 
     def _request_recipe_download(
@@ -4443,39 +4438,37 @@ class SparkLifecycle:
                 # reported separately with its own failure text: a probe that
                 # discards the status tells us nothing, and one failing call
                 # must not hide the answer from the other.
-                job_detail = "unavailable"
-                if self.control is not None:  # pyright: ignore[reportUnnecessaryComparison]  # diagnostics stay safe without a login
-                    parts: list[str] = []
-                    try:
-                        _, node_operations = self.control.request(
-                            "GET",
-                            "/api/operations",
-                            query={"node_id": node_id, "limit": 5},
-                        )
-                        operations = require_object(
-                            node_operations, "stalled operation list"
-                        ).get("operations")
-                        if isinstance(operations, list):
-                            for item in operations:
-                                operation = require_object(item, "stalled operation")
-                                parts.append(
-                                    f"op {operation.get('kind')}"
-                                    f"={operation.get('state')}"
-                                    f"/{operation.get('attempt')}"
-                                    f" progress={json.dumps(operation.get('progress'), sort_keys=True)[:160]}"
-                                )
-                    except (
-                        KeyError,
-                        OSError,
-                        SliceError,
-                        TypeError,
-                        ValueError,
-                    ) as error:
-                        parts.append(
-                            "operations unavailable: "
-                            + self._redact_diagnostics(str(error), limit=200)
-                        )
-                    job_detail = " | ".join(parts) or "none"
+                parts: list[str] = []
+                try:
+                    _, node_operations = self.control.request(
+                        "GET",
+                        "/api/operations",
+                        query={"node_id": node_id, "limit": 5},
+                    )
+                    operations = require_object(
+                        node_operations, "stalled operation list"
+                    ).get("operations")
+                    if isinstance(operations, list):
+                        for item in operations:
+                            operation = require_object(item, "stalled operation")
+                            parts.append(
+                                f"op {operation.get('kind')}"
+                                f"={operation.get('state')}"
+                                f"/{operation.get('attempt')}"
+                                f" progress={json.dumps(operation.get('progress'), sort_keys=True)[:160]}"
+                            )
+                except (
+                    KeyError,
+                    OSError,
+                    SliceError,
+                    TypeError,
+                    ValueError,
+                ) as error:
+                    parts.append(
+                        "operations unavailable: "
+                        + self._redact_diagnostics(str(error), limit=200)
+                    )
+                job_detail = " | ".join(parts) or "none"
                 raise LifecycleError(
                     f"{label} did not converge: state={typed.state} "
                     f"step={typed.current_step}/{typed.total_steps} "
@@ -4709,7 +4702,7 @@ class SparkLifecycle:
                 }
                 if len(identities) == 1:
                     return identities.pop()
-            except (SliceError, LifecycleError, ValueError):
+            except SliceError, LifecycleError, ValueError:
                 # A projection miss is observed again under the route budget.
                 pass
             try:
@@ -4729,7 +4722,7 @@ class SparkLifecycle:
                     observed = run_result.get("phase_results")
                     if isinstance(observed, list):
                         results = observed
-            except (SliceError, LifecycleError, ValueError):
+            except SliceError, LifecycleError, ValueError:
                 pass
             time.sleep(1)
         raise LifecycleError("synthetic canary serving identity observation ended")
@@ -5005,7 +4998,7 @@ class SparkLifecycle:
         while time.monotonic() < deadline:
             try:
                 return read()
-            except (OSError, LifecycleError, ValidationError, json.JSONDecodeError):
+            except OSError, LifecycleError, ValidationError, json.JSONDecodeError:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
@@ -5070,7 +5063,7 @@ class SparkLifecycle:
         # A timeout or malformed reply is unknown. Never repeat this rotation.
         try:
             return read()
-        except (OSError, LifecycleError, ValidationError, json.JSONDecodeError):
+        except OSError, LifecycleError, ValidationError, json.JSONDecodeError:
             return None
 
     def _exercise_native_renewal(

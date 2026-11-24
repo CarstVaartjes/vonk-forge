@@ -189,7 +189,7 @@ class CleanupPlanningMixin:
                         allow_active_reconciliation=True,
                     )
                     reconciliation_authority = authority
-                except (UnknownOutcomeError, SecurityRefusalError):
+                except UnknownOutcomeError, SecurityRefusalError:
                     raise
                 except (
                     KeyError,
@@ -243,7 +243,7 @@ class CleanupPlanningMixin:
             else:
                 try:
                     assessment = service._lifecycle.preview_uninstall(installation_id)
-                except (UnknownOutcomeError, SecurityRefusalError):
+                except UnknownOutcomeError, SecurityRefusalError:
                     raise
                 except (
                     KeyError,

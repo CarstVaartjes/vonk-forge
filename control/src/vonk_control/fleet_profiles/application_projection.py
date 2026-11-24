@@ -162,7 +162,7 @@ class FleetProfileService:
                             child_progress = RunSwitchOperationService._operation_view(
                                 child_job
                             ).progress
-                        except (TypeError, ValueError):
+                        except TypeError, ValueError:
                             # Damaged measurement is unavailable; queue identity,
                             # exact effects, receipts and claims remain visible.
                             child_progress = None

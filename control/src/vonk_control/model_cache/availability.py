@@ -73,8 +73,6 @@ class AvailabilityMixin:
             cache._reverified_at[manifest.digest] = now
         try:
             present = cache._objects_present(manifest)
-            if present is None:  # pyright: ignore[reportUnnecessaryComparison]  # test doubles of _objects_present return None
-                return
             with cache._session(write=True) as session:
                 row = session.get(ModelCacheSet, manifest.digest)
                 if row is not None:

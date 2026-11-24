@@ -32,7 +32,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlalchemy import case, func, select
+from sqlalchemy import Nullable, case, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -233,7 +233,7 @@ class ModelPartialsCollector:
         """One indexed query: do operations of this owner live, and when did one move."""
 
         live = func.sum(case((ModelCacheOperation.state.in_(LIVE), 1), else_=0))
-        query = select(live, func.max(ModelCacheOperation.updated_at))
+        query = select(live, Nullable(func.max(ModelCacheOperation.updated_at)))
         if _DIGEST.match(name):
             query = query.where(ModelCacheOperation.artifact_set_sha256 == name)
         elif name.startswith(REPAIR_PARTIALS_PREFIX):
@@ -246,9 +246,9 @@ class ModelPartialsCollector:
             return _Ownership(live=False, last_update=None)
         with self._sessions() as session:
             count, last = session.execute(query).one()
-        if last is not None and last.tzinfo is None:  # pyright: ignore[reportUnnecessaryComparison]  # an aggregate over no rows is NULL
+        if last is not None and last.tzinfo is None:
             last = last.replace(tzinfo=UTC)
         return _Ownership(
             live=bool(count),
-            last_update=None if last is None else last.timestamp(),  # pyright: ignore[reportUnnecessaryComparison]  # an aggregate over no rows is NULL
+            last_update=None if last is None else last.timestamp(),
         )

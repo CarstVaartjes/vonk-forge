@@ -114,7 +114,7 @@ class LinuxProcessProbe:
                 if name in ("VmHWM", "Threads"):
                     number = int(value.split()[0])
                     found[name] = number * 1024 if name == "VmHWM" else number
-        except (OSError, ValueError, IndexError):
+        except OSError, ValueError, IndexError:
             pass
         return found
 
@@ -133,7 +133,7 @@ class LinuxProcessProbe:
                 if parent != self._pid:
                     continue
                 total += int((entry / "statm").read_text().split()[1]) * self._page_size
-            except (OSError, ValueError, IndexError):
+            except OSError, ValueError, IndexError:
                 continue  # the child exited between listing and reading
         return total
 
@@ -152,7 +152,7 @@ class LinuxProcessProbe:
                     sizes.append(
                         WorkerMemoryCgroupSize(kind=_CGROUP_KEYS[key], bytes=int(value))
                     )
-        except (OSError, ValueError):
+        except OSError, ValueError:
             pass  # no cgroup v2 here; the process figures still stand
         return tuple(sizes)
 
@@ -368,7 +368,7 @@ def read_worker_memory_report(
         if len(raw) > _MAX_REPORT_BYTES:
             return None
         report = WorkerMemoryReport.model_validate_json(raw)
-    except (OSError, ValueError, ValidationError):
+    except OSError, ValueError, ValidationError:
         return None
     if (now - report.recorded_at).total_seconds() > max_age_seconds:
         return None

@@ -215,7 +215,7 @@ class AtomicRouteBundlePublisher:
             return None
         try:
             return self._await_supervisor_ack(marker, required)
-        except (RouteRuntimeError, SecurityRefusalError):
+        except RouteRuntimeError, SecurityRefusalError:
             raise
         except Exception:  # noqa: BLE001 - unavailable acknowledgement has no authority
             return _unknown(WaitReason.RUNTIME_EFFECT_UNCONFIRMED)
@@ -224,7 +224,7 @@ class AtomicRouteBundlePublisher:
     def _valid_routes(content: bytes) -> bool:
         try:
             RouteBundleDocument.model_validate_json(content)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
         return True
 
@@ -232,7 +232,7 @@ class AtomicRouteBundlePublisher:
     def _valid_litellm(content: bytes) -> bool:
         try:
             LiteLlmConfig.model_validate_json(content)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
         return True
 
@@ -470,7 +470,7 @@ def _read_active_route_bundle(
         raw: Any = json.loads(marker_content)
     except OSError:
         return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
-    except (json.JSONDecodeError, UnicodeError):
+    except json.JSONDecodeError, UnicodeError:
         return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
     try:
         marker = read_stored_model(ActivationMarker, raw)

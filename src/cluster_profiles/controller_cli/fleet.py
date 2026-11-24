@@ -234,7 +234,7 @@ def _deliver_enrollment(
                         receipt["reconciliation"] = STOP_UNCONFIRMED
                 try:
                     _delivery_io(lambda: destination.write(receipt))
-                except (OSError, TypeError, ValueError):
+                except OSError, TypeError, ValueError:
                     receipt["output_status"] = ENDPOINT_UNAVAILABLE
                 raise EnrollmentDeliveryError(
                     receipt, isinstance(error, KeyboardInterrupt)
@@ -516,7 +516,7 @@ def _fleet(
                     "fleet removal receipt identifies another Spark"
                 )
             return result
-        except (ControlForbidden, ControlUnauthorized):
+        except ControlForbidden, ControlUnauthorized:
             raise
         except (ControlClientError, OSError) as error:
             if isinstance(error, ControlClientError) and _known_http_refusal_status(

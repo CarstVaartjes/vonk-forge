@@ -54,7 +54,7 @@ def _view_identity(
         recorded = RunSwitchStoredIdentity.model_validate_json(
             canonical_message(job.payload), strict=True
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         recorded = RunSwitchStoredIdentity()
     action: RunSwitchAction = "stop"
     for candidate in get_args(RunSwitchPlacementAction):

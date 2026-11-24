@@ -42,7 +42,7 @@ def _pending(
             state = RunSwitchJournalRepairPendingState.model_validate_json(
                 canonical_message(row.progress), strict=True
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             # The deadline column owns the clock independently of this mutable
             # projection. Cancellation belongs to its independent typed column.
             progress = _candidate(job)

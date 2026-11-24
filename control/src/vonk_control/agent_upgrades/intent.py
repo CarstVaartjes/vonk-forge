@@ -35,7 +35,7 @@ def _request_intent(
     )
     try:
         return read_stored_model(AgentUpgradeRequestIntent, document)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise AgentUpgradeInvalid(
             "agent upgrade request intent is invalid",
             reason=InvalidRequestReason.MALFORMED,

@@ -145,7 +145,7 @@ def _intent_ordinal(job: Job) -> int | None:
         identity = RunSwitchStoredIdentity.model_validate_json(
             canonical_message(job.payload), strict=True
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return identity.workload_intent_ordinal
 
@@ -155,7 +155,7 @@ def _stored_child(value: object) -> str | None:
         evidence = RunSwitchStoredChildIdentity.model_validate_json(
             canonical_message(value), strict=True
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return evidence.child_operation_id
 
@@ -252,12 +252,12 @@ class RunSwitchAdapter:
             result = RunSwitchOperationResult.model_validate_json(
                 canonical_message(stored.result), strict=True
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             try:
                 retained = RunSwitchStoredLifecycle.model_validate_json(
                     canonical_message(stored.result), strict=True
                 )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 retained = RunSwitchStoredLifecycle()
             result = RunSwitchOperationResult(
                 child_operation_id=retained.child_operation_id,
@@ -355,7 +355,7 @@ class RunSwitchAdapter:
             return None, None
         requested = aware(cancellation.requested_at)
         key = cancellation.request_key
-        return requested, key if isinstance(key, str) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+        return requested, key
 
     # ----------------------------------------------------- the kind's facts
 
@@ -619,7 +619,7 @@ class RunSwitchAdapter:
             given
             if explicit
             else cancellation.reason
-            if cancellation is not None and isinstance(cancellation.reason, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            if cancellation is not None
             else None
         )
         if after.effect is Effect.UNKNOWN and not explicit:

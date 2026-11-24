@@ -131,7 +131,7 @@ def _model(
         return _follow_mutation(client, "model", result, args)
     if action == "remove":
         if args.unused:
-            return _remove_unused(client, args, factory)
+            return dict(_remove_unused(client, args, factory))
         result = _remove_model(client, args, factory)
         if args.review:
             return result

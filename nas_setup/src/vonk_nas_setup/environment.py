@@ -70,7 +70,7 @@ def required_default(
     if prompt.env == "VONK_MANAGEMENT_CIDRS":
         try:
             address = ipaddress.IPv4Address(environment["NAS_LAN_IP"])
-        except (KeyError, ValueError):
+        except KeyError, ValueError:
             return None
         return str(ipaddress.IPv4Network(f"{address}/24", strict=False))
     return None

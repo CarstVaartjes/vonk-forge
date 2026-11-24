@@ -418,7 +418,7 @@ class AdvanceMixin:
                     child_id=child_id,
                     cancellation=checkpoint_cancellation,
                 )
-            except (_RunSwitchBuildParentChanged, RecipeBuildAdmissionBusy):
+            except _RunSwitchBuildParentChanged, RecipeBuildAdmissionBusy:
                 return None
 
         def fail(
@@ -443,11 +443,6 @@ class AdvanceMixin:
             )
 
         if child_id is not None:
-            if not isinstance(child_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-                # Bookkeeping: the child is looked up again by the phase's
-                # deterministic identity, which reconciles what it issued.
-                fail("run-switch child operation identity is invalid", clear_child=True)
-                return True
             try:
                 child = service._get_child_operation(child_id)
             except KeyError:
@@ -706,8 +701,7 @@ class AdvanceMixin:
                     # consumer of its set) can be ended by another consumer's
                     # cancel. This order did not cancel it: it asks again.
                     foreign_cancel = (
-                        child is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-                        and child.state == LifecycleState.CANCELLED.value
+                        child.state == LifecycleState.CANCELLED.value
                         and not checkpoint_cancellation
                         and plan.phases[phase_index].kind
                         == ProfileChildPhase.TRANSFER.value
@@ -757,8 +751,7 @@ class AdvanceMixin:
                         checkpoint_guard=checkpoint_job,
                         definite=is_definite(kind)
                         or (
-                            child is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-                            and child.state == LifecycleState.FAILED.value
+                            child.state == LifecycleState.FAILED.value
                             and plan.phases[phase_index].kind
                             in {
                                 ProfileChildPhase.PREPARE,

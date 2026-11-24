@@ -97,7 +97,7 @@ class AcceptanceMixin:
                 source = load_package_source(
                     service._http, service._channel, build_digest, binary_digest
                 )
-            except (httpx2.HTTPError, ValueError):
+            except httpx2.HTTPError, ValueError:
                 skipped[node_id] = "has no published signed rollback package"
                 continue
             sources[node_id] = source

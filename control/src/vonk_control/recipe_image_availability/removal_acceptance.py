@@ -413,7 +413,7 @@ def reconcile_requested_removals(
                 payload = read_row_column(operation, "payload")
                 if not isinstance(payload, AvailabilityJobPayload):
                     continue
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if payload.cancellation is not None:
                 continue
@@ -459,7 +459,7 @@ def reconcile_requested_removals(
                 if not isinstance(payload, AvailabilityJobPayload):
                     return False
                 owner = self._read_removal_owner(remover)
-            except (TypeError, ValueError, RecipeImageAvailabilityError):
+            except TypeError, ValueError, RecipeImageAvailabilityError:
                 return False
             return (
                 payload.cancellation is None
@@ -490,6 +490,6 @@ def reconcile_requested_removals(
                         now=self._clock(),
                     )
                 )
-        except (RuntimeImagePreparationError, ArtifactLifecycleError, OSError):
+        except RuntimeImagePreparationError, ArtifactLifecycleError, OSError:
             continue
     return changed

@@ -573,7 +573,7 @@ def _disable_copy_on_write(directory: Path) -> None:
         if not flags[0] & _FS_NOCOW_FL:
             flags[0] |= _FS_NOCOW_FL
             fcntl.ioctl(descriptor, _FS_IOC_SETFLAGS, flags)
-    except (OSError, ImportError):
+    except OSError, ImportError:
         # ENOTTY/EOPNOTSUPP on other filesystems, EPERM without the capability.
         _LOGGER.info("copy-on-write stays enabled for %s", directory)
     finally:

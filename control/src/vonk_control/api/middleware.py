@@ -71,7 +71,7 @@ def install_request_boundaries(
             )
         except _RequestBodyTooLarge:
             return Response(status_code=413)
-        except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey):
+        except UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey:
             return Response(
                 content=_bounded_error_content(
                     "telemetry request is invalid", validation=True

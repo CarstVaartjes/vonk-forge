@@ -475,7 +475,7 @@ def _diagnostic_command(
             timeout=30,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         return None
 
 
@@ -1073,7 +1073,7 @@ def _json_object_without_duplicate_keys(
 ) -> dict[str, object]:
     document: dict[str, object] = {}
     for key, value in pairs:
-        if not isinstance(key, str) or key in document:  # pyright: ignore[reportUnnecessaryIsInstance]  # JSON keys are re-checked as strings
+        if key in document:
             raise ValueError("JSON object has duplicate or invalid keys")
         document[key] = value
     return document
@@ -1115,7 +1115,7 @@ def _tailnet_hostname_address(hostname: str) -> str | None:
     for _family, _type, _protocol, _canonical, sockaddr in results:
         try:
             address = ipaddress.ip_address(sockaddr[0])
-        except (IndexError, ValueError):
+        except IndexError, ValueError:
             continue
         if not address.is_unspecified and not address.is_multicast:
             addresses.append(address)
@@ -1530,7 +1530,7 @@ def image_present(image: str) -> bool:
             ).returncode
             == 0
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return False
 
 
@@ -1710,11 +1710,7 @@ def exercise_compose(
 
 
 def assert_tailscale_services_absent(raw: str) -> None:
-    observed = {
-        str(row.get("Service", ""))
-        for row in _compose_rows(raw)
-        if isinstance(row, dict)  # pyright: ignore[reportUnnecessaryIsInstance]  # Compose rows are re-checked as objects
-    }
+    observed = {str(row.get("Service", "")) for row in _compose_rows(raw)}
     if observed & TAILSCALE_SERVICES:
         raise AcceptanceError(
             "Tailscale-disabled acceptance created a Tailscale service"

@@ -457,7 +457,7 @@ def collect_failure(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBun
     elif result.diagnostics is not None:
         try:
             diagnostics = sanitize_diagnostics(result.diagnostics)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             errors.append("agent-diagnostics-invalid")
     # Evidence the Controller dropped at ingress, with the field that refused it.
     errors.extend(
@@ -815,7 +815,7 @@ class FailureEvidenceService:
             return facts, None
         try:
             sanitized = sanitize_diagnostics(diagnostics)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             # A damaged latest receipt is unknown, not a failure of this read.
             return None, None
         return facts.model_copy(update={"diagnostics": sanitized}), node_id
@@ -861,7 +861,7 @@ class FailureEvidenceService:
             return None
         try:
             return sanitize_diagnostics(diagnostics)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             # A damaged latest receipt is unknown, not a failure of this read.
             return None
 

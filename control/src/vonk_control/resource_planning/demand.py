@@ -60,7 +60,7 @@ def _selected_model_bytes(
                 total += file.size_bytes
                 selected_any = True
         return total if selected_any else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

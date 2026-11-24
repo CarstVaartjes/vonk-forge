@@ -15,7 +15,7 @@ from cluster_profiles.controller_cli.common import (
 from cluster_profiles.controller_cli.confirmation import _confirm_action
 from cluster_profiles.controller_cli.fleet import _fleet
 from cluster_profiles.controller_cli.library import _job, _model, _recipe
-from cluster_profiles.controller_cli.metrics import _metrics
+from cluster_profiles.controller_cli.metrics import _metric_series
 from cluster_profiles.controller_cli.profile import _profile
 from cluster_profiles.controller_cli.run import _run
 
@@ -33,7 +33,10 @@ def run_controller(
     if command == "fleet":
         return _fleet(args, client, request_id_factory)
     if command == "metrics":
-        return _metrics(args, client)
+        if getattr(args, "metrics_action", None) != "show":
+            return {"metrics": [spec.to_dict() for spec in client.metrics_catalogue()]}
+        series, names = _metric_series(args, client)
+        return {**series.to_dict(), "names": names}
     if command == "model":
         return _model(args, client, request_id_factory)
     if command == "recipe":

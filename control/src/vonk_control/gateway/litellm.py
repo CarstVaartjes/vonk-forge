@@ -367,10 +367,7 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
 
     if not routes.aliases:
         raise LiteLlmPolicyError("LiteLLM models require a published route snapshot")
-    if any(
-        not isinstance(value, str) or not value  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        for value in routes.aliases.values()
-    ):
+    if any(not value for value in routes.aliases.values()):
         raise LiteLlmPolicyError("LiteLLM routes must be already-rendered strings")
     models = dict(policy.models)
     if set(models) - set(routes.aliases):

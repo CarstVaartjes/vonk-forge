@@ -90,15 +90,9 @@ class PreparationMixin:
             and inspection.missing_nas_bytes in (None, 0)
             else 0
         )
-        model_controller_missing = (
-            None
-            if model_controller_expected is None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-            else model_controller_expected - model_controller_verified
-        )
+        model_controller_missing = model_controller_expected - model_controller_verified
         model_controller_ready = (
-            model_controller_expected is not None  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
-            and model_controller_missing == 0
-            and inspection.nas_coverage == "complete"
+            model_controller_missing == 0 and inspection.nas_coverage == "complete"
         )
         model_controller = ControllerAssetState(
             state="ready" if model_controller_ready else "unknown",
@@ -122,7 +116,7 @@ class PreparationMixin:
                 inspection.missing_spark_bytes,
                 len(group.nodes),
             )
-            target_ready = model_expected is not None and model_missing == 0  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
+            target_ready = model_missing == 0
             model_targets.append(
                 TargetAssetState(
                     node_id=node.node_id,

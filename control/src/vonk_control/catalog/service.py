@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from types import MappingProxyType
 from typing import IO, TYPE_CHECKING, Literal
 
@@ -178,7 +178,7 @@ class CatalogService:
             )
         try:
             stored = self._source_bundles.put(expected_sha256, payload)
-        except (SourceBundleRefused, SourceBundleIntegrityRefused, SourceBundleUnknown):
+        except SourceBundleRefused, SourceBundleIntegrityRefused, SourceBundleUnknown:
             raise
         except SourceBundleError as error:
             raise CatalogValidationError(error.code, error.detail) from error
@@ -246,10 +246,7 @@ class CatalogService:
     ) -> dict[tuple[str, str], RecipeCatalogLocalRevision]:
         requested = sorted(set(identities))
         if any(
-            not isinstance(publisher, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            or not isinstance(slug, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            or not _SLUG.fullmatch(publisher)
-            or not _SLUG.fullmatch(slug)
+            not _SLUG.fullmatch(publisher) or not _SLUG.fullmatch(slug)
             for publisher, slug in requested
         ):
             raise CatalogValidationError(
@@ -704,7 +701,7 @@ class CatalogService:
                 projection_type.model_validate_json(
                     canonical_message(existing.projected)
                 )
-            except (CatalogRevisionContractError, TypeError, ValueError):
+            except CatalogRevisionContractError, TypeError, ValueError:
                 # Repair only from the validated incoming content, preserving
                 # verified generations on ordinary cache hits.
                 projection = (
@@ -769,19 +766,6 @@ class CatalogService:
         # another root/head read solely to discover the already-selected id.
         return service.resolve(candidate.id, actor=actor), True
 
-    def resolve_recipe_revision(
-        self, document: Mapping[str, object], *, actor: str
-    ) -> str:
-        try:
-            recipe = read_recipe(document)
-        except (TypeError, ValueError) as error:
-            raise CatalogValidationError(
-                CatalogCode.DOCUMENT_INVALID, "recipe document is invalid"
-            ) from error
-        with self._sessions() as session:
-            _resolve_recipe(session, recipe)
-        return document_sha256(document)
-
 
 def _get_active_recipe(
     session: Session, recipe_id: str
@@ -799,14 +783,6 @@ def _get_active_recipe(
             ),
         )
     )
-
-
-def _resolve_recipe(session: Session, recipe: RecipeDefinition) -> None:
-    service = CatalogEntityService(
-        session, clock=lambda: datetime.now(UTC), cursors=None
-    )
-    for selection in recipe.models:
-        service.resolve_reference(selection.model)
 
 
 def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
@@ -835,7 +811,7 @@ def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
 def _node_count(document: Mapping[str, object]) -> int | None:
     try:
         return recipe_topology(document).node_count
-    except (RecipeRuntimeSpecError, TypeError, ValueError):
+    except RecipeRuntimeSpecError, TypeError, ValueError:
         return None
 
 

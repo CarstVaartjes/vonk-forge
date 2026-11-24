@@ -554,7 +554,13 @@ producer and consumer boundaries.
 
 Python lint, formatting and types share one configuration, the root
 `pyproject.toml`, and one locked tool version each (uv.lock, control dev group).
-Ruff runs its default rules plus the families in `[tool.ruff.lint] extend-select`;
+Ruff targets Python 3.14, the uv environment's. A file another interpreter runs
+keeps that interpreter's syntax through `per-file-target-version`: `agent_protocol`
+3.12 (the Sparks), and 3.13 for `deploy/` (container images), `scripts/` and
+`tests/nodes/` (a runner's or host's `python3`) and for a repository module such a
+script imports (`tools/generated_contracts.py`, loaded by `check-generated-determinism`,
+`prepare-generated-contracts` and the web `pre*` hooks); Ruff then refuses 3.14-only
+syntax there; such a file imports the 3.14 packages only when uv runs it. It runs its default rules plus the families in `[tool.ruff.lint] extend-select`;
 every ignore, global or per file, states its reason next to it. `extend-include`
 makes every extensionless file in `scripts/` and `bin/` Python unless
 `extend-exclude` names it as a shell script, so a new script is either linted or

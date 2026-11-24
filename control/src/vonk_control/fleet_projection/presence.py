@@ -135,7 +135,7 @@ def _installed_presence(
                         required_bytes=expectations.get(node.node_id),
                     )
                 )
-        except (AttributeError, TypeError, ValueError):
+        except AttributeError, TypeError, ValueError:
             warn_unreadable_once("Fleet installation_id", installation_id)
             projected_group = {}
             for row in grouped[installation_id]:
@@ -300,7 +300,7 @@ def _loaded_presence(
                         or None,
                     )
                 )
-        except (AttributeError, TypeError, ValueError):
+        except AttributeError, TypeError, ValueError:
             warn_unreadable_once("Fleet run_id", run_id)
             projected_group = {}
             for row in grouped[run_id]:

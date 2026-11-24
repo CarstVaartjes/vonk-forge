@@ -42,7 +42,7 @@ def _control_openapi() -> dict[str, object]:
         )
         schema = json.loads(raw)
         Draft202012Validator.check_schema(schema)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, SchemaError):
+    except OSError, UnicodeDecodeError, json.JSONDecodeError, SchemaError:
         _schema_unavailable("bundled control API schema is unreadable")
     if not isinstance(schema, dict):
         _schema_unavailable("bundled control API schema must be an object")
@@ -122,7 +122,7 @@ def _validate_schema(value: object, schema: object, *, message: str) -> None:
     # than asserting a type the validator cannot check.
     try:
         instance = json.loads(json.dumps(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise ControlClientError(message) from None
     error = best_match(
         _control_validator().evolve(schema=operation_schema).iter_errors(instance)
@@ -272,7 +272,7 @@ def _validate_generated_request(request: httpx2.Request) -> None:
         if request_media_type.strip().lower() == "application/json":
             try:
                 payload = json.loads(request.content)
-            except (UnicodeDecodeError, json.JSONDecodeError):
+            except UnicodeDecodeError, json.JSONDecodeError:
                 raise ControlClientError(
                     "control API request contains invalid JSON"
                 ) from None
@@ -305,7 +305,7 @@ def _validate_generated_response(
     elif response_media_type.strip().lower() == "application/json":
         try:
             decoded = json.loads(response.content)
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             raise ControlMalformedResponse(
                 "control API returned invalid JSON"
             ) from None

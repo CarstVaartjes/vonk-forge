@@ -286,7 +286,7 @@ class RetirementMixin:
                             read_row_column(attempt, "result"),
                             state=LifecycleState.SUCCEEDED,
                         )
-                    except (TypeError, ValueError):
+                    except TypeError, ValueError:
                         continue
                     for reservation in session.scalars(
                         select(ResourceReservation).where(

@@ -94,7 +94,7 @@ def main(
         try:
             prepare_owned_state()
             break
-        except (OSError, UnknownOutcomeError):
+        except OSError, UnknownOutcomeError:
             _LOGGER.warning(
                 "database schema or administrator initialization is unavailable",
                 exc_info=True,

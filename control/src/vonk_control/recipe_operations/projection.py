@@ -417,7 +417,7 @@ class ProjectionMixin:
                     canonical_message(read_row_column(operation, "payload")),
                     from_json=True,
                 )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 expected = None
                 retire_as_unknown(
                     "recipe.reconciliation",

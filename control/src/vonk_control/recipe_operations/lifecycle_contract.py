@@ -165,7 +165,7 @@ def parse_recipe_lifecycle_result(kind: str, value: object) -> RecipeLifecycleRe
     for model in models:
         try:
             parsed = model.model_validate_json(document)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if isinstance(
             parsed,
@@ -261,7 +261,7 @@ def _typed_node_evidence(kind: str, value: LifecycleNodeResult) -> LifecycleNode
     for model in _node_evidence_models(kind):
         try:
             return model.model_validate_json(canonical_message(value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
     raise ValueError("recipe operation evidence kind is invalid")
 
@@ -288,7 +288,7 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
 def _model_accepts(model: type[BaseModel], value: object) -> bool:
     try:
         model.model_validate_json(canonical_message(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     return True
 

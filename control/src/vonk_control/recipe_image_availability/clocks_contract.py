@@ -55,12 +55,12 @@ def readable_or_none[T](
     def read(value: object) -> object:
         try:
             return source.validate_python(value, strict=strict)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             if not json_fallback:
                 return None
             try:
                 return source.validate_json(canonical_message(value), strict=strict)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return None
 
     return BeforeValidator(read)

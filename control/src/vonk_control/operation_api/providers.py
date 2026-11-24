@@ -54,7 +54,7 @@ def _operation_boundary(item: OperationItem) -> tuple[datetime, str] | None:
         return None
     try:
         parsed = datetime.fromisoformat(item.created_at)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return _aware(parsed), item.id
 
@@ -113,7 +113,7 @@ def merge_operation_providers(
                     break
             except SecurityRefusalError:
                 raise
-            except (OSError, RuntimeError, TypeError, ValueError):
+            except OSError, RuntimeError, TypeError, ValueError:
                 continue
         if page is None:
             projection_issue = "Some operation observations are unavailable."
@@ -137,7 +137,7 @@ def merge_operation_providers(
                 if boundary is None:
                     projection_issue = "Some operation observations are unavailable."
                     continue
-            except (TypeError, ValueError, OperationProjectionError):
+            except TypeError, ValueError, OperationProjectionError:
                 warn_unreadable_once(provider.family, str(getattr(row, "id", "row")))
                 projection_issue = "Some operation observations are unavailable."
                 continue
@@ -238,7 +238,7 @@ def get_operation_from_providers(
                 continue
             except SecurityRefusalError:
                 raise
-            except (OSError, RuntimeError, TypeError, ValueError):
+            except OSError, RuntimeError, TypeError, ValueError:
                 unavailable = True
         if not unavailable and (
             not matches
@@ -438,26 +438,19 @@ class _StandaloneJobActivityProjection:
         request_id = _activity_owner_request_id(job.request_id)
         try:
             if (
-                not isinstance(job.id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-                or not 1 <= len(activity_id) <= 128
+                not 1 <= len(activity_id) <= 128
                 or request_id is None
-                or not isinstance(job.kind, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 or not 1 <= len(job.kind) <= 80
-                or not isinstance(job.state, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
                 or not 1 <= len(job.state) <= 80
                 or type(job.current_attempt) is not int
                 or job.current_attempt < 0
-                or not isinstance(job.created_at, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-                or not isinstance(job.updated_at, datetime)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
             ):
                 raise ValueError("stored job activity is malformed")
             node_ids = _activity_node_ids(job.targets, limit=100)
             status_reason = job.status_reason
-            if status_reason is not None and (
-                not isinstance(status_reason, str) or len(status_reason) > 1024  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            ):
+            if status_reason is not None and len(status_reason) > 1024:
                 raise ValueError("stored job status reason is malformed")
-        except (AttributeError, TypeError, ValueError, ValidationError):
+        except AttributeError, TypeError, ValueError, ValidationError:
             warn_unreadable_once("job", job.id)
             return self._unreadable_item(job, activity_id, request_id)
         return OperationItem(

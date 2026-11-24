@@ -144,7 +144,7 @@ class LibraryAssessment:
                         if stop.is_set() or time.monotonic() >= deadline:
                             return
                         assessments[index] = self._assess(recipe, nodes, held, deadline)
-            except (SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError):
+            except SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError:
                 return
             finally:
                 self._active.release()

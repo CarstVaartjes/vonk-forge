@@ -244,7 +244,7 @@ class StorageMixin:
         for operation_id, kind, payload in running:
             try:
                 manifest = _manifest_of(payload)
-            except (TypeError, ValueError, ModelCacheError):
+            except TypeError, ValueError, ModelCacheError:
                 continue
             needs[operation_id] = cache._transfer_need(
                 manifest,

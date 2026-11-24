@@ -215,7 +215,7 @@ class HttpMixin:
         cache = cast("ModelCacheService", self)
         try:
             token = cache._load_huggingface_token()
-        except (ModelCacheStorageRefused, ModelCacheCredentialPathUnsafe):
+        except ModelCacheStorageRefused, ModelCacheCredentialPathUnsafe:
             return "invalid"
         return _token_fingerprint(token)
 
@@ -358,7 +358,7 @@ class HttpMixin:
             if path.stat().st_size == 0:
                 return None
             raw = read_runtime_secret(path)
-        except (OSError, RuntimeSecretError):
+        except OSError, RuntimeSecretError:
             raise ModelCacheStorageRefused(
                 SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_INVALID.value,
                 "Hugging Face credential file is unavailable; configure HF_TOKEN_FILE",

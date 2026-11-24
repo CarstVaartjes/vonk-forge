@@ -7,8 +7,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future
-from dataclasses import dataclass
-from typing import cast
+from typing import Final, TypedDict, cast, overload
 
 from cluster_profiles.cli_select import SelectorError
 from cluster_profiles.control_client.errors import (
@@ -45,7 +44,7 @@ def _observe_selection[T](read: Callable[[], T], *, deadline: float) -> T:
             result = read()
             _selection_remaining(deadline)
             return result
-        except (ControlForbidden, ControlUnauthorized):
+        except ControlForbidden, ControlUnauthorized:
             raise
         except (ControlClientError, OSError, TypeError, ValueError) as error:
             if isinstance(error, ControlClientError) and _known_http_refusal_status(
@@ -62,18 +61,18 @@ def _observe_selection[T](read: Callable[[], T], *, deadline: float) -> T:
     ) from last_error
 
 
-@dataclass(frozen=True)
-class _ReadOutcome:
+class _ReadOutcome[T]:
     """One read's own outcome: its value or the error it ended with."""
 
-    value: object = None
-    error: Exception | None = None
+    def __init__(self, value: T, error: Exception | None = None) -> None:
+        self._value: Final = value
+        self._error: Final = error
 
-    def get(self) -> object:
+    def get(self) -> T:
         """The read's value; raises that read's own error."""
-        if self.error is not None:
-            raise self.error
-        return self.value
+        if self._error is not None:
+            raise self._error
+        return self._value
 
 
 _MAX_CONCURRENT_READS = 3
@@ -83,14 +82,38 @@ def _skipped_read() -> None:
     """A read that is not needed for this action."""
 
 
-def _run_read(read: Callable[[], object]) -> _ReadOutcome:
+def _run_read(read: Callable[[], object]) -> _ReadOutcome[object]:
     try:
         return _ReadOutcome(value=read())
     except Exception as error:  # noqa: BLE001 - recorded as this read's outcome
-        return _ReadOutcome(error=error)
+        return _ReadOutcome(value=None, error=error)
 
 
-def _read_concurrently(*reads: Callable[[], object]) -> list[_ReadOutcome]:
+@overload
+def _read_concurrently[A](read: Callable[[], A], /) -> tuple[_ReadOutcome[A]]: ...
+
+
+@overload
+def _read_concurrently[A, B](
+    first: Callable[[], A], second: Callable[[], B], /
+) -> tuple[_ReadOutcome[A], _ReadOutcome[B]]: ...
+
+
+@overload
+def _read_concurrently[A, B, C](
+    first: Callable[[], A], second: Callable[[], B], third: Callable[[], C], /
+) -> tuple[_ReadOutcome[A], _ReadOutcome[B], _ReadOutcome[C]]: ...
+
+
+@overload
+def _read_concurrently(
+    *reads: Callable[[], object],
+) -> tuple[_ReadOutcome[object], ...]: ...
+
+
+def _read_concurrently(
+    *reads: Callable[[], object],
+) -> tuple[_ReadOutcome[object], ...]:
     """Run independent reads at once; each keeps its own outcome.
 
     Every read caps itself at its own deadline, so this helper never invents
@@ -109,15 +132,15 @@ def _read_concurrently(*reads: Callable[[], object]) -> list[_ReadOutcome]:
     if len(real) > _MAX_CONCURRENT_READS:
         raise ValueError("too many concurrent reads")
     if len(real) <= 1:
-        return [
-            _ReadOutcome() if read is _skipped_read else _run_read(read)
+        return tuple(
+            _ReadOutcome(value=None) if read is _skipped_read else _run_read(read)
             for read in reads
-        ]
-    pending: dict[int, Future[_ReadOutcome]] = {
+        )
+    pending: dict[int, Future[_ReadOutcome[object]]] = {
         index: Future() for index, read in enumerate(reads) if read is not _skipped_read
     }
 
-    def work(future: Future[_ReadOutcome], read: Callable[[], object]) -> None:
+    def work(future: Future[_ReadOutcome[object]], read: Callable[[], object]) -> None:
         try:
             future.set_result(_run_read(read))
         except BaseException as error:  # noqa: BLE001 - the waiter must always complete
@@ -125,10 +148,10 @@ def _read_concurrently(*reads: Callable[[], object]) -> list[_ReadOutcome]:
 
     for index, future in pending.items():
         threading.Thread(target=work, args=(future, reads[index]), daemon=True).start()
-    return [
-        _ReadOutcome() if index not in pending else pending[index].result()
+    return tuple(
+        _ReadOutcome(value=None) if index not in pending else pending[index].result()
         for index in range(len(reads))
-    ]
+    )
 
 
 def _recipe_rows(
@@ -176,11 +199,19 @@ def _scan_recipe_rows(
             yield decoded
 
 
+class LibraryQuery(TypedDict, total=False):
+    """The filters a paged library read sends with every page."""
+
+    sort: str
+    assess: bool
+    cached: bool
+
+
 def _library_pages(
     client: ControllerClient,
     path: str,
     key: str,
-    query: Mapping,  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+    query: LibraryQuery,
     *,
     deadline: float,
 ) -> Iterator[list[object]]:

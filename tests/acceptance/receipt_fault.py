@@ -48,7 +48,7 @@ def _read(path: Path) -> dict[str, object]:
 def _start_receipt(raw: bytes) -> dict[str, str] | None:
     try:
         document = AgentResult.model_validate_json(raw, strict=True)
-    except (UnicodeError, ValueError):
+    except UnicodeError, ValueError:
         return None
     if not isinstance(document.result, OutcomeDone):
         return None

@@ -605,7 +605,7 @@ class JobRunStopMixin:
                         canonical_message(read_row_column(job, "payload"))
                     ).model_dump(mode="json")
                 )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return False
             return True
 

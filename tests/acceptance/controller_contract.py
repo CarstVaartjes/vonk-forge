@@ -59,7 +59,7 @@ class ObservationResponseContract:
         # still refuses them; non-JSON values never become accepted payloads.
         try:
             instance = json.loads(json.dumps(value, allow_nan=False))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise ContractSkew(
                 f"{self.label} observation violates its source schema"
             ) from None
@@ -267,7 +267,7 @@ class ControllerContract:
             instance = TypeAdapter(JsonValue).validate_json(
                 json.dumps(value, allow_nan=False), strict=True
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise ContractSkew(f"{self._label} receipt is not JSON") from None
         validator = source_schema_validator(rooted)
         problem = next(validator.iter_errors(instance), None)

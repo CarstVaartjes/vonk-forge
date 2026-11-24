@@ -117,7 +117,7 @@ def https_peer(tmp_path, monkeypatch):
         def handle(self):
             try:
                 super().handle()
-            except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
+            except BrokenPipeError, ConnectionResetError, ssl.SSLError:
                 state["closed"].set()
             else:
                 # BaseHTTPRequestHandler treats a clean peer EOF before a
@@ -128,7 +128,7 @@ def https_peer(tmp_path, monkeypatch):
         def finish(self):
             try:
                 super().finish()
-            except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
+            except BrokenPipeError, ConnectionResetError, ssl.SSLError:
                 state["closed"].set()
 
         def do_POST(self):
@@ -182,7 +182,7 @@ def https_peer(tmp_path, monkeypatch):
                     self.wfile.flush()
                     if stop.wait(BYTE_DELAY):
                         break
-            except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
+            except BrokenPipeError, ConnectionResetError, ssl.SSLError:
                 state["closed"].set()
 
         def log_message(self, format: str, *args: object) -> None:

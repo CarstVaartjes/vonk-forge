@@ -6,7 +6,7 @@ import hashlib
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import Nullable, select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -233,11 +233,7 @@ def _prove(
         ),
         None,
     )
-    if (
-        runtime_plan is None
-        or runtime_plan.installation_id != child_parent.owner_id
-        or runtime_plan.mapping_id is None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
-    ):
+    if runtime_plan is None or runtime_plan.installation_id != child_parent.owner_id:
         return None
     RecipeLifecyclePhaseExecutor._bound_installation(
         session,
@@ -249,7 +245,7 @@ def _prove(
     # Lock only this exact native scope, NOWAIT, before sampling its owner.
     rows = tuple(
         session.execute(
-            select(AgentOperation, AgentOperationAttempt)
+            select(AgentOperation, Nullable(AgentOperationAttempt))
             .outerjoin(
                 AgentOperationAttempt,
                 (AgentOperationAttempt.operation_id == AgentOperation.id)
@@ -263,7 +259,7 @@ def _prove(
         if (
             operation.authority_revision != child.authority_revision
             or operation.workload_intent_ordinal != parent.workload_intent_ordinal
-            or (operation.current_attempt > 0 and attempt is None)  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+            or (operation.current_attempt > 0 and attempt is None)
         ):
             return None
     # Measurement repair requires every current sample field/freshness.
@@ -277,7 +273,7 @@ def _prove(
         return None
     witnesses = []
     for operation, attempt in rows:
-        if attempt is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+        if attempt is None:
             continue
         sample = stored_progress(attempt)
         # Without a retained parent attempt witness, a later native attempt

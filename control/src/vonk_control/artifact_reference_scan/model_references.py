@@ -116,7 +116,7 @@ def model_set_reference_findings(
         if ident not in resolves:
             try:
                 digest = resolve_recipe_set(session, ident).digest
-            except (ModelCacheError, TypeError, ValueError):
+            except ModelCacheError, TypeError, ValueError:
                 digest = None
             if digest is not None and digest not in sets:
                 # A set that is not complete yet is not the resolved set yet.

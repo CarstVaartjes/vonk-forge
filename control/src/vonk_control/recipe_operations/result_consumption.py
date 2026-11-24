@@ -262,7 +262,7 @@ class ResultConsumptionMixin:
                             RecipeStopPayload, operation.payload, from_json=True
                         )
                     )
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     # Retain the authenticated receipt; the queue's bounded
                     # observation repairs its missing exact target projection.
                     return
@@ -293,7 +293,7 @@ class ResultConsumptionMixin:
                             ),
                             None,
                         )
-                    except (TypeError, ValueError):
+                    except TypeError, ValueError:
                         rank = None
                     if rank is not None:
                         node = RunNode(
@@ -327,7 +327,7 @@ class ResultConsumptionMixin:
                             stopped = read_stored_model(
                                 RecipeStopPayload, sibling.payload, from_json=True
                             )
-                        except (TypeError, ValueError):
+                        except TypeError, ValueError:
                             continue
                         if (
                             stopped.run_id == owner_id

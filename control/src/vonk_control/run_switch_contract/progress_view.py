@@ -89,7 +89,7 @@ def _merge_measured_evidence(
             payload = RunSwitchObservedEvidence.model_validate_json(
                 canonical_message(raw), strict=True
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return
     if payload.progress is not None:
         _merge_measured_evidence(progress, plan, phase, payload.progress, now)

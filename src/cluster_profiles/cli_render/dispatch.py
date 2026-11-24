@@ -263,7 +263,7 @@ def render_payload(
                     payload["document"], sort_keys=True, indent=2, ensure_ascii=True
                 )
             )
-    except (ControlMalformedResponse, KeyError, TypeError, ValueError):
+    except ControlMalformedResponse, KeyError, TypeError, ValueError:
         _field("Observation", ENDPOINT_UNAVAILABLE)
         for field in ("request_key", "request_id", "operation_id", "id", "job_id"):
             if payload.get(field) is not None:

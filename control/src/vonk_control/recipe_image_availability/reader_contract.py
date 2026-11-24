@@ -87,7 +87,7 @@ class RecoveredAvailabilityPayload(AvailabilityJobPayload):
                 ),
                 value,
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
 
@@ -105,7 +105,7 @@ class AvailabilityDownloadPreview(ModelCacheDownloadPreviewResponse):
     def read(cls, value: object) -> AvailabilityDownloadPreview | None:
         try:
             return cls.model_validate(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
 

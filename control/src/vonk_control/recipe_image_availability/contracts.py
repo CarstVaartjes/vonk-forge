@@ -623,7 +623,7 @@ def _log_excerpt(error: BaseException | BuildUnsettled) -> str | None:
         value = getattr(error, "detail", None)
     if not isinstance(value, str) or not value.strip():
         value = _failure_detail(error)
-    if not isinstance(value, str) or not value.strip():  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
+    if not value.strip():
         return None
     # An excerpt is the end of the output: that is where a failure is printed.
     return value[-1024:]

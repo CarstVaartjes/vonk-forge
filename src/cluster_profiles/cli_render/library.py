@@ -67,7 +67,7 @@ def _qualification(value: object) -> PublishedQualificationStatusView | None:
         return None
     try:
         return PublishedQualificationStatusView.from_dict(value)
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         return None
 
 
@@ -94,11 +94,7 @@ def _qualification_evidence(value: object) -> tuple[str, str] | None:
     tested = _utc(record.tested_at)
     if record.outcome == QualificationOutcome.PASSED:
         count = record.platform.spark_count
-        sparks = (
-            f" on {count} Spark{'s' if count != 1 else ''}"
-            if isinstance(count, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            else ""
-        )
+        sparks = f" on {count} Spark{'s' if count != 1 else ''}"
         return ("Last passed", f"{tested}{sparks}")
     return ("Last failure", f"{record.cause_summary} ({tested})")
 

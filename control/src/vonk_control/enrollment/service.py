@@ -113,7 +113,7 @@ class EnrollmentService(RotationService):
                         certificate.chain_pem.encode("ascii")
                     )
                     return True
-            except (ValueError, UnicodeError):
+            except ValueError, UnicodeError:
                 pass
             binding = _issuance_binding(certificate.provider_request)
             material = certificate.csr_pem
@@ -382,7 +382,7 @@ class EnrollmentService(RotationService):
                 time.sleep(delay)
             try:
                 return self._activate_once(node_id, serial, generation)
-            except (SQLAlchemyError, EnrollmentIssuanceUncertain):
+            except SQLAlchemyError, EnrollmentIssuanceUncertain:
                 pass
         return EnrollmentObservationOutcome(
             category=ErrorCategory.UNKNOWN,
@@ -538,7 +538,7 @@ class EnrollmentService(RotationService):
         for serial in serials:
             try:
                 self._authority.revoke_node(serial, now)
-            except (StepCAUnavailable, RuntimeError, OSError, ValueError):
+            except StepCAUnavailable, RuntimeError, OSError, ValueError:
                 uncertain = True
             else:
                 self._confirm_remote_revocation(node_id, serial, now)
@@ -555,7 +555,7 @@ class EnrollmentService(RotationService):
                 time.sleep(delay)
             try:
                 return self._renew_expired_once(proof)
-            except (SQLAlchemyError, EnrollmentIssuanceUncertain):
+            except SQLAlchemyError, EnrollmentIssuanceUncertain:
                 pass
         return EnrollmentObservationOutcome(
             category=ErrorCategory.UNKNOWN,
@@ -639,7 +639,7 @@ class EnrollmentService(RotationService):
                 time.sleep(delay)
             try:
                 return self._renew_once(node_id, serial, csr, expired=expired)
-            except (RenewalInProgress, StepCAIssuancePending):
+            except RenewalInProgress, StepCAIssuancePending:
                 # A follower ends observation, not the CA owner's accepted work.
                 pass
             except (
@@ -659,7 +659,7 @@ class EnrollmentService(RotationService):
                     self._end_rotation(node_id, csr=csr, serial=serial)
                     ended = True
                 break
-            except (SQLAlchemyError, EnrollmentIssuanceUncertain):
+            except SQLAlchemyError, EnrollmentIssuanceUncertain:
                 pass
         return EnrollmentObservationOutcome(
             category=ErrorCategory.UNKNOWN,

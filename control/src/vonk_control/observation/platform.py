@@ -269,12 +269,12 @@ def api_only_capture() -> CapturedPlatformObservation:
 def _readable_source(value: str | None) -> str | None:
     try:
         return TypeAdapter(Source | None).validate_python(value, strict=True)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
 def _readable_digest(value: str | None) -> str | None:
     try:
         return TypeAdapter(Digest | None).validate_python(value, strict=True)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None

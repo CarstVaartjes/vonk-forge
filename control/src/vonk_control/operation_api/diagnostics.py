@@ -52,7 +52,7 @@ def _agent_upgrade_diagnostics(
         return None
     try:
         package = read_stored_model(AgentUpgradePackage, payload["package"])
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         warn_unreadable_once("agent-upgrade", job_id)
         return None
     operations = list(

@@ -435,7 +435,7 @@ class RecipePackageClient:
             if str(envelope["contract_version"]).split(".")[0] != str(CONTRACT_MAJOR):
                 return None
             return datetime.fromisoformat(envelope["updated_at"])
-        except (OSError, KeyError, TypeError, ValueError, AttributeError):
+        except OSError, KeyError, TypeError, ValueError, AttributeError:
             # An unreadable envelope: the full verified read decides.
             persisted = self._read_persisted_snapshot()
             return persisted.updated_at if persisted is not None else None
@@ -856,7 +856,7 @@ class RecipePackageClient:
         """The GitHub digest of the bundle the persisted generation came from."""
         try:
             payload = _json(self._snapshot_path.read_bytes())
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        except OSError, UnicodeDecodeError, json.JSONDecodeError:
             return None
         value = payload.get("library_digest") if isinstance(payload, Mapping) else None
         return value if isinstance(value, str) else None
@@ -1233,7 +1233,7 @@ class RecipePackageClient:
             try:
                 if marker.read_text(encoding="ascii") == digest:
                     return target
-            except (OSError, UnicodeDecodeError):
+            except OSError, UnicodeDecodeError:
                 pass
             shutil.rmtree(target, ignore_errors=True)
         elif target.exists():

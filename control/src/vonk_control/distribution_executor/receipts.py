@@ -109,7 +109,7 @@ def _evidence_projection(node_id: str, value: object) -> ArtifactVerificationEvi
             error_code=observed.error_code,
             diagnostic=observed.diagnostic,
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return ArtifactVerificationEvidence(node_id=node_id, uncertain=True)
 
 
@@ -130,7 +130,7 @@ def project_child(session: Session, child: Job, now: datetime) -> _ChildView:
         payload = read_stored_model(
             DistributionJobPayload, child.payload, from_json=True
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         payload = None
     members: list[RunSwitchMemberReceipt] = []
     measured_members: list[OperationMemberProgress] = []
@@ -205,7 +205,7 @@ def project_child(session: Session, child: Job, now: datetime) -> _ChildView:
                 ),
                 now,
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             measured = OperationProgress(phase=ProgressPhase.TRANSFER.value)
         total = (
             payload.target_totals.get(operation.node_id)

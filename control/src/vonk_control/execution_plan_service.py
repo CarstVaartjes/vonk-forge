@@ -259,7 +259,7 @@ class ControllerExecutionPlanService:
             model_objects: Sequence[VerifiedModelObject] = verified_model_receipts(
                 self._model_cache, artifact_set_sha256, manifest
             )
-        except (UnknownOutcomeError, SecurityRefusalError, InvalidRequestError):
+        except UnknownOutcomeError, SecurityRefusalError, InvalidRequestError:
             # Unconfirmed storage or bookkeeping keeps its type: the admitting
             # owner observes it again instead of reading a verdict on the plan.
             # A deterministic refusal keeps its type too: it is the verdict.
@@ -303,7 +303,7 @@ class ControllerExecutionPlanService:
                     runtime_spec,
                     placement=placement,
                 )
-            except (UnknownOutcomeError, SecurityRefusalError):
+            except UnknownOutcomeError, SecurityRefusalError:
                 raise
             except (
                 CompiledExecutionPlanError,
@@ -374,10 +374,8 @@ def _runtime_image_receipt(
 
 
 def _build_package(build: RecipeBuild) -> dict[str, object]:
-    if (
-        build.state != RecipeBuildState.SUCCEEDED
-        or not isinstance(build.image_digest, str)
-        or not isinstance(build.build_input_sha256, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+    if build.state != RecipeBuildState.SUCCEEDED or not isinstance(
+        build.image_digest, str
     ):
         raise ExecutionPlanEvidenceUnknown(
             "successful Controller build receipt is unavailable"

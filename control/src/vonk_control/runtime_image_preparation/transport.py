@@ -75,17 +75,13 @@ def _validate_evidence(
         raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.EVIDENCE_INVALID, "OCI transport returned invalid evidence"
         )
-    if (
-        not isinstance(evidence.manifest_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        or _IMAGE_DIGEST.fullmatch(evidence.manifest_digest) is None
-    ):
+    if _IMAGE_DIGEST.fullmatch(evidence.manifest_digest) is None:
         raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.EVIDENCE_INVALID,
             "OCI transport manifest observation is unreadable",
         )
     if (
-        not isinstance(evidence.config_id, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        or _IMAGE_DIGEST.fullmatch(evidence.config_id) is None
+        _IMAGE_DIGEST.fullmatch(evidence.config_id) is None
         or not evidence.local_reference
     ):
         raise RuntimeImagePreparationUnknown(
@@ -93,8 +89,7 @@ def _validate_evidence(
             "OCI transport did not return local image identity",
         )
     if (
-        not isinstance(evidence.archive_sha256, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        or _SHA256.fullmatch(evidence.archive_sha256) is None
+        _SHA256.fullmatch(evidence.archive_sha256) is None
         or type(evidence.archive_bytes) is not int
         or evidence.archive_bytes < 1
     ):

@@ -359,7 +359,7 @@ def _inspect_copy(
             if argument.lstrip().startswith("[")
             else shlex.split(argument)
         )
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError, ValueError:
         return [
             _finding(
                 SourcePolicyCode.COPY_INVALID,
@@ -437,7 +437,7 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
         ]
     try:
         document = yaml.safe_load(payload.decode("utf-8"))
-    except (UnicodeDecodeError, yaml.YAMLError):
+    except UnicodeDecodeError, yaml.YAMLError:
         return [
             _finding(
                 SourcePolicyCode.INVALID,

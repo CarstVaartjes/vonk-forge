@@ -288,5 +288,5 @@ class AgentPresenceService:
                 address=address,
                 observed_at=observed_at,
             )
-        except (SQLAlchemyError, OSError, ValueError, TypeError, AttributeError):
+        except SQLAlchemyError, OSError, ValueError, TypeError, AttributeError:
             return unavailable

@@ -597,7 +597,7 @@ class SchedulerMixin:
                     continue
                 try:
                     manifest = _manifest_of(payload)
-                except (TypeError, ValueError, ModelCacheError):
+                except TypeError, ValueError, ModelCacheError:
                     cache._retire_unreadable(
                         operation,
                         retire_as_unknown(
@@ -747,7 +747,7 @@ class SchedulerMixin:
             fact = _ClaimFact(payload)
             try:
                 manifest = None if payload is None else _manifest_of(payload)
-            except (TypeError, ValueError, ModelCacheError):
+            except TypeError, ValueError, ModelCacheError:
                 manifest = None  # the claim retires it
             if (
                 payload is not None
