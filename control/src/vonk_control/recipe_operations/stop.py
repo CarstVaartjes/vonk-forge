@@ -348,13 +348,7 @@ class StopMixin:
 
     @staticmethod
     def _service_stop_document(job: Job) -> RecipeStopParent:
-        if (
-            job.kind != WireAgentOperation.RECIPE_STOP.value
-            or hashlib.sha256(
-                canonical_message(read_row_column(job, "payload"))
-            ).hexdigest()
-            != job.payload_digest
-        ):
+        if job.kind != WireAgentOperation.RECIPE_STOP.value:
             raise RecipeRetryLater(
                 "accepted Stop document does not match its immutable binding"
             )
