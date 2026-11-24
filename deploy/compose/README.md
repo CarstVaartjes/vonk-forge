@@ -256,8 +256,8 @@ No service mounts the NAS Docker socket, so nothing in the project operates the
 NAS Docker daemon. Two daemon-level conditions need an operator step.
 
 Old platform images: every release pulls new API, worker and LiteLLM images and
-the previous ones stay in the daemon store. Remove the unused ones with the NAS
-Docker UI's image cleanup, or only Vonk Forge's with:
+the previous ones stay in the daemon store. Delete the unused ones in the NAS
+Docker UI, or remove only Vonk Forge's unused images with:
 
 ```sh
 sudo docker image prune -a --force \
