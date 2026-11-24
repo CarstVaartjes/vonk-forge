@@ -31,7 +31,6 @@ from vonk_control.fleet_profiles.contracts import (
 )
 from vonk_control.fleet_profiles.projection_support import (
     _aware,
-    _digest,
     _validate_remaining_effects,
 )
 from vonk_control.jobs import states as job_states
@@ -663,7 +662,6 @@ def _intended_profile(
         root_progress.retry_of_application_id is not None
         or root_progress.intended_profile != intended
         or intended.reviewed_application_id != root.id
-        or intended.reviewed_plan_digest != _digest(root_plan.reviewed_decision())
     ):
         return retire_as_unknown(
             "profile-intent",

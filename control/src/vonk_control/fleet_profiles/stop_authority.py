@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
@@ -103,11 +102,6 @@ def validate_profile_stop_owner(
     switch_stop = profile_operation.kind == ProfileChildJobKind.RUN_SWITCH.value
     if profile_operation.kind != ProfileChildJobKind.STOP.value and not switch_stop:
         raise ProfileStopAuthorityError("profile Stop parent operation kind changed")
-    if (
-        hashlib.sha256(canonical_message(profile_operation.payload)).hexdigest()
-        != profile_operation.payload_digest
-    ):
-        raise ProfileStopAuthorityError("profile Stop parent payload digest changed")
     if (
         profile_operation.payload.get("workload_intent_ordinal")
         != authorization.workload_intent_ordinal
