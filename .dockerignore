@@ -51,8 +51,6 @@ deploy/compose/*
 !deploy/compose/compose.yaml
 !deploy/compose/python-bootstrap.lock
 !deploy/compose/uv-bootstrap.lock
-!deploy/compose/image-janitor/
-!deploy/compose/image-janitor/janitor.py
 !deploy/compose/caddy/
 deploy/compose/caddy/*
 !deploy/compose/caddy/entrypoint.sh

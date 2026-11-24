@@ -47,7 +47,6 @@ DEPENDENCY_FETCH_TIMEOUT_SECONDS = 16 * 60
 
 DEFAULT_SERVICES = {
     "runtime-init",
-    "image-janitor",
     "caddy",
     "control-api",
     "control-worker",
@@ -509,10 +508,6 @@ def compose_startup_diagnostics(bundle: Path) -> str:
     details = f"states: {', '.join(states) or 'none'}"
     if not broken:
         return details
-    # The image janitor heals ingress and can race Compose: its log explains a
-    # failure in another service, so it is always part of the evidence.
-    if "image-janitor" not in broken:
-        broken.append("image-janitor")
     logs = _diagnostic_command(
         bundle,
         [*reference_compose(), "logs", "--no-color", "--tail", "80", *broken],
@@ -928,157 +923,6 @@ def verify_controller_tls(bundle: Path, nas_ip: str, enrollment_hostname: str) -
         raise AcceptanceError("enrollment bootstrap is not JSON") from error
     if not isinstance(document, dict) or not document:
         raise AcceptanceError("enrollment bootstrap is empty")
-
-
-def verify_ingress_heals_after_network_loss(
-    bundle: Path, nas_ip: str, enrollment_hostname: str, services: tuple[str, ...]
-) -> None:
-    """Caddy's ingress network is recreated under it, as after a NAS OS update.
-
-    `compose up` then starts the old container against the old network ID and
-    fails, and a restart reuses it. The janitor must re-attach the same
-    container, with no recreate and no human. It is paused while the fault is
-    set up, so the fault is observed before the repair can race it.
-    """
-    document = json.loads(
-        run([*reference_compose(), "config", "--format", "json"], cwd=bundle).stdout
-    )
-    network = document["networks"]["ingress"]["name"]
-
-    def container(service: str) -> str:
-        return run(
-            [*reference_compose(), "ps", "-q", service], cwd=bundle
-        ).stdout.strip()
-
-    caddy, janitor = container("caddy"), container("image-janitor")
-    run(["docker", "pause", janitor], cwd=bundle)
-    try:
-        run(["docker", "stop", "--timeout", "30", caddy], cwd=bundle, timeout=60)
-        run(["docker", "network", "rm", network], cwd=bundle, timeout=60)
-        # Like the UGREEN Redeploy: recreates the network, then fails to start
-        # the unchanged container. Its exit status is the fault, not the result.
-        subprocess.run(
-            [
-                *reference_compose(),
-                "up",
-                "-d",
-                *(service for service in services if service != "image-janitor"),
-            ],
-            cwd=bundle,
-            env=host_command_environment(),
-            capture_output=True,
-            timeout=300,
-            check=False,
-        )
-        state = json.loads(
-            run(
-                ["docker", "inspect", "--format", "{{json .State}}", caddy],
-                cwd=bundle,
-            ).stdout
-        )
-        if state["Status"] != "exited" or not state["Error"]:
-            raise AcceptanceError(f"the network fault was not reproduced: {state}")
-        try:
-            socket.create_connection((nas_ip, 8443), timeout=5).close()
-        except ConnectionRefusedError:
-            pass
-        else:
-            raise AcceptanceError(":8443 still answers with the fault in place")
-    finally:
-        run(["docker", "unpause", janitor], cwd=bundle)
-    started = time.monotonic()
-    deadline = started + 180
-    while True:
-        try:
-            verify_controller_tls(bundle, nas_ip, enrollment_hostname)
-            break
-        except AcceptanceError:
-            if time.monotonic() > deadline:
-                raise AcceptanceError(
-                    "Caddy :8443 did not heal after its ingress network was "
-                    f"recreated; {compose_startup_diagnostics(bundle)}"
-                ) from None
-            time.sleep(5)
-    attached = run(
-        ["docker", "network", "inspect", "--format", "{{json .Containers}}", network],
-        cwd=bundle,
-    ).stdout
-    if not any(member.startswith(caddy) for member in json.loads(attached)):
-        raise AcceptanceError("the healed Caddy is not the original container")
-    # The janitor logs to stderr.
-    printed = run(["docker", "logs", janitor], cwd=bundle)
-    logs = (printed.stdout + printed.stderr).splitlines()
-    repairs = [
-        line
-        for line in logs
-        if '"reason": "network-reattached"' in line and "vonk-forge-caddy-1" in line
-    ]
-    if not repairs:
-        raise AcceptanceError("the janitor logged no re-attach of Caddy")
-    print(
-        f"ingress heal: :8443 answered {time.monotonic() - started:.1f}s after "
-        f"the fault; janitor: {repairs[-1]}",
-        flush=True,
-    )
-
-
-def verify_running_caddy_heals_without_its_ingress(
-    bundle: Path, nas_ip: str, enrollment_hostname: str
-) -> None:
-    """The 2026-11-19 outage: Caddy keeps running without `ingress`.
-
-    Docker lost the network and restarted Caddy on its four internal networks:
-    :8443 closed, no default route, health check green. The janitor must
-    recreate the declared network and re-attach Caddy within its repair period,
-    with no human. (An existing network missing only from a container's record
-    is left to Compose by design.)
-    """
-    document = json.loads(
-        run([*reference_compose(), "config", "--format", "json"], cwd=bundle).stdout
-    )
-    network = document["networks"]["ingress"]["name"]
-    caddy = run([*reference_compose(), "ps", "-q", "caddy"], cwd=bundle).stdout.strip()
-    janitor = run(
-        [*reference_compose(), "ps", "-q", "image-janitor"], cwd=bundle
-    ).stdout.strip()
-    for deleted in (True,):
-        # Paused while the fault is set up, so it is observed before the repair.
-        run(["docker", "pause", janitor], cwd=bundle)
-        try:
-            run(["docker", "network", "disconnect", "-f", network, caddy], cwd=bundle)
-            if deleted:
-                run(["docker", "network", "rm", network], cwd=bundle)
-            routes = run(["docker", "exec", caddy, "ip", "route"], cwd=bundle).stdout
-            if any(line.startswith("default") for line in routes.splitlines()):
-                raise AcceptanceError("Caddy still has a default route without ingress")
-        finally:
-            run(["docker", "unpause", janitor], cwd=bundle)
-        deadline = time.monotonic() + 180  # Several 30-second repair passes
-        while True:
-            try:
-                verify_controller_tls(bundle, nas_ip, enrollment_hostname)
-                break
-            except AcceptanceError:
-                if time.monotonic() > deadline:
-                    raise AcceptanceError(
-                        "Caddy :8443 did not heal after a running Caddy lost "
-                        f"ingress (network deleted: {deleted}); "
-                        f"{compose_startup_diagnostics(bundle)}"
-                    ) from None
-                time.sleep(5)
-        attached = run(
-            [
-                "docker",
-                "network",
-                "inspect",
-                "--format",
-                "{{json .Containers}}",
-                network,
-            ],
-            cwd=bundle,
-        ).stdout
-        if not any(member.startswith(caddy) for member in json.loads(attached)):
-            raise AcceptanceError("the healed Caddy is not the original container")
 
 
 def verify_postgres_databases(bundle: Path) -> None:
@@ -1801,12 +1645,6 @@ def exercise_compose(
             # a restart or a second installer run must come back healthy.
             assert_bundle_contract(bundle)
             if tailscale_mode == "disabled":
-                verify_ingress_heals_after_network_loss(
-                    bundle, nas_ip, enrollment_hostname, started
-                )
-                verify_running_caddy_heals_without_its_ingress(
-                    bundle, nas_ip, enrollment_hostname
-                )
                 run(
                     [
                         *reference_compose(),

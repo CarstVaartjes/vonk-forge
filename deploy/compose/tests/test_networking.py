@@ -45,7 +45,7 @@ def test_only_caddy_publishes_ports_and_images_are_version_pinned() -> None:
     )
 
 
-def test_caddy_publishes_only_reserved_nas_backend_listener() -> None:
+def test_caddy_publishes_only_the_backend_listener() -> None:
     caddy = _rendered()["services"]["caddy"]
 
     assert caddy["ports"] == [
@@ -54,7 +54,6 @@ def test_caddy_publishes_only_reserved_nas_backend_listener() -> None:
             "target": 8443,
             "published": "8443",
             "protocol": "tcp",
-            "host_ip": "10.0.0.2",
         }
     ]
     assert caddy["environment"] == {

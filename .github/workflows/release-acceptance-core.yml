@@ -387,12 +387,8 @@ jobs:
             dockerd --host=tcp://127.0.0.1:2375 --host=unix:///var/run/docker.sock
           daemon_ready=false
           for _ in $(seq 1 60); do
-            # The CLI uses TCP; the isolated image janitor binds the daemon's
-            # Unix socket, just as it does on the NAS. Prove both transports.
-            if server_version=$(DOCKER_HOST=tcp://127.0.0.1:2375 docker version --format '{{.Server.Version}}' 2>/dev/null) &&
-              socket_version=$(docker exec "$VONK_ACCEPTANCE_DIND_CONTAINER" docker --host=unix:///var/run/docker.sock version --format '{{.Server.Version}}' 2>/dev/null); then
+            if server_version=$(DOCKER_HOST=tcp://127.0.0.1:2375 docker version --format '{{.Server.Version}}' 2>/dev/null); then
               test "$server_version" = 29.4.3
-              test "$socket_version" = 29.4.3
               daemon_ready=true
               break
             fi

@@ -9,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
     "runtime-init",
-    "image-janitor",
     "caddy",
     "control-api",
     "control-worker",
