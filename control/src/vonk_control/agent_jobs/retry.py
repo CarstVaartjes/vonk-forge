@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 
@@ -169,12 +168,10 @@ def _parked_retry_evidence(
     ):
         return False
     try:
-        payload = canonical_payload(
+        canonical_payload(
             AgentOperation(operation.kind), column_value(operation, "payload")
         )
     except (TypeError, ValueError):
-        return False
-    if hashlib.sha256(payload).hexdigest() != operation.payload_digest:
         return False
     if agent_operation_states.attempt_lapsed(attempt):
         # Expiry never proves the old executor stopped. Only exact-resume
