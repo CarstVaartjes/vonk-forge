@@ -130,7 +130,7 @@ def test_shards_are_split_from_the_tree_without_a_collection_pass(
     for file in (
         "scripts/test",
         "scripts/repository-guards",
-        "scripts/select-pytest-shard-files",
+        "scripts/ci/select-pytest-shard-files",
         "tests/repository_guards.py",
     ):
         destination = tmp_path / file

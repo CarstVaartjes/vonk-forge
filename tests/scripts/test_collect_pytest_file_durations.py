@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 SCRIPT = (
-    Path(__file__).resolve().parents[2] / "scripts" / "collect-pytest-file-durations"
+    Path(__file__).resolve().parents[2] / "scripts/ci/collect-pytest-file-durations"
 )
 
 

@@ -131,7 +131,7 @@ def github(monkeypatch):
 @pytest.mark.parametrize(
     ("producer", "changed", "expected"),
     [
-        ("setups", "scripts/select-pytest-shard-files", False),
+        ("setups", "scripts/ci/select-pytest-shard-files", False),
         ("setups", "nas_setup/src/vonk_nas_setup/cli.py", True),
         ("agent", "packaging/debian/postinst", True),
         ("agent", ".github/actions/agent-apt-publish/action.yml", True),
