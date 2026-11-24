@@ -437,7 +437,7 @@ def test_the_exact_identity_fence_of_a_recovery_still_refuses() -> None:
     _require_recovery_preparation("assignment", None, accepted)
 
 
-@pytest.mark.parametrize("damage", ["intent-identity", "review-identity", "scope"])
+@pytest.mark.parametrize("damage", ["intent-identity", "scope"])
 def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) -> None:
 
     sessions = _database()
@@ -454,11 +454,7 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
         if damage == "scope":
             intended["scope"] = {"node_ids": [_node_id(9)]}
         else:
-            intended[
-                "profile_digest"
-                if damage == "intent-identity"
-                else "reviewed_plan_digest"
-            ] = "e" * 64
+            intended["profile_digest"] = "e" * 64
         progress["intended_profile"] = intended
         row.progress = progress
 

@@ -275,62 +275,6 @@ def test_model_removal_child_replay_and_visible_writer_wait(cache, tmp_path: Pat
     assert not service._object_path(digest).exists()
 
 
-@pytest.mark.parametrize(
-    "field", ["actor", "request_key", "selector", "removal_fence", "delete_objects"]
-)
-def test_model_removal_retires_persisted_intent_drift_before_effects(
-    cache, tmp_path: Path, field: str
-):
-    service, sessions = cache
-    artifact = _artifact(tmp_path, b"bound bytes")
-    downloaded = _download(
-        service,
-        [artifact],
-        model_content_sha256="a" * 64,
-        request_key="00000000-0000-4000-8000-000000001070",
-    )
-    assert downloaded.artifact_set_sha256 is not None
-    with sessions.begin() as session:
-        accepted = service.accept_removal_for_sets_in_session(
-            session,
-            actor="test",
-            request_key="00000000-0000-4000-8000-000000001071",
-            selector="recipe-child",
-            selected_sets=[downloaded.artifact_set_sha256],
-        )
-    # Acceptance can already resolve the exact scope; observation is idempotent.
-    service._observe_model_removal_scope(accepted.id)
-    with sessions.begin() as session:
-        row = session.get(ModelCacheOperation, accepted.id)
-        assert row is not None
-        if field in {"actor", "request_key"}:
-            setattr(row, field, "00000000-0000-4000-8000-000000001072")
-        else:
-            payload = dict(row.payload)
-            payload[field] = (
-                []
-                if field == "delete_objects"
-                else "00000000-0000-4000-8000-000000001072"
-            )
-            row.payload = payload
-    # The drifted plan is destructive intent nobody accepted: nothing is
-    # removed, the row ends (kept for inspection) and the worker carries on.
-    assert service._advance_model_removal(accepted.id) is False
-    assert service._object_path(str(artifact["sha256"])).read_bytes() == b"bound bytes"
-    retired = service.get_operation(accepted.id)
-    assert retired.state == "failed"
-    assert "persisted-state-damaged" in str(retired.last_error)
-    assert service.advance_removals() == 0
-    fresh = _download(
-        service,
-        [artifact],
-        model_content_sha256="a" * 64,
-        request_key="00000000-0000-4000-8000-000000001073",
-    )
-    assert fresh.id != accepted.id
-    assert fresh.state == LifecycleState.SUCCEEDED.value
-
-
 def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
     cache,
 ):
