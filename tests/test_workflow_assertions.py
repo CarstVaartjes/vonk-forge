@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import importlib.machinery
 import importlib.util
+import json
 import re
 import textwrap
 from pathlib import Path
@@ -382,3 +383,12 @@ def test_pre_commit_added_line_paths_match_ci() -> None:
     hook = importlib.util.module_from_spec(spec)
     loader.exec_module(hook)
     assert match.group(1).split() == hook.ADDED_LINE_PATHS
+
+
+def test_node_major_in_ci_matches_the_node_image_pin() -> None:
+    """Catches `.node-version` and the Node base image drifting to different majors."""
+    major = (ROOT / ".node-version").read_text().strip()
+    images = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
+    assert images["build_bases"]["node"].startswith(f"node:{major}-")
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert 'node-version: "' not in workflow

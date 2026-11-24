@@ -42,10 +42,10 @@ preserving referenced entries. Treat the managed local cache as trusted and do
 not promise repeated full hashing. Preserve the current schema-2, single-path
 contract: do not document legacy fallbacks or compatibility aliases.
 
-Document the target whole-fleet membership rule too. Distinguish saved drafts
+Document the whole-fleet membership rule too. Distinguish saved drafts
 and one-shot load applications from one durable selected-profile record in
 PostgreSQL that points to the immutable accepted application snapshot. Do not
-infer it from latest application history. The Controller worker must reconcile
+infer it from latest application history. The Controller worker reconciles
 that snapshot after enrollment or revocation, without a new operator decision:
 new Sparks are idle; a removed Spark's independent assignment is ignored while
 the snapshot stays intact. If removal leaves a multi-Spark model without a
@@ -54,5 +54,4 @@ report the missing member, and continue unrelated assignments. Do not count an
 old run as live capacity or claim an unreachable Spark stopped; reconcile a
 same-ID rejoining Spark against the accepted snapshot before scheduling it. A
 review binds current membership, so changes before acceptance require a new
-review. Keep this marked as target behavior until the selected-profile record
-and worker ship.
+review.

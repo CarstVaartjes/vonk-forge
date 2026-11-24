@@ -126,7 +126,7 @@ saved row. The review checksum (`effects_digest`) covers the definition content,
 never the row id, revision or digest, so the review of a draft equals the review
 after that definition is saved, for an existing and a new profile number.
 
-Target ongoing behavior uses one durable selected-profile record in PostgreSQL
+The standing behavior uses one durable selected-profile record in PostgreSQL
 pointing to the immutable accepted application snapshot as whole-fleet desired
 state. Profile saves are drafts and a load application is one-shot; neither the
 latest application nor audit history can stand in for the selected-profile
