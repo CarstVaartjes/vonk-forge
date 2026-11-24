@@ -22,9 +22,9 @@ from pydantic import (
 from pydantic_core import CoreSchema, SchemaValidator, ValidationError, core_schema
 
 from vonk_agent_protocol.identifiers import (
+    DIGEST_PATTERN,
     UUID_PATTERN,
     Digest,
-    Uuid4Text,
 )
 
 # RecipeRun owns generations in a PostgreSQL BIGINT column. The helper and
@@ -269,7 +269,7 @@ CanonicalUUID = Annotated[
 ]
 DigestText = Annotated[
     str,
-    Field(strict=True, pattern=r"^[0-9a-f]{64}$"),
+    Field(strict=True, pattern=DIGEST_PATTERN),
 ]
 
 
@@ -511,7 +511,6 @@ __all__ = [
     "OperationMemberProgress",
     "OperationProgress",
     "StrictJSONModel",
-    "Uuid4Text",
     "WireEnum",
     "WireModel",
     "canonical_message",

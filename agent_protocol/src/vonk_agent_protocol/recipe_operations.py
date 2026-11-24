@@ -28,10 +28,6 @@ RECIPE_OPERATIONS = frozenset(
     }
 )
 
-_UUID_PATTERN = (
-    r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}"
-)
 ByteCount = Annotated[int, Field(ge=0, le=16 * 1024**4)]
 RunGeneration = Annotated[int, Field(ge=1, le=MAX_RUN_GENERATION, strict=True)]
 
