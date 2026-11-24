@@ -6,14 +6,9 @@ from typing import Annotated, Literal
 
 from pydantic import (
     Field,
-    StringConstraints,
 )
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
-
-_DIGEST_PATTERN = r"^[0-9a-f]{64}$"
-
-Digest = Annotated[str, StringConstraints(pattern=_DIGEST_PATTERN)]
 
 PortNumber = Annotated[int, Field(ge=1, le=65535)]
 

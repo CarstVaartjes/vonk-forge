@@ -16,17 +16,17 @@ from vonk_forge_contracts import EndpointAlias
 from vonk_forge_contracts.recipe import Scalar
 
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.identifiers import Digest, NodeId
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.inventory import MemoryPool
+from vonk_control.identifiers import UuidId
 from vonk_control.mapping_parameters import MappingParameters
 from vonk_control.operations.blockers import SwapShortfallEvidence
-from vonk_control.run_switch_contract.identity import NodeId, UuidId
 from vonk_control.run_switch_contract.requests import (
     MemoryUsageUncertainty,
     SparkGroupNode,
 )
 from vonk_control.run_switch_contract.vocabulary import (
-    Digest,
     PortNumber,
     RunSwitchBuildEvidenceState,
     RunSwitchChangeEffect,

@@ -13,7 +13,7 @@ from sqlalchemy import select
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_control.auth import cursor_key
 from vonk_control.catalog.queries import active_head_revision
-from vonk_control.identifiers import _UUID_PATTERN
+from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.library.contract import (
     _MAX_PAGE_RECIPES,
     LibraryFilterValues,
@@ -48,7 +48,7 @@ from vonk_control.operator_receipt_contract import ReceiptOwner
 from vonk_control.request_fault import RequestFault
 from vonk_control.stored.states import CatalogRevisionState
 
-_REVISION_ID = re.compile(_UUID_PATTERN)
+_REVISION_ID = re.compile(UUID_PATTERN)
 
 if TYPE_CHECKING:
     from vonk_control.library_projection.service import LibraryProjection

@@ -17,6 +17,7 @@ from vonk_agent_protocol.error_response import (
     RequestValidationProblem,
 )
 from vonk_agent_protocol.http_failure import HttpTransient
+from vonk_agent_protocol.identifiers import DIGEST_PATTERN, NODE_PATTERN, NodeId
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
@@ -28,12 +29,7 @@ from vonk_control.fleet_profile_contract.applications import (
 )
 from vonk_control.fleet_profile_contract.endpoints import FleetProfileEndpointsView
 from vonk_control.model_cache.contract import ModelCacheCancellation
-from vonk_control.operation_api.constants import (
-    DIGEST_PATTERN,
-    NODE_PATTERN,
-    BoundedIdentifier,
-    NodeIdentifier,
-)
+from vonk_control.operation_api.constants import BoundedIdentifier
 from vonk_control.operations.blockers import OperationBlocker
 from vonk_control.operations.contract import (
     OperationEvidenceDownload,
@@ -165,7 +161,7 @@ class OperationDetailResponse(StrictModel):
     )
     id: str = Field(min_length=1, max_length=128)
     parent_id: str | None = Field(default=None, max_length=128)
-    node_ids: list[NodeIdentifier] = Field(max_length=1024)
+    node_ids: list[NodeId] = Field(max_length=1024)
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
     #: One plain phrase for kind and state ("Job running"), derived by the Controller.

@@ -11,8 +11,8 @@ from pydantic import (
     model_validator,
 )
 
+from vonk_agent_protocol.identifiers import NodeId
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.run_switch_contract.identity import NodeId
 from vonk_control.run_switch_contract.vocabulary import (
     RunSwitchMemberState,
     RunSwitchPhaseKind,

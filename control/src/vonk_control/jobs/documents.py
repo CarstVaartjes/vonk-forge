@@ -30,6 +30,7 @@ from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupRequest,
     RecipeBuildRequest,
 )
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.integer_domains import (
     MAX_DATABASE_BIGINT,
     MAX_DATABASE_INTEGER,
@@ -50,6 +51,7 @@ from vonk_control.fleet_profiles.stop_contract import (
     OfflineStopIntent,
     ProfileStopOwnerBinding,
 )
+from vonk_control.identifiers import UuidId
 from vonk_control.lifecycle.evidence import BookkeepingReason
 from vonk_control.mapping_parameters import EngineArgumentValue
 from vonk_control.operations.blockers import OperationBlocker
@@ -87,14 +89,7 @@ from vonk_control.runtime_image_preparation.contracts import (
 from vonk_control.stored.json_values import ExternalPassthrough
 from vonk_control.strict_json import StrictJSONModel
 
-UuidText = Annotated[
-    str,
-    StringConstraints(
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-    ),
-]
 NodeText = Annotated[str, StringConstraints(min_length=1, max_length=128)]
-DigestText = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 #: A kind with no registered contract.
 GenericJobDocument = Annotated[
@@ -130,7 +125,7 @@ def controller_recipe_document(document: StrictJSONModel) -> JsonValue:
 class _PhaseOperation(_Document):
     """One agent order a parent queued, in the phase it runs."""
 
-    operation_id: UuidText
+    operation_id: UuidId
     node_id: NodeText
 
 
@@ -193,7 +188,7 @@ class _RecipeParent(_Document):
     schema_version: Literal[1]
     owner_kind: Literal["installation", "run", "recipe-build", "artifact-job"]
     owner_id: str = Field(min_length=1, max_length=128)
-    plan_digest: DigestText
+    plan_digest: Digest
     workload_intent_ordinal: int | None = Field(
         le=MAX_DATABASE_INTEGER, default=None, ge=1
     )
@@ -229,7 +224,7 @@ class ServiceRunStopReview(_Document):
     profile_target_node_ids: list[NodeText] | None = Field(
         default=None, min_length=1, max_length=32
     )
-    profile_application_id: UuidText | None = None
+    profile_application_id: UuidId | None = None
     profile_stop_owner: ProfileStopOwnerBinding | None = None
     exact_payloads: dict[NodeText, RecipeStopPayload] | None = Field(
         default=None, min_length=1, max_length=32
@@ -261,7 +256,7 @@ class RecipeJobRunParent(_RecipeParent):
 
 class RecipeJobActivateParent(_RecipeParent):
     # The profile load whose run-switch activated this job run, if any.
-    profile_application_id: UuidText | None = None
+    profile_application_id: UuidId | None = None
 
 
 class RecipeBuildParent(_RecipeParent):
@@ -298,7 +293,7 @@ class RunSwitchCleanupIntent(RunSwitchCleanupApplyRequest):
 
 class RunSwitchProfileStopIntent(_Document):
     type: Literal["profile-stop"]
-    run_id: UuidText
+    run_id: UuidId
     profile_stop_scope: RunSwitchProfileStopScope
 
 
@@ -317,14 +312,14 @@ class RunSwitchJobPayload(_Document):
     schema_version: Literal[2]
     operation_kind: RunSwitchOperationKind
     action: RunSwitchAction
-    plan_digest: DigestText
+    plan_digest: Digest
     plan: RunSwitchPlan
     intent: RunSwitchIntent | None = None
     progress: RunSwitchOperationResult
     workload_intent_ordinal: int | None = Field(
         le=MAX_DATABASE_INTEGER, default=None, ge=1
     )
-    retry_of: UuidText | None = None
+    retry_of: UuidId | None = None
 
 
 # ---------------------------------------------- image availability operation
@@ -373,8 +368,8 @@ class AvailabilityRuntime(_Document):
     writable_paths: list[WritablePath] | None = None
     placement_environment: dict[str, str] | None = None
     image_bytes: int | None = Field(default=None, ge=0)
-    build_input_sha256: DigestText | None = None
-    input_intent_sha256: DigestText | None = None
+    build_input_sha256: Digest | None = None
+    input_intent_sha256: Digest | None = None
     builder_node_id: NodeText | None = None
     recipe_revision_id: str | None = Field(default=None, min_length=1, max_length=128)
 
@@ -382,12 +377,12 @@ class AvailabilityRuntime(_Document):
 class AvailabilityModelChild(_Document):
     """The model-cache child an availability operation waits on, as last seen."""
 
-    id: UuidText
+    id: UuidId
     state: RecipeImageAvailabilityState
-    request_key: UuidText | None = None
-    artifact_set_sha256: DigestText | None = None
-    plan_digest: DigestText | None = None
-    model_content_digests: list[DigestText] | None = None
+    request_key: UuidId | None = None
+    artifact_set_sha256: Digest | None = None
+    plan_digest: Digest | None = None
+    model_content_digests: list[Digest] | None = None
     artifacts: list[RecipeImageAvailabilityArtifact] | None = None
     progress: OperationProgress | None = None
     failure: AvailabilityOperationFailure | None = None
@@ -411,11 +406,11 @@ class AvailabilityJobPayload(_Document):
     kind: Literal["recipe.image.availability.v2"]
     request: RecipeAvailabilityIntent
     recipe_revision_id: str = Field(min_length=1, max_length=128)
-    recipe_content_sha256: DigestText
-    effective_execution_key: DigestText | None = None
+    recipe_content_sha256: Digest
+    effective_execution_key: Digest | None = None
     model_digest: str | None = None
-    build_input_sha256: DigestText | None = None
-    identity_key: DigestText | None = None
+    build_input_sha256: Digest | None = None
+    identity_key: Digest | None = None
     recipe: RecipeDefinition
     runtime: AvailabilityRuntime
     force_rebuild: bool
@@ -432,8 +427,8 @@ class AvailabilityJobPayload(_Document):
     build_dependency: RecipeBuildDependency | None = None
     cancellation: RecipeOperationCancellationResult | None = None
     prebuilt_pull: bool | None = None
-    removal_fence: UuidText | None = None
-    removal_archives: list[DigestText] | None = None
+    removal_fence: UuidId | None = None
+    removal_archives: list[Digest] | None = None
     supersession: AvailabilitySupersession | None = None
     #: When this preparation, or a child working for it, last made progress.
     progress_advanced_at: AwareDatetime | None = None
@@ -455,12 +450,12 @@ class AvailabilityJobResult(_Document):
     """The image an availability operation produced, with its model child."""
 
     schema_version: Literal[2]
-    recipe_content_sha256: DigestText
+    recipe_content_sha256: Digest
     model_digest: str | None = None
-    build_input_sha256: DigestText | None = None
+    build_input_sha256: Digest | None = None
     image_digest: str = Field(min_length=1, max_length=256)
     local_image_config_id: str | None = None
-    oci_archive_sha256: DigestText
+    oci_archive_sha256: Digest
     image_bytes: int = Field(ge=1)
     build_id: str | None = None
     model_child: AvailabilityModelChild | None = None
@@ -480,7 +475,7 @@ class DistributionTransferProgress(_Document):
 class DistributionJobIdentity(_Document):
     """Immutable accepted identity of one target-copy child."""
 
-    plan_digest: DigestText
+    plan_digest: Digest
     workload_intent_ordinal: int | None = Field(
         le=MAX_DATABASE_INTEGER, default=None, ge=1
     )

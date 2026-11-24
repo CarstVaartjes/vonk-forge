@@ -13,6 +13,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.identifiers import NodeId
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.state_machines import InstallationState
 from vonk_control.content_identity import (
@@ -21,7 +22,6 @@ from vonk_control.content_identity import (
     runs_identically,
 )
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
-from vonk_control.fleet_profile_contract.vocabulary import NodeId
 from vonk_control.inventory.repository import newest_snapshot_ids
 from vonk_control.model_cache import states as model_cache_states
 from vonk_control.model_cache.lineage import verifies_model

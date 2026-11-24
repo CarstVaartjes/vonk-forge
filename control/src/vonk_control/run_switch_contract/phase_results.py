@@ -12,12 +12,13 @@ from pydantic import (
 )
 
 from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.identifiers import Digest, NodeId
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.identifiers import UuidId
 from vonk_control.model_cache.contract import ModelCacheDownloadResult
 from vonk_control.operations.blockers import MAX_BLOCKERS, OperationBlocker
-from vonk_control.run_switch_contract.identity import NodeId, UuidId
 from vonk_control.run_switch_contract.progress import (
     ArtifactVerificationEvidence,
     RunSwitchChildProgress,
@@ -26,7 +27,6 @@ from vonk_control.run_switch_contract.progress import (
     _FailureText,
 )
 from vonk_control.run_switch_contract.vocabulary import (
-    Digest,
     RunSwitchContainerBuildState,
     RunSwitchSubphase,
 )

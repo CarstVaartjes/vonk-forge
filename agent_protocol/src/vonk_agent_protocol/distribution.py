@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from pydantic import (
     Field,
@@ -11,14 +11,13 @@ from pydantic import (
     model_validator,
 )
 
+from vonk_agent_protocol.identifiers import Digest, OciDigest
 from vonk_agent_protocol.wire_model import (
     AgentProtocolError,
     WireModel,
     canonical_message,
 )
 
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-ImageDigest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 _EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
@@ -69,8 +68,8 @@ class DistributionAssignment(WireModel):
     """
 
     objects: tuple[DistributionObject, ...] = Field(min_length=1, max_length=4096)
-    oci_image_digest: ImageDigest
-    oci_image_config_digest: ImageDigest
+    oci_image_digest: OciDigest
+    oci_image_config_digest: OciDigest
 
     @model_validator(mode="after")
     def object_set_is_complete(self) -> DistributionAssignment:

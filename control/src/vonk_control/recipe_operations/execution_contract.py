@@ -20,6 +20,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     COMPILED_PLAN_STORAGE_CONTEXT,
     CompiledExecutionPlan,
 )
+from vonk_agent_protocol.identifiers import Digest, NodeId, OciDigest
 from vonk_agent_protocol.integer_domains import (
     MAX_DATABASE_BIGINT,
     MAX_DATABASE_INTEGER,
@@ -29,7 +30,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.content_identity import ImageContent, same_image
 from vonk_control.identifiers import UuidId
-from vonk_control.library.contract import Digest, ImageDigest, NodeId, Text64
+from vonk_control.library.contract import Text64
 from vonk_control.operations.blockers import SwapShortfallEvidence
 from vonk_control.platform_ports import serving_port
 from vonk_control.strict_json import StrictJSONModel
@@ -110,7 +111,7 @@ class StoredInstallationPlan(_PersistedModel):
     mapping_id: UuidId
     mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     recipe_build_id: UuidId | None
-    image_digest: ImageDigest
+    image_digest: OciDigest
     recipe_revision_id: UuidId
     recipe_content_sha256: Digest
     allowed: bool

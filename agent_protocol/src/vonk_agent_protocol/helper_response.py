@@ -6,9 +6,9 @@ from pydantic import AwareDatetime, Field
 
 from vonk_agent_protocol.agent_words import HostHelperResponseStatus
 from vonk_agent_protocol.failure_evidence import FailureLogTail
-from vonk_agent_protocol.host_helper import Digest
+from vonk_agent_protocol.identifiers import Digest, Uuid4Text
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
-from vonk_agent_protocol.wire_model import MAX_RUN_GENERATION, Uuid4Text, WireModel
+from vonk_agent_protocol.wire_model import MAX_RUN_GENERATION, WireModel
 
 
 class HostHelperProcessLogs(WireModel):

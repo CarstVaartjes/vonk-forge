@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import Response
 
+from vonk_agent_protocol.identifiers import UUID4_PATTERN
 from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
@@ -19,7 +20,6 @@ from vonk_control.agent_upgrades.contract import AgentUpgradeRequestIntent
 from vonk_control.api_availability import AVAILABILITY_ERRORS
 from vonk_control.auth import Actor
 from vonk_control.enrollment.contract import (
-    ENROLLMENT_ID_PATTERN,
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
     EnrollmentRevocationStatus,
@@ -327,7 +327,7 @@ def install_operator_projection_routes(
         operation_id="getFleetEnrollment",
     )
     def get_enrollment(
-        grant_id: Annotated[str, Path(pattern=ENROLLMENT_ID_PATTERN)],
+        grant_id: Annotated[str, Path(pattern=UUID4_PATTERN)],
         actor: Actor = authenticated,
     ) -> EnrollmentGrantStatus:
         _require_mutation(actor, "POST", "/api/fleet/enroll")
@@ -354,7 +354,7 @@ def install_operator_projection_routes(
     )
     @operator_acceptance(ReceiptPolicy.ENROLLMENT_REVOKE)
     def revoke_enrollment(
-        grant_id: Annotated[str, Path(pattern=ENROLLMENT_ID_PATTERN)],
+        grant_id: Annotated[str, Path(pattern=UUID4_PATTERN)],
         actor: Actor = authenticated,
     ) -> EnrollmentGrantStatus | EnrollmentObservationOutcome:
         _require_mutation(actor, "POST", "/api/fleet/enrollments/{grant_id}/revoke")

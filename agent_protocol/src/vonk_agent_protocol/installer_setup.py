@@ -15,7 +15,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from vonk_agent_protocol.wire_model import Digest, WireEnum, WireModel, typed_tag
+from vonk_agent_protocol.identifiers import Digest
+from vonk_agent_protocol.wire_model import WireEnum, WireModel, typed_tag
 
 U16 = Annotated[int, Field(ge=0, le=65535)]
 U32 = Annotated[int, Field(ge=0, le=2**32 - 1)]

@@ -14,14 +14,12 @@ from pydantic import (
 from vonk_agent_protocol.agent_words import (
     ProfileSwitchChildKind,
 )
+from vonk_agent_protocol.identifiers import NodeId
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
 from vonk_control.fleet_profile_contract.effects import FleetProfileChildProgress
-from vonk_control.fleet_profile_contract.vocabulary import (
-    FleetProfileOperationState,
-    NodeId,
-    UuidId,
-)
+from vonk_control.fleet_profile_contract.vocabulary import FleetProfileOperationState
+from vonk_control.identifiers import UuidId
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.requests import RunSwitchProfileStopScope
 from vonk_control.strict_json import StrictModel

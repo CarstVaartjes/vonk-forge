@@ -18,6 +18,7 @@ from pydantic import (
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.identifiers import Digest, UuidId
 from vonk_agent_protocol.job_inputs import RecipeJobInputFile, RecipeJobInputManifest
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILES,
@@ -30,7 +31,6 @@ from vonk_agent_protocol.job_wire import (
     MEDIA_TYPE_PATTERN,
     ArtifactName,
     ArtifactSlot,
-    Digest,
     MediaType,
     _parse_model,
     _RecipeJobModel,
@@ -42,12 +42,7 @@ from vonk_agent_protocol.wire_model import (
 )
 
 _EXTENSION = r"^\.[a-z0-9][a-z0-9._-]{0,15}$"
-_UUID = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
-    r"[0-9a-f]{12}$"
-)
 
-CanonicalUUID = Annotated[str, StringConstraints(pattern=_UUID)]
 ArtifactExtension = Annotated[str, StringConstraints(pattern=_EXTENSION)]
 
 
@@ -230,12 +225,12 @@ class RecipeJobRunRequest(_RecipeJobModel):
     # Controller-only reissue after a measured exit. Losing the Spark's
     # retained receipt or scope must never authorize running the process again.
     output_delivery_only: Literal[True] | None = None
-    job_id: CanonicalUUID
-    run_id: CanonicalUUID
-    installation_id: CanonicalUUID
-    mapping_id: CanonicalUUID
+    job_id: UuidId
+    run_id: UuidId
+    installation_id: UuidId
+    mapping_id: UuidId
     run_generation: int = Field(ge=1, le=MAX_RUN_GENERATION, strict=True)
-    recipe_revision_id: CanonicalUUID
+    recipe_revision_id: UuidId
     plan_digest: Digest
     input_manifest_sha256: Digest
     input_total_bytes: int = Field(ge=0, le=MAX_INPUT_TOTAL_BYTES)
@@ -298,8 +293,8 @@ class RecipeJobRunRequest(_RecipeJobModel):
 
 
 class RecipeJobRunResult(_RecipeJobModel):
-    job_id: CanonicalUUID
-    run_id: CanonicalUUID
+    job_id: UuidId
+    run_id: UuidId
     exit_code: int = Field(ge=0, le=255)
     output_manifest: RecipeJobOutputManifest
     evidence: RecipeJobEvidence

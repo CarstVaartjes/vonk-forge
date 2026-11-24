@@ -8,9 +8,8 @@ from uuid import UUID
 
 from pydantic import ConfigDict, Field, TypeAdapter, model_validator
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_control.strict_json import StrictJSONModel
-
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class RecipeBuildDependency(StrictJSONModel):

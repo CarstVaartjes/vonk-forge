@@ -7,15 +7,8 @@ from typing import Annotated
 
 from pydantic import StringConstraints
 
+from vonk_control.identifiers import UuidId
 from vonk_control.strict_json import StrictModel
-
-_UUID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
-_NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
-UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
-NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 
 
 class RunSwitchCancellation(StrictModel):

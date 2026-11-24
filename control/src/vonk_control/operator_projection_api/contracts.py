@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import ConfigDict, Field, model_serializer
 
+from vonk_agent_protocol.identifiers import NODE_PATTERN
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import (
     EnrollmentGrantState,
@@ -20,8 +21,6 @@ from vonk_control.enrollment.contract import (
     EnrollmentRevocationStatus,
 )
 from vonk_control.strict_json import StrictJSONModel
-
-_NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 
 LogSource = Literal["client", "monitor", "runtime", "job"]
 
@@ -77,7 +76,7 @@ class FleetActionResponse(StrictJSONModel):
     action: Literal["enroll", "re-enroll", "remove", "upgrade"]
     state: EnrollmentGrantState | LifecycleState | ModelCacheOperatorStatus
     operation_id: str | None = Field(default=None, max_length=128)
-    node_id: str | None = Field(default=None, pattern=_NODE_PATTERN)
+    node_id: str | None = Field(default=None, pattern=NODE_PATTERN)
     display_name: str | None = Field(default=None, max_length=80)
     plan_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     request_key: EnrollmentId | None = None
@@ -142,7 +141,7 @@ class FleetLogEntry(StrictJSONModel):
 
 
 class FleetLogResponse(StrictJSONModel):
-    node_id: str = Field(pattern=_NODE_PATTERN)
+    node_id: str = Field(pattern=NODE_PATTERN)
     since: datetime | None
     lines: int = Field(ge=1, le=1_000)
     entries: list[FleetLogEntry] = Field(max_length=1_000)

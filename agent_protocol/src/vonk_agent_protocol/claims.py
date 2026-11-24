@@ -7,6 +7,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import Field, model_validator
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
@@ -14,7 +15,7 @@ from vonk_agent_protocol.optional_evidence import (
 )
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
-from vonk_agent_protocol.wire_model import Digest, WireModel
+from vonk_agent_protocol.wire_model import WireModel
 
 
 class AgentRuntimeIdentity(WireModel):

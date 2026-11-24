@@ -7,12 +7,9 @@ import re
 from pydantic import ConfigDict, Field
 from vonk_forge_contracts import EndpointAlias
 
+from vonk_agent_protocol.identifiers import DIGEST_PATTERN, NODE_PATTERN
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 from vonk_control.strict_json import StrictJSONModel
-
-_NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
-_DIGEST_PATTERN = r"^[0-9a-f]{64}$"
-
 
 # One DNS name with an optional port, exactly as a client's Host header names
 # the Controller origin it reached.
@@ -52,6 +49,6 @@ class EndpointResponse(StrictJSONModel):
     api_base: str = Field(min_length=1, max_length=512)
     backend_api_base: str = Field(min_length=1, max_length=512)
     generation: int = Field(le=MAX_DATABASE_BIGINT, ge=1)
-    node_id: str = Field(pattern=_NODE_PATTERN)
+    node_id: str = Field(pattern=NODE_PATTERN)
     observed_at: str = Field(min_length=1, max_length=64)
-    plan_digest: str = Field(pattern=_DIGEST_PATTERN)
+    plan_digest: str = Field(pattern=DIGEST_PATTERN)

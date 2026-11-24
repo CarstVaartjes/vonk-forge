@@ -25,6 +25,11 @@ from vonk_forge_contracts import (
 from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
+from vonk_agent_protocol.identifiers import (
+    Digest,
+    NodeId,
+    OciDigest,
+)
 from vonk_agent_protocol.reason_codes.catalog import LibraryProjectionCode
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 from vonk_agent_protocol.state_machines import (
@@ -58,9 +63,6 @@ from vonk_control.run_switch_contract.evidence import RunSwitchReason, SparkFit
 from vonk_control.run_switch_contract.requests import SparkGroup
 from vonk_control.strict_json import StrictModel
 
-_NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
-_DIGEST_PATTERN = r"^[0-9a-f]{64}$"
-_IMAGE_DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
 _MAX_PAGE_RECIPES = 512
 _MAX_OPERATIONAL_ROWS = 512
 _MAX_OPERATIONAL_MEMBERS = 16_384
@@ -74,9 +76,6 @@ _MAX_NODE_ARTIFACTS_PER_NODE = 512
 _MAX_PROJECTED_CAPABILITIES = 64
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 
-NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
-Digest = Annotated[str, StringConstraints(pattern=_DIGEST_PATTERN)]
-ImageDigest = Annotated[str, StringConstraints(pattern=_IMAGE_DIGEST_PATTERN)]
 Text32 = Annotated[str, StringConstraints(min_length=1, max_length=32)]
 Text64 = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 Text80 = Annotated[str, StringConstraints(min_length=1, max_length=80)]
@@ -455,7 +454,7 @@ class OperationalBuild(StrictModel):
     recipe_build_id: UuidId
     recipe_revision_id: UuidId
     state: Literal["planned", "building", "succeeded", "failed"]
-    image_digest: ImageDigest | None
+    image_digest: OciDigest | None
     image_bytes: int | None = Field(default=None, ge=1)
 
 
