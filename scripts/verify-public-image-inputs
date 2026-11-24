@@ -190,14 +190,14 @@ def scan_wheel(
                 try:
                     with archive.open(member) as source:
                         content = source.read(MAX_ARCHIVE_MEMBER_BYTES + 1)
-                except OSError, RuntimeError, zipfile.BadZipFile:
+                except (OSError, RuntimeError, zipfile.BadZipFile):
                     findings.append((member_display, "archive-invalid"))
                     continue
                 if len(content) > MAX_ARCHIVE_MEMBER_BYTES:
                     findings.append((member_display, "archive-member-too-large"))
                     continue
                 scan_content(member_display, content, patterns, findings)
-    except OSError, zipfile.BadZipFile, zipfile.LargeZipFile:
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
         findings.append((display, "archive-invalid"))
 
 

@@ -55,8 +55,11 @@ path = "tools/hatch_build.py"
 # The formatter writes PEP 758's `except A, B:`; the added-line guards read a
 # respelled header as the handler it replaces.
 target-version = "py314"
-# agent_protocol runs on the Sparks, which have Python 3.12.
-per-file-target-version = { "agent_protocol/**" = "py312" }
+# agent_protocol runs on the Sparks, which have Python 3.12. Files another
+# interpreter runs stay at 3.13 syntax: container scripts under deploy/ (the
+# LiteLLM image's Python), and scripts, bin/vonkctl and tests/nodes that a
+# runner's or host's system python3 starts.
+per-file-target-version = { "agent_protocol/**" = "py312", "deploy/**" = "py313", "scripts/**" = "py313", "bin/**" = "py313", "tests/nodes/**" = "py313" }
 # Every extensionless executable in scripts/ and bin/ is Python unless excluded
 # here by name: a new shell script that is not listed fails Ruff loudly (a parse
 # error) instead of a new Python script being skipped silently.
@@ -159,8 +162,10 @@ ban-relative-imports = "all"
 
 [tool.ruff.format]
 # Never formatter-clean; a reflow re-adds lines the added-line principle guards
-# flag (contract literals, document digests outside ingress). Formatting them is
-# a follow-up together with those guard findings.
+# flag. Their fix is outside the scripts: argv words of external CLIs (`gh
+# attestation verify`, `docker info`) read as contract words need a vocabulary
+# guard exemption, and qualify-recipe re-implements recipe-package ingress
+# (manifest, document digests) instead of reusing vonk_control.recipe_packages.
 exclude = ["scripts/qualify-recipe", "scripts/reuse-development-image"]
 
 [tool.pyright]

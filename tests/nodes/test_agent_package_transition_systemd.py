@@ -113,7 +113,7 @@ def running_digest(unit: str) -> str | None:
     ).stdout
     try:
         return sha(Path(f"/proc/{pid.strip()}/exe")) if pid.strip() != "0" else None
-    except FileNotFoundError, ProcessLookupError, PermissionError:
+    except (FileNotFoundError, ProcessLookupError, PermissionError):
         # The supervised process can restart between the PID and exe reads.
         return None
 
@@ -121,7 +121,7 @@ def running_digest(unit: str) -> str | None:
 def receipt(nonce: str, phase: str):
     try:
         value = json.loads(RECEIPT.read_text())
-    except FileNotFoundError, json.JSONDecodeError:
+    except (FileNotFoundError, json.JSONDecodeError):
         return None
     return (
         value if value["attempt_nonce"] == nonce and value["phase"] == phase else None
@@ -333,7 +333,7 @@ def held_dpkg(marker: bytes) -> int | None:
         try:
             command = (entry / "cmdline").read_bytes()
             parent = int((entry / "stat").read_text().rsplit(")", 1)[1].split()[1])
-        except FileNotFoundError, ProcessLookupError, IndexError, ValueError:
+        except (FileNotFoundError, ProcessLookupError, IndexError, ValueError):
             continue
         if marker in command:
             return parent

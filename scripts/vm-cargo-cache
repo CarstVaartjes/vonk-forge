@@ -42,7 +42,7 @@ def prepare(checkout: Path, cache: Path) -> None:
                     owner.stat()
                 except FileNotFoundError:
                     shutil.rmtree(target)
-            except OSError, ValueError:
+            except (OSError, ValueError):
                 # Bookkeeping cannot prevent a new cargo invocation.
                 continue
     target = cache / target_key(checkout)
@@ -55,5 +55,5 @@ def prepare(checkout: Path, cache: Path) -> None:
 if __name__ == "__main__":
     try:  # noqa: SIM105 - best-effort cache link; suppress() trips the malformed-value guard
         prepare(Path(sys.argv[1]), Path(sys.argv[2]))
-    except OSError, ValueError:
+    except (OSError, ValueError):
         pass

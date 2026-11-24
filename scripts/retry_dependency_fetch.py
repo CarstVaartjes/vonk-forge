@@ -97,7 +97,7 @@ def locked_temporary_pip_acquisition(words: tuple[str, ...]) -> bool:
             and cache_root.resolve().is_relative_to(temporary_root)
             and cache_root.resolve() != temporary_root
         )
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return False
 
 

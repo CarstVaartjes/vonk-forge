@@ -316,7 +316,7 @@ def image_errors(root: Path) -> list[str]:
     errors: list[str] = []
     try:
         lock = json.loads((root / "deploy/compose/images.lock.json").read_bytes())
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return ["image lock is unreadable"]
     compose_paths = (
         "deploy/compose/compose.yaml",

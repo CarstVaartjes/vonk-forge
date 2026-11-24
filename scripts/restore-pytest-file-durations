@@ -33,7 +33,7 @@ def _valid_files(payload: Any, *, now: datetime) -> dict[str, float]:
         return {}
     try:
         generated = datetime.fromisoformat(str(payload["generated_at"]))
-    except KeyError, TypeError, ValueError:
+    except (KeyError, TypeError, ValueError):
         return {}
     if generated.tzinfo is None or now - generated > MAX_AGE:
         return {}
@@ -44,7 +44,7 @@ def _valid_files(payload: Any, *, now: datetime) -> dict[str, float]:
     for name, value in files.items():
         try:
             seconds = float(value)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
         if isinstance(name, str) and name and math.isfinite(seconds) and seconds > 0:
             valid[name] = seconds
