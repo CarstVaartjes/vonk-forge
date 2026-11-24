@@ -262,7 +262,7 @@ def test_an_unreadable_model_display_costs_the_display_only_and_is_read_again(
     assert first.catalog_entities[0].entry.display is None
     assert result.skipped_count == 0
     assert world.library_model().model_display is None
-    assert world.documents()["model"]
+    assert world.documents()["model"][2] is None
 
     index["catalog_entities"][0]["display"] = shown
     world.release.publish(index, world.packages)

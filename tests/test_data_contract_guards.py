@@ -193,7 +193,9 @@ def test_python_registry_rejects_unregistered_and_duplicate_models(
             name: str
         """,
     )
-    registry = {"modules": [{"module": "agent_protocol/src/p/a.py"}]}
+    registry: scans.ModelRegistry = {
+        "modules": [{"module": "agent_protocol/src/p/a.py"}]
+    }
     problems = scans.python_registry_problems(tmp_path, registry)
     assert problems
 

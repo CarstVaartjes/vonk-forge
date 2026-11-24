@@ -568,10 +568,13 @@ extensionless scripts Ruff selects; `agent_protocol/src` is checked as Python
 `# pyright: ignore[rule]` with its reason, and reportUnnecessaryTypeIgnoreComment
 fails an ignore that is no longer needed. The commit hook passes the staged
 files Ruff treats as Python; CI checks the whole tree with the same commands.
+Both run pyright through `pyright_environment()` in `scripts/check_environment.py`:
+the version is the one `uv.lock` installs (`importlib.metadata`), with the nodejs
+wheel and no global Node, so hook and CI cannot use different pyright builds.
 
 New syntax is checked by `scripts/check-added-lines [PATCH_FILE|-]`, which consumes
 an externally supplied unified diff. CI creates that patch against its explicit
-PR/merge-group base. Only added lines can fail. The adapter, scanners and fixture
+PR/merge-group base over the pathspec in `ci.yml`'s `lint` job (a workflow test keeps the hook's list equal to it). Only added lines can fail. The adapter, scanners and fixture
 tests never read Git.
 The pre-commit hook (`scripts/check-staged-code`) runs the same guards on the
 staged diff with the same path set as CI, preparing the control environment
