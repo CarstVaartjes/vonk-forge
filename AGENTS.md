@@ -303,8 +303,8 @@ SSH as the rollout path. `vonkctl` exposes one authorized upgrade command; there
 is no separate candidate/preview/apply or plan-digest subcommand:
 
 ```bash
-vonkctl fleet upgrade Atlas --strategy one-at-a-time --yes --json
-vonkctl fleet upgrade --all --strategy one-at-a-time --yes --json
+vonkctl fleet upgrade Atlas --yes --json
+vonkctl fleet upgrade --all --yes --json
 ```
 
 For a mounted controller project, consume the signed NAS installer from the

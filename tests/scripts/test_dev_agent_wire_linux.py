@@ -40,6 +40,7 @@ def _lane_root(tmp_path: Path, module) -> Path:
         module.CI_WORKFLOW,
         module.DOCKERFILE,
         Path(".tool-versions"),
+        Path("rust-toolchain.toml"),
         *actions,
     ):
         destination = tmp_path / relative
@@ -68,9 +69,9 @@ def test_local_lane_refuses_a_drifted_rust_toolchain(tmp_path: Path) -> None:
     root = _lane_root(tmp_path, module)
     _mutate(
         root,
-        module.CI_WORKFLOW,
-        f"rustup toolchain install {module.RUST_TOOLCHAIN} --profile minimal",
-        "rustup toolchain install 1.98.0 --profile minimal",
+        Path("rust-toolchain.toml"),
+        f'channel = "{module.RUST_TOOLCHAIN}"',
+        'channel = "1.98.0"',
     )
 
     problems = module.check_lane_consistency(root)

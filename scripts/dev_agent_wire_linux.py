@@ -142,14 +142,26 @@ def lane_contract(workflow_text: str, root: Path | None = None) -> dict[str, obj
         for command in run_commands(job)
         if "run_agent_wire_contracts.py" in command and "--build-only" not in command
     ]
+    # The toolchain has one owner: rust-toolchain.toml, which the setup-rust
+    # action installs; a job that installs it inline names its own.
+    toolchain = None
+    if root is not None and "./.github/actions/setup-rust" in job:
+        channel = re.search(
+            r'^\s*channel\s*=\s*"([^"]+)"',
+            (root / "rust-toolchain.toml").read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        toolchain = channel.group(1) if channel else None
     rust = re.search(r"rustup toolchain install (\S+)", job)
+    if toolchain is None and rust:
+        toolchain = rust.group(1)
     uv = re.search(r"^\s*version-file:\s*(\S+)\s*$", job, re.MULTILINE)
     python = re.search(r'^\s*python-version:\s*"([^"]+)"\s*$', job, re.MULTILINE)
     runner = re.search(r"^\s*runs-on:\s*(\S+)\s*$", job, re.MULTILINE)
     revision = re.search(r"cat\s+(tests/acceptance/recipe-library-revision\.txt)", job)
     return {
         "tier_commands": tier_commands,
-        "rust_toolchain": rust.group(1) if rust else None,
+        "rust_toolchain": toolchain,
         "uv_version": (root / uv.group(1)).read_text().split()[1]
         if uv and root is not None
         else None,
