@@ -139,24 +139,24 @@ module defines its own.
 | Module | Kind | Models | Purpose |
 | --- | --- | --- | --- |
 | `agent_protocol/src/vonk_agent_protocol/agent_operations.py` | agent-protocol | 5 | Agent operation kinds and the result bodies the outcome envelope shares. |
-| `agent_protocol/src/vonk_agent_protocol/agent_state.py` | agent-protocol | 15 | Records the Rust agent and its privileged helper persist beside their work. |
+| `agent_protocol/src/vonk_agent_protocol/agent_state.py` | agent-protocol | 20 | Records the Rust agent and its privileged helper persist beside their work. |
 | `agent_protocol/src/vonk_agent_protocol/build_import.py` | agent-protocol | 13 | Typed recipe build request/result wire contracts. |
 | `agent_protocol/src/vonk_agent_protocol/claims.py` | agent-protocol | 2 | Canonical current-agent identity and work-claim request. |
 | `agent_protocol/src/vonk_agent_protocol/compiled_execution_plan.py` | agent-protocol | 18 | Typed compiled launch plan shared by Controller and agents. |
 | `agent_protocol/src/vonk_agent_protocol/contracts.py` | agent-protocol | 7 | Agent claim, progress, directive and result envelopes and their operation registries. |
 | `agent_protocol/src/vonk_agent_protocol/distribution.py` | agent-protocol | 2 | Pydantic contracts for authenticated Controller-to-Spark distribution. |
-| `agent_protocol/src/vonk_agent_protocol/enrollment.py` | agent-protocol | 6 | Canonical enrollment and certificate-rotation JSON messages. |
-| `agent_protocol/src/vonk_agent_protocol/failure_evidence.py` | agent-protocol | 3 | Current bounded failure diagnostics shared by agent and Controller. |
-| `agent_protocol/src/vonk_agent_protocol/helper_response.py` | agent-protocol | 2 | Current framed Unix-socket response from the privileged host helper. |
+| `agent_protocol/src/vonk_agent_protocol/enrollment.py` | agent-protocol | 8 | Canonical enrollment and certificate-rotation JSON messages. |
+| `agent_protocol/src/vonk_agent_protocol/failure_evidence.py` | agent-protocol | 5 | Current bounded failure diagnostics shared by agent and Controller. |
+| `agent_protocol/src/vonk_agent_protocol/helper_response.py` | agent-protocol | 3 | Current framed Unix-socket response from the privileged host helper. |
 | `agent_protocol/src/vonk_agent_protocol/host_helper.py` | agent-protocol | 11 | Canonical authorization protocol for the narrow root host helper. |
 | `agent_protocol/src/vonk_agent_protocol/http_failure.py` | agent-protocol | 1 | Shared typed temporary HTTP response and bounded retry delay. |
 | `agent_protocol/src/vonk_agent_protocol/installer_release.py` | agent-protocol | 14 | Complete installer publication graphs and the forward-compatible signed CLI updater projection. |
-| `agent_protocol/src/vonk_agent_protocol/installer_setup.py` | agent-protocol | 23 | Documents the NAS and Spark setup programs read and exchange. |
-| `agent_protocol/src/vonk_agent_protocol/inventory.py` | agent-protocol | 2 | Authenticated schema-1 inventory evidence reported by an agent. |
+| `agent_protocol/src/vonk_agent_protocol/installer_setup.py` | agent-protocol | 22 | Documents the NAS and Spark setup programs read and exchange. |
+| `agent_protocol/src/vonk_agent_protocol/inventory.py` | agent-protocol | 7 | Authenticated schema-1 inventory evidence reported by an agent. |
 | `agent_protocol/src/vonk_agent_protocol/job_inputs.py` | agent-protocol | 3 | The exact input manifest shared by job staging and container adapters. |
 | `agent_protocol/src/vonk_agent_protocol/job_wire.py` | agent-protocol | 1 | Constrained values and the base model the recipe-job wire models share. |
 | `agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py` | agent-protocol | 1 | The lifecycle and outcome vocabulary shared by Python, Rust and TypeScript. |
-| `agent_protocol/src/vonk_agent_protocol/optional_evidence.py` | agent-protocol | 1 | Mixin that drops invalid optional agent evidence and reports it as a typed warning instead of refusing the report. |
+| `agent_protocol/src/vonk_agent_protocol/optional_evidence.py` | agent-protocol | 2 | Mixin that drops invalid optional agent evidence and reports it as a typed warning instead of refusing the report. |
 | `agent_protocol/src/vonk_agent_protocol/outcome.py` | agent-protocol | 9 | The one outcome envelope of an agent operation result. |
 | `agent_protocol/src/vonk_agent_protocol/package_source.py` | agent-protocol | 1 | Immutable publication lookup for an exact installed agent binary. |
 | `agent_protocol/src/vonk_agent_protocol/package_upgrade.py` | agent-protocol | 3 | Exact source-bound rollback authority for the current package transaction. |
@@ -164,18 +164,18 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/recipe_jobs.py` | agent-protocol | 9 | Closed Pydantic protocol for one-shot artifact-producing recipe jobs. |
 | `agent_protocol/src/vonk_agent_protocol/recipe_observations.py` | agent-protocol | 2 | Recipe run observation report sent by the mTLS-authenticated agent. |
 | `agent_protocol/src/vonk_agent_protocol/recipe_operations.py` | agent-protocol | 11 | Closed declarative protocol for digest-bound recipe lifecycle work. |
-| `agent_protocol/src/vonk_agent_protocol/route_activation.py` | agent-protocol | 2 | Canonical schema-2 activation receipt shared with the LiteLLM supervisor. |
-| `agent_protocol/src/vonk_agent_protocol/runtime_preflight.py` | agent-protocol | 3 | Current recipe runtime preflight wire contract; no raw host diagnostics. |
+| `agent_protocol/src/vonk_agent_protocol/route_activation.py` | agent-protocol | 3 | Canonical schema-2 activation receipt shared with the LiteLLM supervisor. |
+| `agent_protocol/src/vonk_agent_protocol/runtime_preflight.py` | agent-protocol | 4 | Current recipe runtime preflight wire contract; no raw host diagnostics. |
 | `agent_protocol/src/vonk_agent_protocol/runtime_scan.py` | agent-protocol | 3 | Node-local durable traversal checkpoint for managed run observation; native filesystem witnesses remain authoritative. |
 | `agent_protocol/src/vonk_agent_protocol/source_bundles.py` | agent-protocol | 3 | Canonical source-bundle digest document and verified storage metadata. |
-| `agent_protocol/src/vonk_agent_protocol/telemetry.py` | agent-protocol | 3 | The authenticated agent telemetry wire contract: a flat sample of host scalars. |
-| `agent_protocol/src/vonk_agent_protocol/wire_model.py` | agent-protocol | 5 | Shared strict JSON boundary helpers for Pydantic wire models. |
-| `control/src/vonk_control/agent_api/common.py` | declared | 8 | mTLS-authenticated machine agent API routes. |
+| `agent_protocol/src/vonk_agent_protocol/telemetry.py` | agent-protocol | 8 | The authenticated agent telemetry wire contract: a flat sample of host scalars. |
+| `agent_protocol/src/vonk_agent_protocol/wire_model.py` | agent-protocol | 6 | Shared strict JSON boundary helpers for Pydantic wire models. |
+| `control/src/vonk_control/agent_api/common.py` | declared | 3 | mTLS-authenticated machine agent API routes. |
 | `control/src/vonk_control/agent_upgrades/contract.py` | controller-contract | 5 | Package, request intent, plan and result documents of an agent upgrade rollout. |
 | `control/src/vonk_control/jobs/agent_contract.py` | controller-contract | 1 | The bounded facts the agent job queue renders into a refused-claim note. |
 | `control/src/vonk_control/artifact_jobs/blob_store.py` | declared | 2 | Usage and reconciliation reports of the artifact blob store. |
 | `control/src/vonk_control/artifact_jobs/api.py` | declared | 3 | Authenticated controller and mTLS agent routes for artifact recipe jobs. |
-| `control/src/vonk_control/artifact_jobs/evidence.py` | controller-contract | 1 | The one closed result-evidence contract of an artifact job. |
+| `control/src/vonk_control/artifact_jobs/evidence.py` | controller-contract | 2 | The one closed result-evidence contract of an artifact job. |
 | `control/src/vonk_control/artifact_jobs/contracts.py` | declared | 10 | Durable, bounded, content-addressed artifact-producing recipe jobs. |
 | `control/src/vonk_control/artifact_jobs/job_contract.py` | declared | 1 | The compiled job contract of a recipe revision, read before a job exists. |
 | `control/src/vonk_control/artifact_jobs/maintenance.py` | declared | 1 | Typed reports of artifact maintenance sweeps. |
@@ -191,35 +191,35 @@ module defines its own.
 | `control/src/vonk_control/compiled_execution_plan.py` | declared | 7 | Verified Controller receipts for the compiled Spark execution plan. |
 | `control/src/vonk_control/distribution_assignment.py` | declared | 1 | The Controller's record of one node's artifact distribution grant. |
 | `control/src/vonk_control/endpoint_contract.py` | controller-contract | 1 | Secret-free projection of one published recipe endpoint. |
-| `control/src/vonk_control/enrollment/contract.py` | controller-contract | 8 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |
+| `control/src/vonk_control/enrollment/contract.py` | controller-contract | 7 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |
 | `control/src/vonk_control/failure_evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
 | `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
 | `control/src/vonk_control/fleet_profile_contract/endpoints.py` | controller-contract | 3 | Fleet profile contract: endpoints. |
-| `control/src/vonk_control/fleet_profile_contract/definitions.py` | controller-contract | 17 | Fleet profile contract: definitions. |
+| `control/src/vonk_control/fleet_profile_contract/definitions.py` | controller-contract | 19 | Fleet profile contract: definitions. |
 | `control/src/vonk_control/fleet_profile_contract/assessment.py` | controller-contract | 11 | Fleet profile contract: assessment. |
-| `control/src/vonk_control/fleet_profile_contract/effects.py` | controller-contract | 7 | Fleet profile contract: effects. |
+| `control/src/vonk_control/fleet_profile_contract/effects.py` | controller-contract | 8 | Fleet profile contract: effects. |
 | `control/src/vonk_control/fleet_profile_contract/switch_state.py` | controller-contract | 9 | Fleet profile contract: switch state. |
 | `control/src/vonk_control/fleet_profile_contract/applications.py` | controller-contract | 8 | Fleet profile contract: applications. |
-| `control/src/vonk_control/fleet_profile_contract/review.py` | controller-contract | 7 | Fleet profile contract: review. |
+| `control/src/vonk_control/fleet_profile_contract/review.py` | controller-contract | 9 | Fleet profile contract: review. |
 | `control/src/vonk_control/fleet_profiles/contracts.py` | controller-contract | 1 | Saved profile content identity used by admission and projections. |
-| `control/src/vonk_control/fleet_projection/common.py` | declared | 12 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
-| `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 13 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
+| `control/src/vonk_control/fleet_projection/common.py` | declared | 14 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
+| `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 14 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
 | `control/src/vonk_control/gateway/keys.py` | declared | 18 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
 | `control/src/vonk_control/jobs/documents.py` | controller-contract | 45 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
 | `control/src/vonk_control/library/contract.py` | controller-contract | 45 | Bounded typed contract and deterministic display helpers for Library reads. |
 | `control/src/vonk_control/lifecycle_preflight_contract.py` | controller-contract | 1 | The durable checkpoint of a recipe-bound lifecycle admission probe round. |
-| `control/src/vonk_control/gateway/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
+| `control/src/vonk_control/gateway/litellm.py` | declared | 13 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
 | `control/src/vonk_control/model_cache/input_contracts.py` | controller-contract | 3 | Typed catalog artifact locators and explicit fixture ingress. |
-| `control/src/vonk_control/model_cache/provider_contracts.py` | declared | 3 | Durable, content-addressed model artifacts stored on the Controller NAS. |
-| `control/src/vonk_control/model_cache/contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
+| `control/src/vonk_control/model_cache/provider_contracts.py` | declared | 10 | Durable, content-addressed model artifacts stored on the Controller NAS. |
+| `control/src/vonk_control/model_cache/contract.py` | controller-contract | 53 | Schema-2 contracts for the Controller-owned NAS model cache. |
 | `control/src/vonk_control/observation/transfer.py` | controller-contract | 5 | Canonical immutable observation transfer records; sequence, identity, byte count and final digest bind the original complete Fleet or platform payload. |
-| `control/src/vonk_control/operation_api/contracts.py` | declared | 20 | Strict, secret-free representations for routine administrative operations. |
-| `control/src/vonk_control/operations/blockers.py` | declared | 1 | One typed answer to "what is this operation waiting for?". |
+| `control/src/vonk_control/operation_api/contracts.py` | declared | 17 | Strict, secret-free representations for routine administrative operations. |
+| `control/src/vonk_control/operations/blockers.py` | declared | 8 | One typed answer to "what is this operation waiting for?". |
 | `control/src/vonk_control/operations/contract.py` | controller-contract | 4 | Current nested contracts for durable Controller operations and progress. |
 | `control/src/vonk_control/operations/item_contract.py` | controller-contract | 3 | One operation of any family as Activity projects it: the typed item, its owner and the failure facts of its stored result. |
 | `control/src/vonk_control/operator_projection_api/contracts.py` | declared | 10 | Operator projection api: contracts. |
-| `control/src/vonk_control/observation/platform.py` | controller-contract | 3 | API and worker process provenance observations; unavailable producer facts remain nullable. |
+| `control/src/vonk_control/observation/platform.py` | controller-contract | 4 | API and worker process provenance observations; unavailable producer facts remain nullable. |
 | `control/src/vonk_control/preparation_contract.py` | controller-contract | 10 | Shared schema-2 truth for Controller-owned rollout preparation. |
 | `control/src/vonk_control/fleet_profiles/stop_contract.py` | controller-contract | 8 | Typed ownership for profile-authorized one-shot JobRun cleanup Stops. |
 | `control/src/vonk_control/recipe_operations/availability_intent.py` | declared | 4 | Original requests, distinct from resolved preparation and worker effects. |
@@ -229,7 +229,7 @@ module defines its own.
 | `control/src/vonk_control/recipe_image_availability/clocks_contract.py` | controller-contract | 5 | Tolerant typed lifecycle clock projection independent of job-document imports. |
 | `control/src/vonk_control/recipe_image_availability/reader_contract.py` | controller-contract | 4 | Typed adoption and exact-catalog recovery of damaged availability bookkeeping. |
 | `control/src/vonk_control/recipe_image_availability/view_contract.py` | controller-contract | 2 | Typed availability and removal read projections with canonical JSON egress. |
-| `control/src/vonk_control/recipe_image_availability/removal_contract.py` | controller-contract | 6 | The current persisted intent for one recipe cache removal request. |
+| `control/src/vonk_control/recipe_image_availability/removal_contract.py` | controller-contract | 8 | The current persisted intent for one recipe cache removal request. |
 | `control/src/vonk_control/recipe_image_availability/response_contract.py` | controller-contract | 5 | Wire documents of recipe image availability requests and their operator answers. |
 | `control/src/vonk_control/recipe_operations/lifecycle_contract.py` | controller-contract | 9 | Typed response contracts for recipe lifecycle operations. |
 | `control/src/vonk_control/recipe_operations/contracts.py` | controller-contract | 2 | Typed recipe operation context and installation disposal receipt. |
@@ -237,18 +237,18 @@ module defines its own.
 | `control/src/vonk_control/recipe_update_batches/contract.py` | controller-contract | 8 | One current contract for durable recipe-update intent and observation. |
 | `control/src/vonk_control/recipe_update_batches/notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |
 | `control/src/vonk_control/resource_planning_contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
-| `control/src/vonk_control/gateway/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
+| `control/src/vonk_control/gateway/route_bundle_contract.py` | controller-contract | 7 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/gateway/keys_contract.py` | controller-contract | 3 | Wire documents of gateway client keys. |
 | `control/src/vonk_control/run_switch_contract/requests.py` | controller-contract | 15 | Run switch contract: requests. |
 | `control/src/vonk_control/run_switch_contract/evidence.py` | controller-contract | 16 | Run switch contract: evidence. |
 | `control/src/vonk_control/run_switch_contract/plans.py` | controller-contract | 2 | Run switch contract: plans. |
 | `control/src/vonk_control/run_switch_contract/progress.py` | controller-contract | 6 | Run switch contract: progress. |
-| `control/src/vonk_control/run_switch_contract/phase_results.py` | controller-contract | 22 | Run switch contract: phase results. |
-| `control/src/vonk_control/run_switch_contract/operations.py` | controller-contract | 5 | Run switch contract: operations. |
+| `control/src/vonk_control/run_switch_contract/phase_results.py` | controller-contract | 20 | Run switch contract: phase results. |
+| `control/src/vonk_control/run_switch_contract/operations.py` | controller-contract | 6 | Run switch contract: operations. |
 | `control/src/vonk_control/run_switch_contract/identity.py` | controller-contract | 1 | Shared Run/Switch request identity constraints and typed cancellation intent independent of ORM and workers. |
 | `control/src/vonk_control/run_switch_contract/journal.py` | controller-contract | 4 | Typed run-switch journal repair evidence and audit records. |
-| `control/src/vonk_control/run_switch_contract/observation.py` | controller-contract | 7 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
-| `control/src/vonk_control/runtime_image_preparation/contracts.py` | declared | 2 | Controller-owned preparation of exact runtime image archives. |
+| `control/src/vonk_control/run_switch_contract/observation.py` | controller-contract | 8 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
+| `control/src/vonk_control/runtime_image_preparation/contracts.py` | declared | 3 | Controller-owned preparation of exact runtime image archives. |
 | `control/src/vonk_control/runtime/spec_contract.py` | controller-contract | 18 | The compiled runtime specification the recipe compiler produces and the launch plan projects. |
 | `control/src/vonk_control/stored/documents.py` | controller-contract | 2 | Typed documents stored in plan, run and installation JSON columns. |
 | `control/src/vonk_control/strict_json.py` | declared | 1 | Controller JSON models and their field-presence serialization policy. |
