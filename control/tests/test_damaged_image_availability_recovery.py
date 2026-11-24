@@ -38,7 +38,7 @@ from vonk_control.oci_image_store import OciImageStore, StoredImage
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_operations.availability_intent import RecipeBuildDependency
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime_image_preparation import storage as runtime_image_storage
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage

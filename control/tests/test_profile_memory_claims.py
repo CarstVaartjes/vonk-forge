@@ -20,12 +20,12 @@ from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.reservations.memory import memory_reservations
 from vonk_control.resource_planning.types import UnknownRunMemoryResidual
-from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_operations.observation_helpers import (
     _phase_request_key,
     _stop_child_request_key,
 )
+from vonk_control.runs.admission import RunAdmissionBusy
 
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .test_profile_installed_execution import _drive_to_job

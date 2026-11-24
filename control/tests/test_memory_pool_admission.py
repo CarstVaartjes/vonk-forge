@@ -24,7 +24,7 @@ from vonk_control.resource_planning.types import (
     PlannedStopRelease,
     ResourceDemand,
 )
-from vonk_control.run_admission import (
+from vonk_control.runs.admission import (
     RunAdmissionService,
 )
 

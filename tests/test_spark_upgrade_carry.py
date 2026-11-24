@@ -35,10 +35,10 @@ from vonk_control.fleet_projection.common import (
     NodeConnection,
     RunPresence,
 )
-from vonk_control.run_readiness import GroupHealth
 from vonk_control.run_switch_contract.phase_results import (
     RunSwitchFinalVerifyResult,
 )
+from vonk_control.runs.readiness import GroupHealth
 
 
 def _lane(probes: list[carry.ProbeResult]) -> carry.UpgradeCarryLifecycle:

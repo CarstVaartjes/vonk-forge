@@ -53,7 +53,7 @@ from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.service import RecipeRouteService
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.source_bundles import SourceBundleStore
 
 from .agent_fences import fenced_operation

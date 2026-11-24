@@ -20,7 +20,7 @@ from vonk_control.models.telemetry import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from vonk_control.observed_run_memory import recent_best_available
+from vonk_control.runs.observed_memory import recent_best_available
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 from vonk_control.telemetry.maintenance import TelemetryMaintenance
 from vonk_control.telemetry.samples import TelemetryRepository

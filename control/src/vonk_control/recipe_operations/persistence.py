@@ -82,7 +82,7 @@ from vonk_control.recipe_operations.progress import (
     _recorded_parent,
 )
 from vonk_control.recipe_operations.results import _recorded_result
-from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.runs.admission import RunAdmissionBusy
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model
 from vonk_control.workload_intent import allocate_workload_intent

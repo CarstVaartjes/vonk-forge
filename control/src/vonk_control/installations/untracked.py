@@ -21,7 +21,7 @@ from vonk_control.models.execution import (
     RecipeRun,
     RunNode,
 )
-from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.runs.states import ENDED_RUN_STATES
 
 
 def node_run_ids(node_id: str) -> Select[str]:

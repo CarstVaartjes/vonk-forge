@@ -52,7 +52,6 @@ from vonk_control.recipe_operations.execution_contract import (
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.service import RecipeRouteService
-from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract.operations import (
     RunSwitchOperationResult,
 )
@@ -62,6 +61,7 @@ from vonk_control.run_switch_operations.image_receipts import (
 from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore

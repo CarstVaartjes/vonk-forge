@@ -34,10 +34,10 @@ from vonk_control.recipe_builds.common import (
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_operations.execution_contract import run_plan_document
 from vonk_control.reservations.memory import memory_reservations
-from vonk_control.run_admission import _node_document
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.plans import RunSwitchPlan
 from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.runs.admission import _node_document
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 from .preflight_fixtures import record_passing_preflight

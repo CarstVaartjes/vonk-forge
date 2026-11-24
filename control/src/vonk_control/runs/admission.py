@@ -71,7 +71,6 @@ from vonk_control.models.execution import (
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
-from vonk_control.observed_run_memory import observed_role_peaks, recent_best_available
 from vonk_control.offline_stops import deferred_stop_nodes
 from vonk_control.platform_ports import RENDEZVOUS_PORT, service_host_port_candidates
 from vonk_control.recipe_operations.execution_contract import (
@@ -90,6 +89,7 @@ from vonk_control.resource_planning.memory import (
     memory_requirement,
 )
 from vonk_control.resource_planning.memory_kinds import memory_reservation_kind
+from vonk_control.runs.observed_memory import observed_role_peaks, recent_best_available
 from vonk_control.stored.states import CatalogRevisionState, ClusterMappingState
 from vonk_control.topology import Placement, TopologyError, validate_topology
 

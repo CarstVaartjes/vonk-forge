@@ -22,7 +22,7 @@ from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_operations.observation_helpers import record_build_evidence
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
 
 from .recipe_builds_support import RecordingQueue, setup
 

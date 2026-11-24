@@ -81,8 +81,8 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
-from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.preparation import (
     make_runtime_image_receipt_preparer,
     stored_runtime_image_resolver,

@@ -34,7 +34,7 @@ from vonk_control.models.telemetry import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from vonk_control.observed_run_memory import record_observed_run_memory
+from vonk_control.runs.observed_memory import record_observed_run_memory
 from vonk_control.strict_json import warn_unreadable_once
 from vonk_control.warn_once import warn_once
 

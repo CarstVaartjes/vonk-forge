@@ -36,7 +36,7 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.workload_intent import (
     allocate_workload_intent,

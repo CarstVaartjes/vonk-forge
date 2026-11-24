@@ -104,7 +104,7 @@ from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     lock_profile_build_dependencies,
 )
-from vonk_control.run_route_name import rename_run
+from vonk_control.runs.route_name import rename_run
 from vonk_control.workload_intent import allocate_workload_intent, raise_workload_intent
 
 if TYPE_CHECKING:

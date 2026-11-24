@@ -24,7 +24,7 @@ from vonk_control.recipe_image_availability.service import (
 from vonk_control.recipe_operations import build_cancellation as owner
 from vonk_control.recipe_operations.execution_contract import parse_stored_build_plan
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .recipe_builds_support import (

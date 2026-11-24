@@ -36,8 +36,8 @@ from vonk_control.models.telemetry import (
     FleetStreamEvent,
     NodeTelemetrySample,
 )
-from vonk_control.observed_run_memory import observed_role_peaks
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
+from vonk_control.runs.observed_memory import observed_role_peaks
 from vonk_control.telemetry.samples import TelemetryRepository
 
 from .test_load_phase_swap_admission import _FREE as _LIVE_FREE
@@ -450,7 +450,7 @@ def test_a_failing_attribution_never_refuses_the_samples(
         )
 
     monkeypatch.setattr(
-        "vonk_control.observed_run_memory._raise_measured_peak", violating_peak
+        "vonk_control.runs.observed_memory._raise_measured_peak", violating_peak
     )
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     run_id = _admit_run(sessions, now, node, installation)

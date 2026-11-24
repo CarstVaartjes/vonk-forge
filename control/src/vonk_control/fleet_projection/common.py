@@ -60,7 +60,7 @@ from vonk_control.models.execution import (
 )
 from vonk_control.models.mapping import ClusterMapping
 from vonk_control.recipe_update_batches.notice import RecipeUpdateNotice
-from vonk_control.run_readiness import GroupHealth
+from vonk_control.runs.readiness import GroupHealth
 from vonk_control.stored.states import CatalogRevisionState
 from vonk_control.strict_json import StrictModel
 from vonk_control.telemetry.samples import TelemetrySampleView

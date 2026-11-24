@@ -49,7 +49,7 @@ from vonk_control.recipe_routes.shared import (
     _RecipeCandidate,
     _RecipeEndpoint,
 )
-from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.runs.states import ENDED_RUN_STATES
 from vonk_control.security.route_authority import require_route_authority
 
 _ALIAS = re.compile(ENDPOINT_ALIAS_PATTERN)

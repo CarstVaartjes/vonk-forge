@@ -65,7 +65,7 @@ from vonk_control.observation.capture import begin_observation_capture
 from vonk_control.operations.blockers import PHASE_RETRY_CODE, read_blockers
 from vonk_control.owner_liveness import SPARK_PRESENCE_WINDOW
 from vonk_control.recipe_update_batches.notice import newest_active_revisions
-from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.runs.states import ENDED_RUN_STATES
 from vonk_control.stored.states import CatalogRevisionState
 from vonk_control.swap import selected_swaps
 from vonk_control.telemetry.samples import (

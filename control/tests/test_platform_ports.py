@@ -10,7 +10,7 @@ from vonk_control.platform_ports import (
     HOST_ENDPOINT_PORT,
     RENDEZVOUS_PORT,
 )
-from vonk_control.run_admission import run_port_demand
+from vonk_control.runs.admission import run_port_demand
 
 
 def _document(port: int) -> dict[str, object]:

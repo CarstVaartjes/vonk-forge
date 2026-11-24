@@ -92,7 +92,7 @@ from vonk_control.model_cache.fleet_removal_contract import (  # noqa: E402 -- t
 from vonk_control.operation_api.openapi import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     admin_openapi_schema,
 )
-from vonk_control.run_readiness import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+from vonk_control.runs.readiness import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     GroupHealth,
 )
 from vonk_control.security.browser_auth import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment

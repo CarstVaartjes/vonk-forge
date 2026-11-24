@@ -34,7 +34,7 @@ from vonk_control.recipe_operations.lifecycle_contract import (
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recovery_policy import RecoveryPolicy
-from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.runs.admission import RunAdmissionBusy
 from vonk_control.stored.rows import read_row_column
 from vonk_control.waits.due import DueWaitBackstop, WaitSource
 

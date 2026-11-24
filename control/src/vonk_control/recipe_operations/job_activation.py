@@ -48,9 +48,9 @@ from vonk_control.recipe_operations.lifecycle_contract import JOB_ACTIVATION
 from vonk_control.recipe_operations.observation_helpers import _active_recipe_revision
 from vonk_control.recipe_operations.progress import _catalog_recipe
 from vonk_control.recipe_operations.results import _validated_result
-from vonk_control.run_admission import RunPlan
-from vonk_control.run_admission import require_admissible as require_run_admissible
-from vonk_control.run_admission import (
+from vonk_control.runs.admission import RunPlan
+from vonk_control.runs.admission import require_admissible as require_run_admissible
+from vonk_control.runs.admission import (
     require_same_execution as require_same_run_execution,
 )
 from vonk_control.stored.rows import read_row_column

@@ -64,7 +64,7 @@ from vonk_control.operator_projection_api.errors import (
 )
 from vonk_control.operator_projection_api.services import FleetOperatorServices
 from vonk_control.operator_receipt_contract import ReceiptPolicy
-from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.runs.states import ENDED_RUN_STATES
 
 
 def install_operator_projection_routes(

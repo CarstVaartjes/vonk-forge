@@ -84,7 +84,7 @@ from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_operations.service import (
     RecipeOperationService as recipe_operations_RecipeOperationService,
 )
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService
 
 from .recipe_builds_support import RecordingQueue as BuildQueue
 from .recipe_builds_support import setup as build_setup

@@ -65,11 +65,11 @@ from vonk_control.recipe_builds.common import RecipeBuildUnknown
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_packages.library_types import RecipeLibrarySnapshot
-from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract.evidence import StopImpact
 from vonk_control.run_switch_contract.requests import SparkGroup, SparkGroupNode
 from vonk_control.run_switch_operations.interfaces import ArtifactInspection
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_control.source_policy import (

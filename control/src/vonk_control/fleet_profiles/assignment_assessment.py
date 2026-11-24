@@ -42,7 +42,7 @@ from vonk_control.recipe_operations.execution_contract import (
     installation_serves_authorised_ports,
 )
 from vonk_control.recipe_operations.observation_helpers import _run_is_one_shot
-from vonk_control.run_readiness import run_not_ready_for_profile
+from vonk_control.runs.readiness import run_not_ready_for_profile
 from vonk_control.stored.states import ClusterMappingState, RecipeBuildState
 
 

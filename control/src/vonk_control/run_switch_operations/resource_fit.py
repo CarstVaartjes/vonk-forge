@@ -30,7 +30,6 @@ from vonk_control.load_swap import swap_capacity
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.fleet import AgentNode
-from vonk_control.observed_run_memory import observed_role_peaks, recent_best_available
 from vonk_control.recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,
@@ -49,11 +48,6 @@ from vonk_control.resource_planning.memory import (
 from vonk_control.resource_planning.types import (
     ResourceDemand,
     installation_disk_requirement,
-)
-from vonk_control.run_admission import (
-    allocate_service_port,
-    run_port_blockers,
-    run_port_demand,
 )
 from vonk_control.run_switch_contract.evidence import (
     FreshnessEvidence,
@@ -78,6 +72,12 @@ from vonk_control.run_switch_operations.planning_helpers import (
     _resource_evidence_digest,
     _resource_reason,
 )
+from vonk_control.runs.admission import (
+    allocate_service_port,
+    run_port_blockers,
+    run_port_demand,
+)
+from vonk_control.runs.observed_memory import observed_role_peaks, recent_best_available
 from vonk_control.spark_disk import spark_free_bytes
 from vonk_control.unused_storage_collection.service import spark_eviction_capacity
 

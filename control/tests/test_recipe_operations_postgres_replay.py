@@ -62,7 +62,7 @@ from vonk_control.recipe_operations import persistence
 from vonk_control.recipe_operations.errors import (
     RecipeOperationConflict,
 )
-from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.runs.admission import RunAdmissionBusy
 from vonk_control.runtime_image_preparation.preparation import (
     stored_runtime_image_resolver,
 )

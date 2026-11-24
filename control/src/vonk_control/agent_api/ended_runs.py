@@ -16,7 +16,7 @@ from vonk_control.logging import log_event
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.owner_liveness import run_has_live_operation
 from vonk_control.recipe_operations.stop_payloads import durable_run_stop_payloads
-from vonk_control.run_states import ENDED_RUN_STATES
+from vonk_control.runs.states import ENDED_RUN_STATES
 from vonk_control.waits.persisted import schedule_wait
 
 

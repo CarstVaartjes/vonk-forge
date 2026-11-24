@@ -59,7 +59,7 @@ from vonk_control.recipe_routes.shared import (
     RecipeRouteError,
     route_publication_transaction,
 )
-from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.runs.admission import RunAdmissionBusy
 from vonk_control.stored.rows import read_row_column
 from vonk_control.waits.persisted import schedule_wait
 

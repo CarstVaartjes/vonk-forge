@@ -75,7 +75,7 @@ from vonk_control.recipe_operations.stop_payloads import (
     durable_run_stop_payloads,
 )
 from vonk_control.recipe_routes.shared import route_publication_transaction
-from vonk_control.run_admission import RunAdmissionBusy
+from vonk_control.runs.admission import RunAdmissionBusy
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
