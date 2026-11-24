@@ -1348,11 +1348,11 @@ def _load_short_of_disk(tmp_path, monkeypatch, relief: _Relief | None, engine=No
     if relief is None:
         lifecycle = planner._lifecycle
         assert lifecycle is not None
-        planner._clock = lambda: profiles._clock()
-        lifecycle._clock = lambda: profiles._clock()
+        planner._clock = lambda: profiles._clock()  # noqa: PLW0108 -- reads the replaceable clock or attribute late
+        lifecycle._clock = lambda: profiles._clock()  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         collector = UnusedStorageCollector(
             sessions,
-            clock=lambda: profiles._clock(),
+            clock=lambda: profiles._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
             lifecycle=lifecycle,
         )
         profiles.bind_storage_relief(collector.relief_for_spark)

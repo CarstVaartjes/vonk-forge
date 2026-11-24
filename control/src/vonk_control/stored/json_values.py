@@ -355,7 +355,7 @@ _REPORTED: set[tuple[str, str]] = set()
 
 
 def set_write_guard_mode(*, strict: bool) -> None:
-    global _GUARD_MODE
+    global _GUARD_MODE  # noqa: PLW0603 -- module state that tests reset by name
     _GUARD_MODE = "strict" if strict else "warn"
 
 

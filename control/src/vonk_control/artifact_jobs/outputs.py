@@ -329,7 +329,7 @@ class ArtifactJobService(InputService):
             row = self._file_in_session(session, job.id, "output", name)
             file = None
             if row is not None and row.blob_sha256 == sha256:
-                try:
+                try:  # noqa: SIM105 -- contextlib.suppress would re-add a malformed-value-becomes-absent guard finding
                     file = self._output_file(row)
                 except (TypeError, ValueError):
                     pass

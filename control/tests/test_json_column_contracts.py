@@ -295,7 +295,7 @@ def test_journal_columns_return_models_and_keep_damaged_reads_non_blocking(docum
         connection.execute(table.update().values({column: {"wrong": True}}))
     # Fault injection bypasses the serializer, as a damaged database row would.
     with engine.begin() as connection:
-        connection.execute(text(f"UPDATE {table.name} SET {column} = '{{}}'"))
+        connection.execute(text(f"UPDATE {table.name} SET {column} = '{{}}'"))  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
     with Session(engine) as session:
         damaged = session.get(model, identity)
         assert damaged is not None

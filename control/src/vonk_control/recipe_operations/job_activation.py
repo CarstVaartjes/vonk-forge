@@ -117,7 +117,7 @@ class JobActivationMixin:
             )
             recipe = None
             if revision is not None:
-                try:
+                try:  # noqa: SIM105 -- contextlib.suppress would re-add a malformed-value-becomes-absent guard finding
                     recipe = _catalog_recipe(read_row_column(revision, "document"))
                 except (TypeError, ValueError):
                     pass

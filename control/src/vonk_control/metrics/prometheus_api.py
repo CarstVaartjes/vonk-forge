@@ -308,7 +308,7 @@ class _MatrixRow(_External):
 
 
 class _Matrix(_External):
-    resultType: Literal["matrix"]
+    resultType: Literal["matrix"]  # noqa: N815 -- Prometheus wire field name
     result: list[_MatrixRow]
 
 
@@ -318,7 +318,7 @@ class _VectorRow(_External):
 
 
 class _Vector(_External):
-    resultType: Literal["vector"]
+    resultType: Literal["vector"]  # noqa: N815 -- Prometheus wire field name
     result: list[_VectorRow]
 
 
@@ -326,7 +326,7 @@ class _Alert(_External):
     labels: dict[str, str]
     annotations: dict[str, str]
     state: Literal["pending", "firing", "inactive"]
-    activeAt: str
+    activeAt: str  # noqa: N815 -- Prometheus wire field name
 
 
 class _Alerts(_External):

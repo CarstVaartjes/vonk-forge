@@ -133,7 +133,11 @@ class HTTPSResponse(io.BufferedIOBase):
             work.close()
 
     async def _open(
-        self, request: urllib.request.Request, timeout: float, *, trust_env: bool
+        self,
+        request: urllib.request.Request,
+        timeout: float,  # noqa: ASYNC109 -- the timeout configures the HTTP client, not this coroutine's wait
+        *,
+        trust_env: bool,
     ) -> httpx2.Response:
         try:
             self._client = httpx2.AsyncClient(

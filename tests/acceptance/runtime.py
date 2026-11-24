@@ -182,7 +182,7 @@ def run_interactive(
     if pid == 0:
         try:
             os.chdir(cwd)
-            os.execvpe(argv[0], argv, child_environment)
+            os.execvpe(argv[0], argv, child_environment)  # noqa: S606 -- the exec or pty spawn is intended
         except OSError:
             os._exit(127)
 

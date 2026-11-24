@@ -131,7 +131,7 @@ def test_release_accepts_only_successful_or_proven_reused_ci(
     expression = re.sub(r"!(?!=)", "not ", expression)
     expression = expression.replace("&&", "and").replace("||", "or")
     assert (
-        eval(
+        eval(  # noqa: S307 -- evaluates a GitHub expression with no builtins
             " ".join(expression.split()),
             {"__builtins__": {}},
             {
@@ -165,7 +165,7 @@ def test_promote_waits_for_apt_and_producers_and_needs_them_not_failed(
         expression = expression.replace(f"needs.{name}.result", repr(results[name]))
     expression = re.sub(r"!(?!=)", "not ", expression)
     expression = expression.replace("&&", "and")
-    promoted = eval(
+    promoted = eval(  # noqa: S307 -- evaluates a GitHub expression with no builtins
         expression,
         {"__builtins__": {}},
         {"cancelled": lambda: False, "contains": lambda v, i: i in v},
@@ -707,7 +707,7 @@ def evaluate(expression: str, context: dict[str, str]) -> object:
     )
     expression = re.sub(r"!(?!=)", "not ", expression)
     expression = expression.replace("&&", "and").replace("||", "or")
-    return eval(" ".join(expression.split()), {"__builtins__": {}})
+    return eval(" ".join(expression.split()), {"__builtins__": {}})  # noqa: S307 -- evaluates a GitHub expression with no builtins
 
 
 def render(template: str, context: dict[str, str]) -> str:

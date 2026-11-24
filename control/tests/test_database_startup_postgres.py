@@ -202,7 +202,7 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
             management_observed_at = '2026-10-25T13:00:00Z',
             recipe_observation_http_status = 204,
             recipe_observation_status_at = '2026-10-25T11:00:00Z'
-            WHERE node_id = '{legacy}'""")
+            WHERE node_id = '{legacy}'""")  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
     initialize_database(url)
     readopted = contact(legacy)
     assert (
@@ -440,7 +440,7 @@ def test_damaged_optional_inventory_keeps_capacity_and_fresh_report_recovers(
     with services.sessions.begin() as session:
         session.execute(
             text(
-                f"UPDATE node_inventory_snapshots SET \"{field}\" = '42'::json WHERE id = :identity"
+                f"UPDATE node_inventory_snapshots SET \"{field}\" = '42'::json WHERE id = :identity"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             ),
             {"identity": before.id},
         )

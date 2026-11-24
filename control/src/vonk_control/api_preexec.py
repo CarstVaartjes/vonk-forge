@@ -80,7 +80,7 @@ def initialize_administrator(database_url: str, password_path: Path) -> None:
 
 
 def _exec(command: tuple[str, ...]) -> None:
-    os.execvp(command[0], command)
+    os.execvp(command[0], command)  # noqa: S606 -- the exec or pty spawn is intended
 
 
 def main(

@@ -627,7 +627,8 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
     """Runtime net: no source or housekeeping key may stay off after a fault."""
     now = [datetime(2026, 8, 3, tzinfo=UTC)]
     monkeypatch.setattr(
-        "vonk_control.worker.loop.time.monotonic", lambda: now[0].timestamp()
+        "vonk_control.worker.loop.time.monotonic",
+        lambda: now[0].timestamp(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
     )
     broken = True
     calls: list[str] = []
@@ -742,7 +743,8 @@ def test_a_security_refusal_stays_refused_until_its_cause_clears(tmp_path, monke
 
     now = [datetime(2026, 8, 3, tzinfo=UTC)]
     monkeypatch.setattr(
-        "vonk_control.worker.loop.time.monotonic", lambda: now[0].timestamp()
+        "vonk_control.worker.loop.time.monotonic",
+        lambda: now[0].timestamp(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
     )
     refused = True
     calls = []
@@ -1042,7 +1044,7 @@ def test_a_long_pass_of_short_steps_never_trips_the_watchdog(tmp_path) -> None:
         _service(tmp_path),
         "worker-1",
         {},
-        background_services=(step, lambda: step(), lambda: step()),
+        background_services=(step, lambda: step(), lambda: step()),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         coordinator_failures=_failures(tmp_path),
         step_heartbeat=watchdog.beat,
     )
@@ -1246,7 +1248,7 @@ def test_a_long_pass_writes_readiness_between_its_steps(tmp_path, monkeypatch) -
         _service(tmp_path),
         "worker-1",
         {},
-        background_services=(step, lambda: step(), lambda: step(), lambda: step()),
+        background_services=(step, lambda: step(), lambda: step(), lambda: step()),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         coordinator_failures=_failures(tmp_path),
         loop_heartbeat=lambda: events.append(("readiness", now[0])),
     )
@@ -1417,7 +1419,7 @@ def test_due_run_switch_wait_is_redriven_within_one_step_of_any_number_of_slow_s
         _service(tmp_path),
         "worker-1",
         {},
-        background_services=tuple((lambda: slow_source()) for _ in range(sources)),
+        background_services=tuple((lambda: slow_source()) for _ in range(sources)),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         coordinator_failures=_failures(tmp_path),
         due_waits=due_waits,
     )

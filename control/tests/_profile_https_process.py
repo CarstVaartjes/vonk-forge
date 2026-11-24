@@ -70,7 +70,7 @@ async def _serve(args: argparse.Namespace) -> None:
         )
     )
     serving = asyncio.create_task(server.serve(sockets=[listener]))
-    while not server.started and not serving.done():
+    while not server.started and not serving.done():  # noqa: ASYNC110 -- uvicorn's started flag has no event to await
         await asyncio.sleep(0.01)
     if server.started:
         # Publish the pid atomically: the parent polls for the file to exist

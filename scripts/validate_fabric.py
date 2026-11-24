@@ -19,7 +19,7 @@ repository_src = Path(__file__).resolve().parents[1] / "src"
 if str(repository_src) not in sys.path:
     sys.path.insert(0, str(repository_src))
 
-from fabric_validation import (
+from fabric_validation import (  # noqa: E402 -- imports follow this entry point's sys.path or environment setup
     CUDA_NVCC,
     FABRIC_WORKER_ALIAS,
     LATENCY_ITERATIONS,

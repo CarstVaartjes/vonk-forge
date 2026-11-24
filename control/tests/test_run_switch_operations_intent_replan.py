@@ -694,7 +694,7 @@ def test_run_switch_admission_declares_the_resource_estimate_uncertain(
         sessions,
         memory_floor_bytes=0,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifacts=CompleteArtifactInspector(),
         artifact_phase_executor=RecordingArtifactExecutor(),
     )
@@ -867,7 +867,7 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifact_phase_executor=RecordingArtifactExecutor(),
         model_cache=ModelCacheManifestProvider(missing_nas_bytes=1024),
         memory_floor_bytes=50,

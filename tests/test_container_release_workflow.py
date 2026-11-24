@@ -129,7 +129,7 @@ class _Workflow(TypedDict):
 
 
 def development_workflow() -> _Workflow:
-    return yaml.load(DEV_WORKFLOW.read_text(), Loader=yaml.BaseLoader)
+    return yaml.load(DEV_WORKFLOW.read_text(), Loader=yaml.BaseLoader)  # noqa: S506 -- BaseLoader is deliberate
 
 
 def development_job_step(job_name: str, step_name: str) -> _WorkflowStep:

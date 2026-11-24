@@ -724,7 +724,7 @@ class RecipeRouteService:
             with self.publication_transaction() as session:
                 owner = session.get(RoutePublicationOwner, 1)
                 if owner is None:
-                    raise RecipeRouteNotReady("route publication owner is unavailable")
+                    raise RecipeRouteNotReady("route publication owner is unavailable")  # noqa: B904 -- re-raises an existing error; from would overwrite the __cause__ failure classification walks
                 # A held owner or evidence that is not there yet is a wait and
                 # spends nothing; an ended observation pauses for one capped
                 # delay and a fresh window starts: standing routes survive it.

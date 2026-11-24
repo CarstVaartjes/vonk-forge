@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Export campaign schemas from the pinned canonical recipe contracts."""
 
-# ruff: noqa: E402 - the project imports follow run_in_control, which re-executes in the control environment
 from __future__ import annotations
 
 import argparse
@@ -15,7 +14,7 @@ if __name__ == "__main__":
 
     run_in_control(ROOT)
 
-from vonk_forge_contracts.qualification_authority import (
+from vonk_forge_contracts.qualification_authority import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     campaign_authority_json_schema,
     campaign_manifest_json_schema,
 )

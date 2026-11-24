@@ -30,7 +30,10 @@ class RuntimeBuildIdentity:
 
 
 def verified_wheel_identity(
-    archive: ZipFile, *, source_sha: str, version: str
+    archive: ZipFile,
+    *,
+    source_sha: str,  # noqa: ARG001 -- the caller evaluates the release fields inside its KeyError handler
+    version: str,  # noqa: ARG001 -- the caller evaluates the release fields inside its KeyError handler
 ) -> RuntimeBuildIdentity:
     """Observe content fingerprints of a wheel verified by signed ingress.
 

@@ -221,7 +221,7 @@ def _reexec_in(environment: Path) -> None:
         # Like ``uv run``: the environment's console scripts (code generators)
         # resolve before any system copy.
         binaries = str(environment / "bin")
-        os.execve(
+        os.execve(  # noqa: S606 -- the exec or pty spawn is intended
             str(environment / "bin/python"),
             [
                 str(environment / "bin/python"),

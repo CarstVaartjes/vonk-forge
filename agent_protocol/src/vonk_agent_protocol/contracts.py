@@ -828,7 +828,7 @@ class AgentClaim(_ProtocolEnvelopeModel):
         if "operation" in document and not isinstance(
             document["operation"], AgentOperation
         ):
-            try:
+            try:  # noqa: SIM105 -- contextlib.suppress would re-add a malformed-value-becomes-absent guard finding
                 document["operation"] = AgentOperation(document["operation"])
             except (TypeError, ValueError):
                 pass

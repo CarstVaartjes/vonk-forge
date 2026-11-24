@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Export the current Pydantic wire graph without a second field registry."""
 
-# ruff: noqa: E402 - the project imports follow run_in_protocol, which re-executes in the protocol environment
 from __future__ import annotations
 
 import argparse
@@ -20,12 +19,21 @@ if __name__ == "__main__":
     run_in_protocol(ROOT)
 sys.path.insert(0, str(ROOT / "agent_protocol/src"))
 
-from pydantic import BaseModel, TypeAdapter
-from pydantic.json_schema import models_json_schema
+from pydantic import (  # noqa: E402 -- the project imports follow run_in_protocol, which re-executes in the protocol environment
+    BaseModel,
+    TypeAdapter,
+)
+from pydantic.json_schema import (  # noqa: E402 -- the project imports follow run_in_protocol, which re-executes in the protocol environment
+    models_json_schema,
+)
 
-import vonk_agent_protocol
-from vonk_agent_protocol.host_helper import HostOperationKind
-from vonk_agent_protocol.lifecycle_vocabulary import RETIRED_RESULT_STATE_SPELLINGS
+import vonk_agent_protocol  # noqa: E402 -- the project imports follow run_in_protocol, which re-executes in the protocol environment
+from vonk_agent_protocol.host_helper import (  # noqa: E402 -- the project imports follow run_in_protocol, which re-executes in the protocol environment
+    HostOperationKind,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (  # noqa: E402 -- the project imports follow run_in_protocol, which re-executes in the protocol environment
+    RETIRED_RESULT_STATE_SPELLINGS,
+)
 
 
 def export_schema() -> dict[str, object]:

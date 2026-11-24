@@ -66,7 +66,7 @@ def _validate_rows(
         )
         predicates.append(f"NOT ({order.compile(dialect=connection.dialect)})")
     invalid = connection.exec_driver_sql(
-        f"SELECT 1 FROM {table_name} WHERE {' OR '.join(predicates)} LIMIT 1"
+        f"SELECT 1 FROM {table_name} WHERE {' OR '.join(predicates)} LIMIT 1"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
     ).first()
     if invalid is not None:
         raise ValueError(f"exact integer adoption refused invalid rows in {table_name}")
@@ -386,7 +386,7 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
                         continue  # Its validated token is already the owner encoding.
                     original_type = old_type.compile(dialect=connection.dialect)
                     lossy = connection.exec_driver_sql(
-                        f"SELECT 1 FROM {table_name} WHERE {name} IS NOT NULL "
+                        f"SELECT 1 FROM {table_name} WHERE {name} IS NOT NULL "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                         f"AND ({name}::text)::{original_type} <> {name} LIMIT 1"
                     ).first()
                     if lossy is not None:

@@ -507,7 +507,7 @@ def test_a_resumed_start_phase_adopts_the_activation_it_already_made(
         sessions,
         memory_floor_bytes=0,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
         artifact_phase_executor=RecordingArtifactExecutor(),
     )

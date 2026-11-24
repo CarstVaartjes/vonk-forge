@@ -113,7 +113,7 @@ def _constraint(connection, name: str) -> tuple[int, bool]:
 
 
 def _set_state(connection, table: str, word: str) -> None:
-    connection.execute(text(f"UPDATE {table} SET state = :word"), {"word": word})
+    connection.execute(text(f"UPDATE {table} SET state = :word"), {"word": word})  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
 
 
 def test_a_retired_word_is_refused_by_every_lifecycle_table(postgres_engine):
@@ -150,7 +150,7 @@ def test_startup_adds_the_state_checks_and_never_refuses(
         first = {name: _constraint(connection, name) for name in CHECKS.values()}
         for table, name in CHECKS.items():
             assert first[name][1] is not retired_row, table
-            stored = connection.execute(text(f"SELECT state FROM {table}")).scalars()
+            stored = connection.execute(text(f"SELECT state FROM {table}")).scalars()  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             assert set(stored) == {RETIRED if retired_row else "running"}
             with pytest.raises(IntegrityError), connection.begin_nested():
                 _set_state(connection, table, "partial")

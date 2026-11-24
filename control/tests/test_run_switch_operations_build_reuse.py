@@ -1026,7 +1026,7 @@ def test_model_cache_manifest_failure_is_a_typed_blocker(tmp_path: Path) -> None
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifact_phase_executor=RecordingArtifactExecutor(),
         model_cache=ModelCacheManifestProvider(fail=True),
         memory_floor_bytes=50,
@@ -1054,7 +1054,7 @@ def test_a_spark_whose_agent_cannot_pull_images_asks_for_an_upgrade(
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifacts=CompleteArtifactInspector(),
         artifact_phase_executor=RecordingArtifactExecutor(),
         memory_floor_bytes=50,

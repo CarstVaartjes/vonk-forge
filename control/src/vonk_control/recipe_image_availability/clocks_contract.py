@@ -30,10 +30,10 @@ class _Reader[T]:
 
     reader: Callable[[Any], T]
 
-    def validate_python(self, value: object, *, strict: bool | None = None) -> T:
+    def validate_python(self, value: object, *, strict: bool | None = None) -> T:  # noqa: ARG002 -- mirrors TypeAdapter; callers pass strict= by keyword
         return self.reader(value)
 
-    def validate_json(self, text: str | bytes, *, strict: bool | None = None) -> T:
+    def validate_json(self, text: str | bytes, *, strict: bool | None = None) -> T:  # noqa: ARG002 -- mirrors TypeAdapter; callers pass strict= by keyword
         return self.reader(json.loads(text))
 
 

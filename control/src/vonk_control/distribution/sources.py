@@ -98,7 +98,7 @@ class CompositeObjectSource:
             except SecurityRefusalError:
                 raise
             except DistributionError:
-                raise model_error
+                raise model_error  # noqa: B904 -- re-raises an existing error; from would overwrite the __cause__ failure classification walks
 
 
 class MemoryObjectSource:

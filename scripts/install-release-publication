@@ -509,7 +509,7 @@ def _install_object(objects: Path, key: str, content: bytes, mode: int = 0o644) 
 
 
 def assemble(arguments: argparse.Namespace) -> str:
-    from vonk_agent_protocol.installer_release import (
+    from vonk_agent_protocol.installer_release import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
         InstallerAcceptanceBaselineRelease,
         InstallerCandidateRelease,
     )
@@ -653,7 +653,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         raise PublicationError("CLI wheel filename is invalid")
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-        from cluster_profiles.runtime_identity import (
+        from cluster_profiles.runtime_identity import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
             contract_fingerprint,
             verified_wheel_identity,
         )
@@ -714,7 +714,9 @@ def assemble(arguments: argparse.Namespace) -> str:
             _install_object(objects, key, content, mode)
             entries.append(_object_entry(key, content, "immutable"))
 
-        from agent_package_source_publication import package_source
+        from agent_package_source_publication import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
+            package_source,
+        )
 
         source_entries = [(path, version) for path in packages.values()] + [
             (path, baseline_version) for path in baseline_packages.values()
@@ -2076,7 +2078,9 @@ def refresh(arguments: argparse.Namespace) -> None:
         release_signature,
         "release object",
     )
-    from vonk_agent_protocol.installer_release import InstallerCandidateRelease
+    from vonk_agent_protocol.installer_release import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
+        InstallerCandidateRelease,
+    )
 
     try:
         release = InstallerCandidateRelease.model_validate_json(

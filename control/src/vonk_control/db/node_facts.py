@@ -81,7 +81,7 @@ def move_contact_facts(connection: Connection) -> None:
     )
     connection.execute(
         text(
-            f"INSERT INTO agent_node_contacts ({names}) "
+            f"INSERT INTO agent_node_contacts ({names}) "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             # WHERE true: SQLite parses ON CONFLICT after INSERT ... SELECT only so.
             f"SELECT {names} FROM agent_nodes WHERE true "
             f"ON CONFLICT (node_id) {adopt}"

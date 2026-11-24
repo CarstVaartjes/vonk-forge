@@ -9,7 +9,6 @@ The TypeScript transport uses pinned openapi-fetch. Its DTOs and standalone
 runtime validators are generated together from this same canonical document.
 """
 
-# ruff: noqa: E402 - the project imports follow run_in_control, which re-executes in the control environment
 from __future__ import annotations
 
 import argparse
@@ -31,42 +30,74 @@ if __name__ == "__main__":
 
     run_in_control(ROOT)
 
-import nodejs_wheel
-from sqlalchemy.orm import sessionmaker
-from vonk_forge_contracts.qualification_status import (
+import nodejs_wheel  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+from sqlalchemy.orm import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    sessionmaker,
+)
+from vonk_forge_contracts.qualification_status import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     QualificationOutcome,
     QualificationStatus,
 )
 
-from vonk_agent_protocol.job_wire import MEDIA_TYPE_PATTERN
-from vonk_agent_protocol.lifecycle_vocabulary import (
+from vonk_agent_protocol.job_wire import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    MEDIA_TYPE_PATTERN,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     LIVE_LIFECYCLE_STATES,
     TERMINAL_LIFECYCLE_STATES,
     UNSUCCESSFUL_LIFECYCLE_STATES,
     LifecycleState,
     LifecycleVocabulary,
 )
-from vonk_agent_protocol.phase_words import BYTE_PHASES, PHASE_WORDS, WAIT_WORDS
-from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
-from vonk_agent_protocol.recipe_jobs import canonical_media_types
-from vonk_control import control_limits
-from vonk_control.api.application import create_app
-from vonk_control.auth import TokenCodec
-from vonk_control.browser_auth import BrowserAuthService
-from vonk_control.cache_removal_review import CacheAssetDisposition
-from vonk_control.cli_update_contract import cli_update_contract_schema
-from vonk_control.fleet_model_removal_contract import (
+from vonk_agent_protocol.phase_words import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    BYTE_PHASES,
+    PHASE_WORDS,
+    WAIT_WORDS,
+)
+from vonk_agent_protocol.reason_codes.vocabulary import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    ReasonCodeVocabulary,
+)
+from vonk_agent_protocol.recipe_jobs import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    canonical_media_types,
+)
+from vonk_control import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    control_limits,
+)
+from vonk_control.api.application import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    create_app,
+)
+from vonk_control.auth import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    TokenCodec,
+)
+from vonk_control.browser_auth import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    BrowserAuthService,
+)
+from vonk_control.cache_removal_review import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    CacheAssetDisposition,
+)
+from vonk_control.cli_update_contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    cli_update_contract_schema,
+)
+from vonk_control.fleet_model_removal_contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     FleetRemovalDisposition,
     FleetRemovalReason,
 )
-from vonk_control.fleet_profile_contract.review import ProfileLoadAction
-from vonk_control.library.contract import LibraryCacheState
-from vonk_control.model_cache.contract import (
+from vonk_control.fleet_profile_contract.review import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    ProfileLoadAction,
+)
+from vonk_control.library.contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    LibraryCacheState,
+)
+from vonk_control.model_cache.contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     CacheOperationKind,
     ModelStorageObservationReason,
 )
-from vonk_control.operation_api.openapi import admin_openapi_schema
-from vonk_control.run_readiness import GroupHealth
+from vonk_control.operation_api.openapi import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    admin_openapi_schema,
+)
+from vonk_control.run_readiness import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    GroupHealth,
+)
 
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_OUTPUT = ROOT / "src/cluster_profiles/generated_control"

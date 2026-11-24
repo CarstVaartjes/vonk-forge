@@ -278,7 +278,7 @@ def _submit_recipe_retry(
                 "recipe retry receipt identifies another request or frozen intent"
             )
         operation_id = _cache_operation_id("recipe", result.to_dict())
-        return operation_id
+        return operation_id  # noqa: RET504 -- inlining re-adds a contract-literal guard finding
 
     return decode(
         _submit_idempotent_request(

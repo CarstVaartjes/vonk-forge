@@ -6,7 +6,6 @@ the admin web hooks call it so a tree is generated at most once per change,
 however many tools then read the outputs.
 """
 
-# ruff: noqa: E402 - the repository imports follow the repository root's sys.path entry
 from __future__ import annotations
 
 import sys
@@ -15,7 +14,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tools.generated_contracts import prepare_generated_contracts
+from tools.generated_contracts import (  # noqa: E402 -- the repository imports follow the repository root's sys.path entry
+    prepare_generated_contracts,
+)
 
 
 def main() -> int:

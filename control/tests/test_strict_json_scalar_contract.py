@@ -30,7 +30,7 @@ class _LiteralSemanticsProbe(StrictJSONModel):
     model_config = ConfigDict(strict=True)
     optional_tag: Literal[1] | None = None
     mixed_string: Literal[1] | str
-    mixed_integer: Literal[1] | int
+    mixed_integer: Literal[1] | int  # noqa: PYI051 -- Literal[1] | int is the contract case under test
     mixed_float: Literal[1] | float
     bool_tag: Literal[True]
 

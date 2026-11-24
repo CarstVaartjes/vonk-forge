@@ -911,7 +911,7 @@ def _parked_start_switch(tmp_path: Path, *, healthy: bool):
         sessions,
         memory_floor_bytes=0,
         lifecycle=observing,
-        clock=lambda: lifecycle._clock(),
+        clock=lambda: lifecycle._clock(),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
         artifact_phase_executor=RecordingArtifactExecutor(),
     )

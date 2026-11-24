@@ -266,7 +266,7 @@ TERMINAL_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(
 )
 
 
-def adopt_state(subject: LifecycleSubject, stored: str) -> LifecycleState | None:
+def adopt_state(subject: LifecycleSubject, stored: str) -> LifecycleState | None:  # noqa: ARG001 -- part of the vocabulary API threaded through every adopter
     """The core state a stored ``state`` word of ``subject`` is, or ``None``.
 
     Every reader of a stored lifecycle state goes through this one function.  A
@@ -294,7 +294,8 @@ LIVE_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(LifecycleState) - (
 
 
 def stored_words(
-    subject: LifecycleSubject, states: Iterable[LifecycleState]
+    subject: LifecycleSubject,  # noqa: ARG001 -- part of the vocabulary API threaded through every adopter
+    states: Iterable[LifecycleState],
 ) -> tuple[str, ...]:
     """The stored words of ``subject`` for any of ``states``, in vocabulary order.
 

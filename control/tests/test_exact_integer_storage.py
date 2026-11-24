@@ -306,7 +306,7 @@ def _schema(engine: Engine) -> tuple[tuple[object, ...], ...]:
                 (table, *tuple(row))
                 for table in OWNING_COLUMNS
                 for row in connection.exec_driver_sql(
-                    f"SELECT * FROM {table} ORDER BY 1"
+                    f"SELECT * FROM {table} ORDER BY 1"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                 )
             )
         )
@@ -416,7 +416,7 @@ def test_database_rejects_noncanonical_tokens_and_exact_adjacent_verified_bytes(
     for token in ("", "00", "01", "+1", "-1", "1.0", "1e2", "1\n", " 1", "١"):
         with pytest.raises(DBAPIError), storage_engine.begin() as connection:
             connection.exec_driver_sql(
-                f"UPDATE model_cache_sets SET expected_bytes={parameter} WHERE artifact_set_sha256={parameter}",
+                f"UPDATE model_cache_sets SET expected_bytes={parameter} WHERE artifact_set_sha256={parameter}",  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                 (token, digest),
             )
     for value in (0, 9, 10):
@@ -434,7 +434,7 @@ def test_database_rejects_noncanonical_tokens_and_exact_adjacent_verified_bytes(
         )
     with pytest.raises(DBAPIError), storage_engine.begin() as connection:
         connection.exec_driver_sql(
-            f"UPDATE model_cache_sets SET verified_bytes=NULL WHERE artifact_set_sha256={parameter}",
+            f"UPDATE model_cache_sets SET verified_bytes=NULL WHERE artifact_set_sha256={parameter}",  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             (digest,),
         )
     with pytest.raises(StatementError), storage_engine.begin() as connection:
@@ -494,7 +494,7 @@ def test_legacy_adoption_preserves_keys_extensions_and_checked_restart(
         )
         parameter = "?" if engine.dialect.name == "sqlite" else "%s"
         connection.exec_driver_sql(
-            f"INSERT INTO proof_child VALUES ({parameter},{parameter})",
+            f"INSERT INTO proof_child VALUES ({parameter},{parameter})",  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
             ("retained-child", revision.id),
         )
         connection.exec_driver_sql(

@@ -334,7 +334,7 @@ def shared_catalog_document(
 ) -> ModelDefinition | RecipeDefinition:
     """The shared parse itself, uncopied: the caller must never mutate it."""
 
-    global _document_cache_size
+    global _document_cache_size  # noqa: PLW0603 -- module state that tests reset by name
     document = require_mapping(raw, "catalog document is not a JSON object")
     key = (kind, digest)
     with _document_cache_lock:

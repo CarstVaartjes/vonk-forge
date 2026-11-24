@@ -9,7 +9,6 @@ changes here, and ``tests/test_generated_contracts.py`` fails while the
 committed files are stale.
 """
 
-# ruff: noqa: E402 - the project imports follow run_in_control, which re-executes in the control environment
 from __future__ import annotations
 
 import argparse
@@ -25,13 +24,15 @@ if __name__ == "__main__":
 
     run_in_control(ROOT)
 sys.path[:0] = [str(ROOT / "agent_protocol/src"), str(ROOT / "control/src")]
-from vonk_forge_contracts.qualification_status import (
+from vonk_forge_contracts.qualification_status import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     QualificationOutcome,
     QualificationStatus,
 )
 
-from vonk_agent_protocol.agent_operations import AgentFailureKind
-from vonk_agent_protocol.agent_words import (
+from vonk_agent_protocol.agent_operations import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    AgentFailureKind,
+)
+from vonk_agent_protocol.agent_words import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     Disposition,
     ProfileChildJobKind,
     ProfileChildPhase,
@@ -39,9 +40,13 @@ from vonk_agent_protocol.agent_words import (
     ProfileReportedPhase,
     ProgressPhase,
 )
-from vonk_agent_protocol.disposition import HTTP_STATUS_DISPOSITIONS
-from vonk_agent_protocol.gpu_clock import GpuClockMetric
-from vonk_agent_protocol.lifecycle_vocabulary import (
+from vonk_agent_protocol.disposition import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    HTTP_STATUS_DISPOSITIONS,
+)
+from vonk_agent_protocol.gpu_clock import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    GpuClockMetric,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     LIVE_LIFECYCLE_STATES,
     TERMINAL_LIFECYCLE_STATES,
     UNSUCCESSFUL_LIFECYCLE_STATES,
@@ -52,12 +57,15 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     StopOutcome,
     WaitReason,
 )
-from vonk_agent_protocol.phase_words import PHASE_WORDS, WAIT_WORDS
-from vonk_agent_protocol.reason_codes.profiles import (
+from vonk_agent_protocol.phase_words import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    PHASE_WORDS,
+    WAIT_WORDS,
+)
+from vonk_agent_protocol.reason_codes.profiles import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     PROFILE_REFUSAL_CODES,
     ProfileReasonCode,
 )
-from vonk_agent_protocol.state_machines import (
+from vonk_agent_protocol.state_machines import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     AssetAvailability,
     EndpointState,
     EnrollmentGrantState,
@@ -65,10 +73,19 @@ from vonk_agent_protocol.state_machines import (
     RouteState,
     RunState,
 )
-from vonk_control.artifact_jobs.job_contract import JobContractState
-from vonk_control.cache_removal_review import ArtifactKind, CacheAssetDisposition
-from vonk_control.fleet_profile_contract.review import ProfileLoadAction
-from vonk_control.model_cache.contract import CacheOperationKind
+from vonk_control.artifact_jobs.job_contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    JobContractState,
+)
+from vonk_control.cache_removal_review import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    ArtifactKind,
+    CacheAssetDisposition,
+)
+from vonk_control.fleet_profile_contract.review import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    ProfileLoadAction,
+)
+from vonk_control.model_cache.contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    CacheOperationKind,
+)
 
 CLI_WORDS = ROOT / "src/cluster_profiles/cli_states_generated.py"
 HOOK_WORDS = ROOT / "scripts/hook_words_generated.py"

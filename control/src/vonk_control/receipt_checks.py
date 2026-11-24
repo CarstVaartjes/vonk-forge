@@ -19,7 +19,7 @@ def _refused(detail: str, *, unavailable: bool = False) -> HTTPException:
     )
 
 
-def _require(condition: bool) -> None:
+def _require(condition: bool) -> None:  # noqa: FBT001 -- a positional callback or assert-style helper signature
     if not condition:
         raise _refused("The owner has no matching acceptance receipt for this request")
 

@@ -33,7 +33,7 @@ def model_artifact_specs(
 ) -> tuple[ArtifactSpec, ...]:
     """The specs of ``row``'s exact model content; ``build`` runs only on a miss."""
 
-    global _retained
+    global _retained  # noqa: PLW0603 -- module state that tests reset by name
     key = (row.content_digest, fixture_sources)
     with _lock:
         cached = _cache.get(key)

@@ -1091,7 +1091,7 @@ def test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue(
         tmp_path / "routes",
         clock=lambda: now,
         cursors=TokenCodec(b"k" * 32).cursor_codec(),
-        resume_agent_upgrade=lambda job_id, *, receipt=None: resumed.append(job_id),
+        resume_agent_upgrade=lambda job_id, *, receipt=None: resumed.append(job_id),  # noqa: PLW0108 -- reads the replaceable clock or attribute late
     )
 
     services.resume_job(job.id)

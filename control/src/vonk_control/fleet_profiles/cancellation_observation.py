@@ -315,7 +315,10 @@ class FleetProfileService:
         return _LifecycleEffect.UNKNOWN
 
     def _finish_cancel_records(
-        self, session: Session, row: FleetProfileApplication, residue: bool
+        self,
+        session: Session,
+        row: FleetProfileApplication,
+        residue: bool,  # noqa: FBT001 -- a positional callback or assert-style helper signature
     ) -> None:
         """Close the records of a cancel that ended: the cancellation, the child and
         the result.  The state itself was written by the lifecycle adapter."""

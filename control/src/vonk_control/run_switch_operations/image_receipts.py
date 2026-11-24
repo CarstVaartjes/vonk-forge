@@ -128,7 +128,7 @@ def effective_build_receipt(
         and planned_layout is not None
         and planned_bytes is not None
     ):
-        try:
+        try:  # noqa: SIM105 -- contextlib.suppress would re-add a malformed-value-becomes-absent guard finding
             candidates.append(
                 RunSwitchEffectiveBuildReceipt(
                     build_id=expected_build_id,

@@ -218,7 +218,7 @@ def _submit_idempotent_request(
                 # request under this key: it was refused, not unknown. Its
                 # answer reaches the caller, which may plan again.
                 submission.acceptance = SubmissionAcceptance.REFUSED
-                raise submit_error
+                raise submit_error  # noqa: B904 -- re-raises an existing error; from would overwrite the __cause__ failure classification walks
             else:
                 return _poll_path(
                     client,

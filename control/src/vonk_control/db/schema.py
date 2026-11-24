@@ -198,7 +198,7 @@ def reconcile_schema(connection: Connection) -> None:
                     using = f"{quoted}::{target_type}"
                     with connection.begin_nested():
                         lossy_value = connection.exec_driver_sql(
-                            f"SELECT 1 FROM {quoted_table} WHERE {quoted} IS NOT NULL "
+                            f"SELECT 1 FROM {quoted_table} WHERE {quoted} IS NOT NULL "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                             f"AND NOT ({quoted}::{target_type} = {quoted}) LIMIT 1"
                         ).first()
                         if lossy_value is not None:
@@ -250,7 +250,7 @@ def reconcile_schema(connection: Connection) -> None:
                                 )
                             )
                             connection.exec_driver_sql(
-                                f"UPDATE {quoted_table} SET {quoted_column}={default_sql} "
+                                f"UPDATE {quoted_table} SET {quoted_column}={default_sql} "  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                                 f"WHERE {quoted_column} IS NULL"
                             )
                         ops.alter_column(

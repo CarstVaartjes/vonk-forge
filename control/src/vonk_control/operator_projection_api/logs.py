@@ -207,7 +207,7 @@ def _add_diagnostics(
         add(f"stdout: {line}")
     # The refusing rule and its measured bound, e.g. "rule=… limit=4096
     # observed=518", so an operator sees how far over the request was.
-    for property in diagnostics.preflight:
+    for property in diagnostics.preflight:  # noqa: A001 -- renaming re-adds a contract-literal guard finding
         add(f"preflight: {property.name}={property.value}", level="warning")
     for item in diagnostics.collector_errors:
         add(f"collector={item}", level="warning")
@@ -301,7 +301,7 @@ class AgentFailureLogProvider:
         lines: int,
         recipe: str | None,
         source: str | None,
-        follow: bool,
+        follow: bool,  # noqa: ARG002 -- FleetLogProvider declares the keyword
     ) -> FleetLogResponse:
         entries: list[FleetLogEntry] = []
         retained = False

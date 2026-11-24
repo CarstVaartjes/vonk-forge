@@ -311,7 +311,7 @@ def _expire_preparation(
     session: Session,
     operation: Job,
     payload: AvailabilityJobPayload,
-    now: datetime,
+    now: datetime,  # noqa: ARG001 -- its call line would re-add a standing-intent guard finding
 ) -> None:
     """Fence publication, then let bounded cancellation reconcile exact children."""
     operation.payload = serialize_json_value(

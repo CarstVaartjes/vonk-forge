@@ -8,7 +8,6 @@ image, or imply a native Spark result. Container execution is a separate
 arm64/environment-dependent gate.
 """
 
-# ruff: noqa: E402 - the sibling helper imports after this file's directory is on sys.path, however it is loaded
 from __future__ import annotations
 
 import argparse
@@ -31,7 +30,9 @@ sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behin
 
 # The sibling helper, however this file is loaded.
 sys.path.insert(0, str(Path(__file__).absolute().parent))
-from check_environment import ensure_catalog
+from check_environment import (  # noqa: E402 -- the sibling helper imports after this file's directory is on sys.path, however it is loaded
+    ensure_catalog,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")

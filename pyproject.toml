@@ -138,69 +138,16 @@ ignore = [
 "!{src,control/src,agent_protocol/src,nas_setup/src}/**" = ["TID252"]
 # The one place that may hold threads on a raw barrier.
 "control/tests/insert_collision_support.py" = ["TID251"]
-
-# --- Reasoned exceptions. Each entry names why the rule cannot hold there. ---
-
-# Composite asserts whose split re-adds an assertion a principle guard flags
-# (a transient fault ending "failed", an operator wait, an observation
-# withdrawal): the grandfathered behaviour they pin is what the guard rejects.
-"control/tests/{test_agent_jobs_claim_intent,test_agent_jobs_postgres,test_build_cancellation_process_recovery,test_profile_removed_spark_postgres,test_recipe_builds_plan_admission,test_recipe_observation_wire_bridge,test_recipe_retry_installed_cli,test_recipe_update_batches,test_agent_operation_lifecycle,test_operation_api,test_distributed_recovery_budget,test_service_stop_review_postgres}.py" = ["PT018"]
-# Lambdas that must read a replaceable clock, counter or attribute late.
-"control/tests/{run_switch_operations_support,test_profile_capacity_admission,test_profile_job_member,test_run_switch_old_shape_payload,test_run_switch_operations_build_reuse,test_run_switch_operations_child_progress_cancel,test_run_switch_operations_intent_replan,test_worker,test_operation_api}.py" = ["PLW0108"]
-"control/src/vonk_control/model_cache/service.py" = ["PLW0108"]
-# SQL that interpolates table/column identifiers, types or driver placeholder
-# styles, which cannot be bound as parameters.
-"control/tests/{test_database_startup_postgres,test_exact_integer_storage,test_job_owner_columns_postgres,test_json_column_contracts,test_lifecycle_state_checks_postgres,test_state_vocabulary_schema_postgres}.py" = ["S608"]
-"control/src/vonk_control/{db/node_facts,db/schema,db/schema_helpers,exact_integer_adoption}.py" = ["S608"]
-"tests/acceptance/test_spark_lifecycle.py" = ["S608", "PLC0415"]
-# A rewrite of these lines re-adds a finding an added-line principle guard flags
-# (malformed value becomes absent, contract literal, untyped mapping, item-count
-# cap, operator wait); the line stays as it is.
-"control/tests/test_agent_upgrade_lifecycle.py" = ["RUF021"]
-"{agent_protocol/src/vonk_agent_protocol/contracts,control/src/vonk_control/artifact_jobs/outputs,control/src/vonk_control/recipe_operations/job_activation,control/src/vonk_control/run_switch_operations/image_receipts}.py" = ["SIM105"]
-"control/src/vonk_control/operator_projection_api/logs.py" = ["A001", "ARG002"]
-"control/src/vonk_control/model_cache/http.py" = ["B007"]
-"control/src/vonk_control/lifecycle/job.py" = ["RUF036"]
+# Guard-blocked grandfathered sites; fixed by the class follow-up. A fix or a
+# per-site noqa re-adds a line an added-line principle guard flags: an untyped
+# mapping (catalog/service, lifecycle/job, campaign profiles), an item-count cap
+# (model_cache/http), and for PT018 a transient fault ending "failed", an
+# operator wait or an observation withdrawal.
 "control/src/vonk_control/catalog/service.py" = ["ARG002"]
-"control/src/vonk_control/recipe_image_availability/scheduling.py" = ["ARG001"]
-"src/cluster_profiles/controller_cli/cache_submission.py" = ["RET504"]
+"control/src/vonk_control/lifecycle/job.py" = ["RUF036"]
+"control/src/vonk_control/model_cache/http.py" = ["B007"]
 "src/cluster_profiles/fleet_qualification_campaign_cli/profiles.py" = ["ARG001"]
-# Interface signatures: the parameter is part of a declared protocol, a mirrored
-# third-party API or a positional callback.
-"agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py" = ["ARG001"]
-"control/src/vonk_control/recipe_image_availability/clocks_contract.py" = ["ARG002"]
-"control/src/vonk_control/{receipt_checks,fleet_profiles/cancellation_observation}.py" = ["FBT001"]
-"src/cluster_profiles/runtime_identity.py" = ["ARG001"]
-# Prometheus wire field names.
-"control/src/vonk_control/metrics/prometheus_api.py" = ["N815"]
-# Module state that tests reset by name.
-"control/src/vonk_control/{catalog/revision_contract,model_cache/model_artifact_cache,stored/json_values}.py" = ["PLW0603"]
-# Re-raising an existing exception: `from` would overwrite the __cause__ the
-# failure classification walks.
-"{control/src/vonk_control/distribution/sources,control/src/vonk_control/recipe_routes/service,src/cluster_profiles/controller_cli/submission}.py" = ["B904"]
-# The timeout configures the HTTP client, not this coroutine's wait; uvicorn's
-# `started` flag has no event to await.
-"src/cluster_profiles/control_transport.py" = ["ASYNC109"]
-"control/tests/_profile_https_process.py" = ["ASYNC110"]
-# `Literal[1] | int` is the contract case under test.
-"control/tests/test_strict_json_scalar_contract.py" = ["PYI051"]
-# Intended exec/pty/eval/BaseLoader uses.
-"{control/src/vonk_control/api_preexec,scripts/check_environment,tests/acceptance/runtime}.py" = ["S606"]
-"tests/test_release_workflow.py" = ["S307"]
-"{tests/scripts/test_install_release_publication_acceptance_evidence,tests/test_container_release_workflow}.py" = ["S506"]
-# Entry points that put sibling or source directories on sys.path (or set
-# dont_write_bytecode) before importing them.
-"scripts/{agent_package_source_publication,validate_fabric,dev_agent_wire_linux}.py" = ["E402"]
-"scripts/check-staged-python" = ["E402"]
-# Call-time imports in scripts that serve stdlib-only lanes (`uv run
-# --no-project`, system python3): their project imports cannot be module level.
-"scripts/{install-release-publication,spark_lifecycle_contract.py,candidate_payload.py}" = ["PLC0415"]
-# A twin of the recipe library's adapters/three-d copy (kept AST-identical by
-# tests/cluster_profiles/test_glb_validation.py); where the adapter runs Pillow is
-# optional, and a missing Pillow reads as an invalid image.
-"src/cluster_profiles/glb_validation/images.py" = ["PLC0415"]
-# abspath is lexical; resolve() would follow symlinks in a no-follow verifier.
-"scripts/spark_lifecycle_contract.py" = ["PTH100"]
+"control/tests/{test_agent_jobs_claim_intent,test_agent_jobs_postgres,test_build_cancellation_process_recovery,test_profile_removed_spark_postgres,test_recipe_builds_plan_admission,test_recipe_observation_wire_bridge,test_recipe_retry_installed_cli,test_recipe_update_batches,test_agent_operation_lifecycle,test_operation_api,test_distributed_recovery_budget,test_service_stop_review_postgres}.py" = ["PT018"]
 
 [tool.ruff.lint.isort]
 # Classification must not depend on the generated client being present.

@@ -101,7 +101,7 @@ def test_every_stored_shape_adopts_and_no_event_waits_for_an_operator(stored) ->
         decision = transition(row, event, adapter, NOW)
         assert (
             decision.row.state is not State.NEEDS_OPERATOR
-            or stored == ("waiting-for-operator")
+            or stored == ("waiting-for-operator")  # noqa: RUF021 -- parentheses would re-add a line the operator-wait guard flags
             and event is Tick
         )  # a legacy wait is re-evaluated, never produced
     assert adapter.actions(row) == ()

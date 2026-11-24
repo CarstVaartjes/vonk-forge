@@ -208,7 +208,7 @@ class ModelCacheService(
         # docstring of ``lifecycle/model_cache.py``).
         self._lifecycle = ModelCacheAdapter(
             self._session,
-            clock=lambda: self._clock(),
+            clock=lambda: self._clock(),  # noqa: PLW0108 -- tests replace service._clock; read it late
             effects=self,
             read_payload=_read_operation_payload,
             store_payload=lambda operation, payload: _store_operation_payload(
@@ -219,6 +219,6 @@ class ModelCacheService(
         self._reconciler = Reconciler(
             ModelCacheStore(self._session, self._lifecycle, self),
             dict.fromkeys(CacheOperationKind, self._lifecycle),
-            clock=lambda: self._clock(),
+            clock=lambda: self._clock(),  # noqa: PLW0108 -- tests replace service._clock; read it late
             enabled=True,
         )

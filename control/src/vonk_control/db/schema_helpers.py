@@ -152,7 +152,7 @@ def _check_constraint_differences(connection: Connection) -> list[str]:
             def normalized(expression: str, table_name: str = temporary.name) -> object:
                 quoted_table = connection.dialect.identifier_preparer.quote(table_name)
                 plan = connection.exec_driver_sql(
-                    f"EXPLAIN (VERBOSE, FORMAT JSON) SELECT ({expression}) FROM {quoted_table}"
+                    f"EXPLAIN (VERBOSE, FORMAT JSON) SELECT ({expression}) FROM {quoted_table}"  # noqa: S608 -- interpolates identifiers, types or placeholder styles, which cannot be bound
                 ).scalar_one()
                 return plan[0]["Plan"]["Output"]
 
