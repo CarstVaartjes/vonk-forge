@@ -256,6 +256,12 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
   `clippy.toml`; a crate inherits them. Silence a lint only with a narrow
   `#[expect(lint, reason = "...")]`, never `#[allow]`. Take an exclusive file lock
   through `HeldLock`, never a raw `flock`.
+- Python lint and type configuration lives only in the root `pyproject.toml`
+  (`[tool.ruff]`, `[tool.pyright]`). Silence a finding only on the line it is
+  reported, with its reason: `# noqa: RULE -- reason` or
+  `# pyright: ignore[rule]  # reason`. Never add a `# type: ignore`, a
+  file-level `# ruff: noqa`, or a per-file ignore; the per-file entries that
+  exist are guard-blocked sites awaiting their class follow-up.
 - Every application route appears in the full OpenAPI schema; never use
   `include_in_schema=False` in production routes.
 - Consume wire and persisted JSON with the canonical model's JSON validation
