@@ -285,3 +285,29 @@ def test_staged_added_line_violation_fails_the_hook(
     unstaged.append(file)
     module.check_added_lines([file])
     assert file in capsys.readouterr().err
+
+
+def test_staged_extensionless_files_are_python_only_when_ruff_selects_them(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A Python script without a suffix is linted; a shell script that
+    pyproject.toml's extend-exclude names is not (Ruff's selection decides)."""
+    module = _hook_module()
+    for name in ("scripts/tool", "scripts/run-shell", "scripts/helper.py"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).touch()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    selection = f"{tmp_path / 'scripts/tool'}\n{tmp_path / 'scripts/helper.py'}\n"
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout=selection)
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    staged = ["scripts/tool", "scripts/run-shell", "scripts/helper.py"]
+    assert module.python_files(staged, tmp_path / "python") == [
+        "scripts/tool",
+        "scripts/helper.py",
+    ]
+    assert commands[0][-2:] == ["--show-files", "."]
