@@ -7,7 +7,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 import vonk_control.enrollment.issuance as issuance_module
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.model_primitives import Base
@@ -16,8 +15,9 @@ from vonk_control.models.fleet import (
     AgentCertificateRotation,
     AgentEnrollment,
 )
-from vonk_control.pki import IssuedCertificate
-from vonk_control.step_ca import StepCAUnavailable
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
+from vonk_control.pki.step_ca import StepCAUnavailable
 
 from .ca_material import NODE_ID, NOW
 from .test_enrollment import RecordingAuthority, csr, evidence

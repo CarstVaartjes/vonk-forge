@@ -20,7 +20,7 @@ from vonk_control.models.fleet import (
     AgentEnrollment,
     AgentEnrollmentGrant,
 )
-from vonk_control.pki import IssuedCertificate
+from vonk_control.pki.issuance import IssuedCertificate
 from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
 from .ca_material import NODE_ID, NOW

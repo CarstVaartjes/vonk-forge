@@ -51,7 +51,6 @@ from vonk_control.agent_upgrades.contract import (
     AgentUpgradeRolloutResult,
 )
 from vonk_control.artifact_jobs.evidence import ArtifactJobResultEvidence
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
@@ -110,6 +109,7 @@ from vonk_control.model_cache.contract import (
     ModelCacheRepairPayload,
 )
 from vonk_control.operator_receipt_contract import ReceiptOwner
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
 from vonk_control.recipe_image_availability.removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,

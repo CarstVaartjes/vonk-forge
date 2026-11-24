@@ -47,7 +47,8 @@ from vonk_control.models.fleet import (
     AgentNode,
 )
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-from vonk_control.pki import IssuedCertificate
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.step_ca import StepCAIssuancePending
 from vonk_control.security.enrollment import (
     require_certificate,
     require_node,
@@ -56,7 +57,6 @@ from vonk_control.security.enrollment import (
     validate_issued_binding,
     validate_renewal_result,
 )
-from vonk_control.step_ca import StepCAIssuancePending
 from vonk_control.waits.persisted import schedule_wait
 
 _ROTATION_ISSUANCE_TIMEOUT = timedelta(minutes=5)

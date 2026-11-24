@@ -33,20 +33,20 @@ from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
     CertificateRequestMode,
 )
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.capabilities import CapabilityConfigurationError
 from vonk_control.models.fleet import (
     AgentCertificate,
     LocalCertificateIssuance,
     LocalCertificateRevocation,
 )
-from vonk_control.pki import (
+from vonk_control.pki.issuance import (
     IssuedCertificate,
     _load_node_csr,
     _read_regular_secret_file,
     _utc_timestamp,
 )
-from vonk_control.step_ca import (
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
+from vonk_control.pki.step_ca import (
     _DEFAULT_CERTIFICATE_LIFETIME_SECONDS,
     _KID,
     _MAX_CRL_WINDOW,

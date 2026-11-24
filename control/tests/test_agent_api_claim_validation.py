@@ -24,15 +24,15 @@ from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.inventory.items import runtime_value
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperationAttempt
-from vonk_control.pki import IssuedCertificate
-from vonk_control.step_ca import StepCAIssuancePending
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
+from vonk_control.pki.step_ca import StepCAIssuancePending
 
 from .agent_api_support import (
     NODE_A,

@@ -116,8 +116,8 @@ from vonk_control.owner_liveness import (
     builds_in_flight,
     installations_named_by_live_jobs,
 )
+from vonk_control.pki.step_ca import CERTIFICATE_LIFETIME
 from vonk_control.run_states import ENDED_RUN_STATES
-from vonk_control.step_ca import CERTIFICATE_LIFETIME
 from vonk_control.stored.json_values import binding_for
 from vonk_control.stored.rows import read_row_column
 from vonk_control.stored.states import LibrarySyncRunState

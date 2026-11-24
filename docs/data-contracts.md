@@ -180,7 +180,7 @@ module defines its own.
 | `control/src/vonk_control/artifact_jobs/job_contract.py` | declared | 1 | The compiled job contract of a recipe revision, read before a job exists. |
 | `control/src/vonk_control/artifact_jobs/maintenance.py` | declared | 1 | Typed reports of artifact maintenance sweeps. |
 | `control/src/vonk_control/auth_api.py` | declared | 4 | Strict HTTP boundary for durable browser authentication. |
-| `control/src/vonk_control/ca_issuance_contract.py` | controller-contract | 1 | Exact accepted CA issuance binding and the typed refusal reason. |
+| `control/src/vonk_control/pki/issuance_contract.py` | controller-contract | 1 | Exact accepted CA issuance binding and the typed refusal reason. |
 | `control/src/vonk_control/cache_removal_review.py` | declared | 6 | Canonical review contract shared by cache-removal owners and clients. |
 | `control/src/vonk_control/catalog/api.py` | declared | 3 | Strict authenticated HTTP surface for the local database recipe catalog. |
 | `control/src/vonk_control/catalog/revision_contract.py` | controller-contract | 9 | Typed readers and writers for immutable catalog revision JSON columns. |

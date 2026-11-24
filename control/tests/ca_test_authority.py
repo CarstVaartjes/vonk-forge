@@ -10,9 +10,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
-from vonk_control.pki import CertificateAuthority, IssuedCertificate
-from vonk_control.step_ca import StepCAIssuancePending
+from vonk_control.pki.issuance import CertificateAuthority, IssuedCertificate
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
+from vonk_control.pki.step_ca import StepCAIssuancePending
 
 
 def fixture_certificate(

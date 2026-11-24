@@ -76,7 +76,8 @@ from vonk_control.models.fleet import (
     AgentIssuedCertificateRevocation,
     AgentNode,
 )
-from vonk_control.pki import CertificateAuthority, IssuedCertificate
+from vonk_control.pki.issuance import CertificateAuthority, IssuedCertificate
+from vonk_control.pki.step_ca import StepCAIssuancePending
 from vonk_control.security.enrollment import (
     require_admitted_request,
     require_fresh_enrollment,
@@ -86,7 +87,6 @@ from vonk_control.security.enrollment import (
     validate_issued_binding,
 )
 from vonk_control.settings import DATABASE_WAIT_BUDGETS
-from vonk_control.step_ca import StepCAIssuancePending
 from vonk_control.waits.persisted import schedule_wait
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")

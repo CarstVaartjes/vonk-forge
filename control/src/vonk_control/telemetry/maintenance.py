@@ -41,7 +41,7 @@ from vonk_control.models.telemetry import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from vonk_control.step_ca import CERTIFICATE_LIFETIME
+from vonk_control.pki.step_ca import CERTIFICATE_LIFETIME
 
 _MAX_MAINTENANCE_LIMIT = 25_000
 #: One pass deletes at most this many rows per table.  Maintenance holds rows

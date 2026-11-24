@@ -17,11 +17,15 @@ from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import CertificateCode
-from vonk_control.ca_issuance_contract import (
+from vonk_control.pki.issuance import (
+    CertificateAuthority,
+    _load_node_csr,
+    _utc_timestamp,
+)
+from vonk_control.pki.issuance_contract import (
     CertificateIssuanceBinding,
     CertificateRefusalReason,
 )
-from vonk_control.pki import CertificateAuthority, _load_node_csr, _utc_timestamp
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}\Z")
 _KID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")

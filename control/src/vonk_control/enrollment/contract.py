@@ -12,8 +12,8 @@ from vonk_agent_protocol.state_machines import (
     CertificateRotationState,
     EnrollmentPurpose,
 )
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.machine_states import EnrollmentGrantStateField
+from vonk_control.pki.issuance_contract import CertificateIssuanceBinding
 from vonk_control.strict_json import StrictJSONModel
 
 EnrollmentId = Annotated[str, StringConstraints(pattern=UUID4_PATTERN)]

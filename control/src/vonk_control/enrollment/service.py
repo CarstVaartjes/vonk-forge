@@ -57,7 +57,12 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-from vonk_control.pki import IssuedCertificate
+from vonk_control.pki.issuance import IssuedCertificate
+from vonk_control.pki.step_ca import (
+    StepCAError,
+    StepCAIssuancePending,
+    StepCAUnavailable,
+)
 from vonk_control.security.enrollment import (
     require_activation_identity,
     require_certificate,
@@ -69,7 +74,6 @@ from vonk_control.security.enrollment import (
 from vonk_control.security.enrollment import (
     require_expired_source as _require_expired_source,
 )
-from vonk_control.step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
 from vonk_control.waits.persisted import read_wait, schedule_wait
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")

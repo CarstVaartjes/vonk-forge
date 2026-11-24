@@ -49,12 +49,12 @@ from vonk_control.models.fleet import AgentIssuedCertificateRevocation
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
+from vonk_control.pki.step_ca import StepCAUnavailable
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from vonk_control.step_ca import StepCAUnavailable
 from vonk_control.stored.rows import read_row_column
 from vonk_control.waits.contract import WaitEvidence
 from vonk_control.waits.due import DueWaitBackstop, WaitSource
