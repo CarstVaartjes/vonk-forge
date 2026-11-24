@@ -119,18 +119,16 @@ def run_vm_cargo(command: list[str], deadline: float) -> None:
         raise subprocess.CalledProcessError(result.returncode, invocation)
 
 
-# The paths CI's `lint` job feeds to scripts/check-added-lines.
-ADDED_LINE_PATHS = [
-    "control",
-    "agent_protocol",
-    "src",
-    "scripts",
-    "rust",
-    "deploy",
-    "packaging",
-    "tests",
-    ".github",
-]
+# The paths CI's `lint` job feeds to scripts/check-added-lines: read from the
+# workflow, its one owner, so the hook cannot drift from CI.
+_CI_PATHSPEC = re.search(
+    r"^\s+(control agent_protocol .+?) \|$",
+    (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"),
+    re.MULTILINE,
+)
+if _CI_PATHSPEC is None:
+    raise SystemExit("ci.yml has no added-line pathspec")
+ADDED_LINE_PATHS = _CI_PATHSPEC.group(1).split()
 
 
 def check_added_lines(changed: list[str]) -> None:

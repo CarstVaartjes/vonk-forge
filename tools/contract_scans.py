@@ -29,7 +29,7 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import NotRequired, TypedDict
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
@@ -206,10 +206,25 @@ def python_models(root: Path = ROOT) -> dict[tuple[str, str], tuple[str, ...]]:
     return models
 
 
+class RegistryModule(TypedDict):
+    module: str
+
+
+class AllowedDuplicate(TypedDict):
+    models: list[str]
+
+
+class ModelRegistry(TypedDict):
+    """The parts of ``tools/python-model-registry.json`` the scan reads."""
+
+    modules: list[RegistryModule]
+    allowed_duplicates: NotRequired[list[AllowedDuplicate]]
+
+
 def python_registry_problems(
-    root: Path = ROOT, registry: dict[str, Any] | None = None
+    root: Path = ROOT, registry: ModelRegistry | None = None
 ) -> list[str]:
-    document: dict[str, Any] = (
+    document: ModelRegistry = (
         json.loads((root / "tools/python-model-registry.json").read_text())
         if registry is None
         else registry
