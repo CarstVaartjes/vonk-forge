@@ -168,8 +168,7 @@ def test_dependencies_only_order_startup_and_are_acyclic() -> None:
 # edges cannot prevent that. Each allowed joiner needs a reason.
 ALLOWED_JOINS = {
     "tailscale-configurator": (
-        "optional remote path; a configurator left Created by a refused join "
-        "starts on the next Redeploy"
+        "a configurator left Created by a refused join starts on the next Redeploy"
     ),
 }
 

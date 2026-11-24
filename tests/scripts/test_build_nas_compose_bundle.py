@@ -203,7 +203,7 @@ def test_payload_build_rejects_noncanonical_compose(
         document["include"] = ["other.yaml"]
     elif mutation == "bind":
         document["services"]["control-api"]["volumes"].append(
-            "./repository:/repository:ro"
+            "/var/run/docker.sock:/var/run/docker.sock"
         )
     elif mutation == "digest":
         environment = document["services"]["control-api"]["environment"]

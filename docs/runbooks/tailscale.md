@@ -167,8 +167,11 @@ enroll.vonk-forge.lan 10.0.0.2
 agents.vonk-forge.lan 10.0.0.2
 ```
 
-Allow TCP 8443 only from `10.0.0.0/24`, preferably narrowed to reserved GPU node
-leases. Do not allow LAN access to human endpoints. GPU node DHCP
+Caddy publishes TCP 8443 on all NAS interfaces, and Docker-published ports
+bypass the host INPUT firewall, so restrict 8443 with a LAN or router rule:
+allow it only from `10.0.0.0/24`, preferably narrowed to reserved GPU node
+leases. The human control site is served on 8443 too (TLS plus application
+login). GPU node DHCP
 reservations improve stability, but identity and routing use authenticated
 agent presence rather than a hard-coded address.
 Do not put the Tailscale Service hostname in the Windows hosts file; MagicDNS

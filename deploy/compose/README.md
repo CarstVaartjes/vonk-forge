@@ -106,8 +106,8 @@ Tailscale-connected client. For Lab mode, trust the generated local CA and
 verify the controller from a LAN client.
 
 Do not add host-path overrides. Persistent data belongs to the named Docker
-volumes declared by the generated project. Caddy binds to the configured LAN
-address and serves the browser UI with the generated local CA certificate;
+volumes declared by the generated project. Caddy publishes 8443 on all NAS
+interfaces and serves the browser UI with the generated local CA certificate;
 Secure remote additionally enables the Tailscale gateway. PostgreSQL is the
 control authority and Step CA is the agent identity authority. There is no
 runtime Git checkout, host updater, migration helper, or A/B agent supervisor.
@@ -278,7 +278,8 @@ while `ingress` is attached) shows `unhealthy` and the critical
 `docs/runbooks/observability.md#agent-ingress-down`). `compose up` and restarts
 reuse the container record, so recover by deleting the Caddy container (not
 volumes) and Redeploying; Compose recreates it on all its networks. A container
-left `created` by an aborted `up` also starts on the next Redeploy.
+left `created`, or stopped after a failed start, starts on the next Redeploy
+(Docker does not retry a failed start at boot, moby#39559).
 
 This daemon store is separate from recipe availability: recipe preparation
 copies registry bytes with skopeo into the Controller's `image-cache/oci` layout,
