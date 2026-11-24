@@ -199,9 +199,13 @@ def test_profile_stop_whose_parent_changed_replans_and_completes(
                 root = session.scalar(select(Job).where(Job.kind == _ROOT))
                 assert root is not None
                 payload = dict(root.payload)
-                ordinal = payload["workload_intent_ordinal"]
+                recorded = payload["progress"]
+                assert isinstance(recorded, dict)
+                progress = dict(recorded)
+                ordinal = progress["workload_intent_ordinal"]
                 assert isinstance(ordinal, int)
-                payload["workload_intent_ordinal"] = ordinal + 1
+                progress["workload_intent_ordinal"] = ordinal + 1
+                payload["progress"] = progress
                 root.payload = payload
                 changed.append(root.id)
         return accept(*args, **kwargs)
