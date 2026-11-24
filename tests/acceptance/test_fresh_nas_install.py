@@ -476,7 +476,7 @@ def _diagnostic_command(
             timeout=30,
             check=False,
         )
-    except OSError, subprocess.SubprocessError:
+    except (OSError, subprocess.SubprocessError):
         return None
 
 
@@ -1271,7 +1271,7 @@ def _tailnet_hostname_address(hostname: str) -> str | None:
     for _family, _type, _protocol, _canonical, sockaddr in results:
         try:
             address = ipaddress.ip_address(sockaddr[0])
-        except IndexError, ValueError:
+        except (IndexError, ValueError):
             continue
         if not address.is_unspecified and not address.is_multicast:
             addresses.append(address)
@@ -1686,7 +1686,7 @@ def image_present(image: str) -> bool:
             ).returncode
             == 0
         )
-    except OSError, subprocess.TimeoutExpired:
+    except (OSError, subprocess.TimeoutExpired):
         return False
 
 

@@ -1462,7 +1462,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             detail = detail or f"{type(error).__name__}: {str(error)[:200]}"
         try:
             route_state = self._route_state()
-        except LifecycleError, SliceError, AssertionError:
+        except (LifecycleError, SliceError, AssertionError):
             route_state = None
         return ProbeResult(
             at=at,

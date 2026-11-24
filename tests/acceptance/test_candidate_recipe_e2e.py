@@ -352,7 +352,7 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
                     }
                     if keys == expected_recipe_keys:
                         break
-            except httpx2.TransportError, ValueError, KeyError, TypeError:
+            except (httpx2.TransportError, ValueError, KeyError, TypeError):
                 pass
             time.sleep(min(2, max(0, deadline - time.monotonic())))
         else:
