@@ -330,7 +330,7 @@ class PhaseDispatchMixin:
                 fail(
                     str(error),
                     failure_code=code,
-                    replan=phase.kind != ProfileChildPhase.FINAL_VERIFY,  # pyright: ignore[reportUnnecessaryComparison]  # a StrEnum member equals its string value at run time
+                    replan=phase.kind != ProfileReportedPhase.FINAL_VERIFY,
                     definite=error.definite,
                     cause=error,
                 )
