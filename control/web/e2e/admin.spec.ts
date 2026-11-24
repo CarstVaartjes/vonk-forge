@@ -384,12 +384,14 @@ test("the Library Spark counts stay one scrollable row on a phone and the page d
   await expect(buttons.last()).toBeAttached();
   const shape = await sparks.evaluate((group) => {
     const row = group.getBoundingClientRect();
-    const heights = [...group.querySelectorAll("button")].map(
-      (button) => button.getBoundingClientRect().height,
+    const rects = [...group.querySelectorAll("button")].map((button) =>
+      button.getBoundingClientRect(),
     );
+    const heights = rects.map((rect) => rect.height);
+    const tops = rects.map((rect) => Math.round(rect.top));
     return {
       withinPage: row.right <= document.documentElement.clientWidth + 0.5,
-      oneRow: Math.max(...heights) - Math.min(...heights) < 1,
+      oneRow: Math.max(...tops) - Math.min(...tops) < 1,
       tallest: Math.max(...heights),
     };
   });

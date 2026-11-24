@@ -4,7 +4,7 @@ import type { MetricsSeriesResponse, VisualFleetNode } from "../../api/types";
 import { fleetFigure, formatValue } from "../../lib/metric-units";
 import { Estimate } from "../ui/estimate";
 import { HISTORY_SECONDS, type HistoryPoint } from "../../hooks/use-telemetry-history";
-import { NOT_REPORTED_TEXT, halfUp, liveSample } from "../../lib/fleet";
+import { halfUp, liveSample } from "../../lib/fleet";
 import { GPU_READINGS, num } from "../../lib/gpu-readings";
 import { throttleReasons } from "../../lib/throttle";
 import { GPU_TEMP_SERIOUS_C, GPU_TEMP_WARN_C } from "../../lib/gpu-thresholds";
@@ -95,7 +95,7 @@ export function SparkGpuNow({
       <div className="spark-power">
         <div>
           <span>GPU power</span>
-          <strong>{power === null ? NOT_REPORTED_TEXT : `${power.toFixed(1)} W`}</strong>
+          <strong>{power === null ? <NoReading /> : `${power.toFixed(1)} W`}</strong>
         </div>
         <div className="spark-power-trace">
           <Sparkline

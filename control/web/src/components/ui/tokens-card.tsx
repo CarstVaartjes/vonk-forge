@@ -50,7 +50,7 @@ export function TokensCard({
             <EstimateTag basis={tokens.spec.basis} />
           </p>
           <p className="stat-caption">
-            {tokens.spec.hint} Prompt tokens: <NoReading />
+            {tokens.spec.hint} Prompt tokens: <NoReading />.
             {coverage < 1 && ` Data covers ${Math.floor(coverage * 100)}% of this range.`}
           </p>
           <div className="stat-table">

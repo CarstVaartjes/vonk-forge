@@ -1,3 +1,4 @@
+import { NoReading } from "../components/ui/no-reading";
 import "./spark.css";
 import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { ControlApi, MetricRange } from "../api/types";
@@ -12,14 +13,7 @@ import { sparkColor } from "../components/chart/series";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import { useTelemetryHistory } from "../hooks/use-telemetry-history";
-import {
-  NOT_REPORTED_TEXT,
-  liveSample,
-  nodeDisplayName,
-  nodeStatus,
-  nodeStatusTone,
-  uptimeText,
-} from "../lib/fleet";
+import { liveSample, nodeDisplayName, nodeStatus, nodeStatusTone, uptimeText } from "../lib/fleet";
 
 type Tab = "overview" | "settings" | "logs";
 const TABS: Array<[Tab, string]> = [
@@ -152,10 +146,10 @@ export function SparkPage({
           </header>
           <ul className="spark-chips" aria-label="Facts">
             <li>
-              Uptime <strong>{uptime ?? NOT_REPORTED_TEXT}</strong>
+              Uptime <strong>{uptime ?? <NoReading />}</strong>
             </li>
             <li>
-              Agent <strong>{agent ?? NOT_REPORTED_TEXT}</strong>
+              Agent <strong>{agent ?? <NoReading />}</strong>
             </li>
             <li>
               Host{" "}

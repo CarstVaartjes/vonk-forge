@@ -1,7 +1,8 @@
+import { NoReading } from "../ui/no-reading";
 import "./fleet-pulse.css";
 import type { ReactNode } from "react";
 import type { MetricsSeriesResponse, VisualFleetNode } from "../../api/types";
-import { NOT_REPORTED_TEXT, coverageText, fleetMemory, formatBytes } from "../../lib/fleet";
+import { coverageText, fleetMemory, formatBytes } from "../../lib/fleet";
 import { compactCount, fleetFigure, formatValue, modelTotals } from "../../lib/metric-units";
 import { GPU_ONLY_CAPTION } from "../ui/energy-card";
 import { Estimate } from "../ui/estimate";
@@ -14,6 +15,7 @@ function Tile({
   unit,
   caption,
   unavailable,
+  unread,
   children,
 }: {
   label: string;
@@ -22,12 +24,18 @@ function Tile({
   caption?: string | undefined;
   /** Why there is no figure; shown instead of the figure and caption. */
   unavailable?: string | undefined;
+  /** No reading at all: the shared muted dash stands in for the figure. */
+  unread?: boolean;
   children?: ReactNode;
 }) {
   return (
     <section className="pulse-tile" aria-label={label}>
       <h2 className="pulse-label">{label}</h2>
-      {unavailable !== undefined ? (
+      {unread ? (
+        <p className="pulse-fig">
+          <NoReading />
+        </p>
+      ) : unavailable !== undefined ? (
         <>
           <p className="pulse-fig is-muted" aria-hidden="true">
             —
@@ -93,12 +101,12 @@ export function FleetPulse({
         figure={watts?.value.toFixed(1)}
         unit={watts?.symbol}
         caption={watts ? coverageText(watts.reporting, online) : undefined}
-        unavailable={watts ? undefined : NOT_REPORTED_TEXT}
+        unread={!watts}
       />
       <Tile
         label="Unified memory"
         figure={memory ? formatBytes(memory.split.usedBytes).replace(/ GiB$/, "") : undefined}
-        unavailable={memory ? undefined : NOT_REPORTED_TEXT}
+        unread={!memory}
         unit={memory ? `GiB of ${formatBytes(memory.split.totalBytes)}` : undefined}
         caption={
           memory
@@ -138,7 +146,7 @@ export function FleetPulse({
           ) : undefined
         }
         caption={GPU_ONLY_CAPTION}
-        unavailable={gpuEnergy ? undefined : NOT_REPORTED_TEXT}
+        unread={!gpuEnergy}
       />
     </div>
   );

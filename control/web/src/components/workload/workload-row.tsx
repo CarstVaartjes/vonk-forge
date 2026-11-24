@@ -3,13 +3,7 @@ import "./workload-row.css";
 import type { ReactNode } from "react";
 import type { MetricsSeriesResponse } from "../../api/types";
 import type { WorkloadReads } from "../../hooks/use-workload-reads";
-import {
-  formatBytes,
-  NOT_REPORTED_TEXT,
-  nodeDisplayName,
-  nodeMemorySplit,
-  type WorkloadGroup,
-} from "../../lib/fleet";
+import { formatBytes, nodeDisplayName, nodeMemorySplit, type WorkloadGroup } from "../../lib/fleet";
 import {
   compactCount,
   formatValue,
@@ -101,12 +95,16 @@ export function WorkloadRow({
               />
             </>
           ) : (
-            !speedPending && <strong>{NOT_REPORTED_TEXT}</strong>
+            !speedPending && (
+              <strong>
+                <NoReading />
+              </strong>
+            )
           )}
         </div>
         <div>
           <span className="row-label">Requests</span>
-          <strong>{queue === undefined ? null : (queue ?? NOT_REPORTED_TEXT)}</strong>
+          <strong>{queue === undefined ? null : (queue ?? <NoReading />)}</strong>
         </div>
         <div>
           <span className="row-label">Tokens, 24 h</span>
@@ -129,7 +127,7 @@ export function WorkloadRow({
               return (
                 <li key={node.id}>
                   <small>{nodeDisplayName(node)}</small>
-                  <strong>{models == null ? NOT_REPORTED_TEXT : formatBytes(models)}</strong>
+                  <strong>{models == null ? <NoReading /> : formatBytes(models)}</strong>
                 </li>
               );
             })}

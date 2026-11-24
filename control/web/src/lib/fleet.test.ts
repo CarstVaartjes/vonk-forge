@@ -2,7 +2,6 @@ import { GroupHealth, ProfileReasonSeverity, ProjectionCode } from "../api/vocab
 import { parseContractJson, materialize, type WireNumber } from "../api/contract-numeric";
 import type { VisualFleetNode } from "../api/types";
 import {
-  joinWords,
   formatBytes,
   groupByWorkload,
   nodeDisplayName,
@@ -331,11 +330,4 @@ describe("workloadStateUnconfirmed", () => {
     expect(workloadStateUnconfirmed(run(GroupHealth.UNAVAILABLE, null))).toBe(true);
     expect(workloadStateUnconfirmed(run(GroupHealth.HEALTHY, true))).toBe(false);
   });
-});
-
-test("joinWords drops empty parts and leaves no space before punctuation", () => {
-  expect(joinWords(["The disk is nearly full", "", "(spark-1)"])).toBe(
-    "The disk is nearly full (spark-1)",
-  );
-  expect(joinWords(["10 GiB free ", ".", " "])).toBe("10 GiB free.");
 });

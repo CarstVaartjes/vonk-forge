@@ -1,9 +1,9 @@
+import { NoReading } from "../ui/no-reading";
 import "./spark-card.css";
 import type { ControlApi, VisualFleetNode } from "../../api/types";
 import { HISTORY_SECONDS, useTelemetryHistory } from "../../hooks/use-telemetry-history";
 import { GPU_READINGS as READINGS } from "../../lib/gpu-readings";
 import {
-  NOT_REPORTED_TEXT,
   halfUp,
   liveSample,
   nodeDisplayName,
@@ -116,7 +116,13 @@ export function SparkCard({
         </h3>
         {rank !== undefined && <span className="spark-rank">rank {rank}</span>}
         <span className="spark-uptime">
-          {uptime ? `up ${uptime}` : `Uptime: ${NOT_REPORTED_TEXT}`}
+          {uptime ? (
+            `up ${uptime}`
+          ) : (
+            <>
+              Uptime: <NoReading />
+            </>
+          )}
         </span>
       </header>
       <p className="spark-sub">

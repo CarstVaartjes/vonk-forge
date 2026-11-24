@@ -1,4 +1,4 @@
-import { NOT_REPORTED_TEXT } from "../../lib/fleet";
+import { NoReading } from "./no-reading";
 import { Sparkline } from "../chart/sparkline";
 
 /**
@@ -32,7 +32,7 @@ export function TraceTile({
         <span>{title}</span>
         <span className="spark-trace-value">
           {shown === null ? (
-            NOT_REPORTED_TEXT
+            <NoReading />
           ) : (
             <>
               {shown} <small>{unit}</small>

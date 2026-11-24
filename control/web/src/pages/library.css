@@ -1081,6 +1081,11 @@
 .library-toolbar .segmented button small.segment-count {
   color: var(--muted);
 }
+/* The row scrolls, so an outer ring would be clipped: draw it inside the button. */
+.library-toolbar .segmented button:focus-visible,
+.library-subnav a:focus-visible {
+  outline-offset: -3px;
+}
 .library-toolbar .segmented button:disabled {
   cursor: not-allowed;
   opacity: 0.5;

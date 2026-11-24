@@ -393,15 +393,6 @@ export function attentionTone(
   return alert.severity === "critical" ? "bad" : "warn";
 }
 
-/** Words joined by single spaces: empty parts vanish and no space is left before punctuation. */
-export function joinWords(parts: readonly string[]): string {
-  return parts
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+([.,;:!?])/g, "$1");
-}
-
 /**
  * A firing alert in plain words: its severity as a word, and its summary with the Spark it
  * names by display name rather than by identity. `vonkctl fleet` prints `severity: text`.
@@ -412,11 +403,11 @@ export function attentionText(
 ): { severity: string; text: string } {
   const spark = fleet.find((node) => node.id === alert.labels.node_id);
   const named = alert.labels.node_id
-    ? `(${spark ? nodeDisplayName(spark) : alert.labels.node_id})`
+    ? ` (${spark ? nodeDisplayName(spark) : alert.labels.node_id})`
     : "";
   return {
     severity: alert.severity.charAt(0).toLocaleUpperCase() + alert.severity.slice(1),
-    text: joinWords([alert.summary, named]),
+    text: `${alert.summary}${named}`,
   };
 }
 

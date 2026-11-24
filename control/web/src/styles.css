@@ -114,7 +114,7 @@ a:where(:not([class])):is(:hover, :focus-visible) {
   text-decoration-thickness: 2px;
 }
 /* Programmatic focus targets (page headings, main) show a ring only once a key was pressed last. */
-:root:not([data-input="keyboard"]) [tabindex="-1"]:focus,
+:root[data-input="pointer"] [tabindex="-1"]:focus,
 [tabindex="-1"]:focus:not(:focus-visible) {
   outline: none;
 }
