@@ -7,6 +7,7 @@ import importlib.machinery
 import importlib.util
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,15 @@ def _publication(monkeypatch):
     return module
 
 
+def _read_pid(pidfile: Path) -> int:
+    """The transfer's pid, once its atomic write lands (bounded wait)."""
+    deadline = time.monotonic() + 10
+    while not pidfile.exists():
+        assert time.monotonic() < deadline, "transfer never wrote its pid"
+        time.sleep(0.01)
+    return int(pidfile.read_text())
+
+
 @pytest.mark.timeout(30, method="signal")
 @pytest.mark.parametrize("reader", ["digest", "bytes"])
 def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
@@ -36,7 +46,9 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
     child = tmp_path / "transfer.py"
     child.write_text(
         "import os,pathlib,sys,time\n"
-        "pathlib.Path(sys.argv[2]).write_text(str(os.getpid()))\n"
+        "pid=pathlib.Path(sys.argv[2])\n"
+        "pid.with_name(pid.name+'.tmp').write_text(str(os.getpid()))\n"
+        "os.replace(pid.with_name(pid.name+'.tmp'),pid)\n"
         "payload=pathlib.Path(sys.argv[1])\n"
         "if payload.exists():\n"
         "    sys.stdout.buffer.write(payload.read_bytes())\n"
@@ -46,7 +58,7 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
         "    time.sleep(60)\n"
     )
     transfer_timeout = publication.RCLONE_TRANSFER_TIMEOUT
-    monkeypatch.setattr(publication, "RCLONE_TRANSFER_TIMEOUT", 0.15)
+    monkeypatch.setattr(publication, "RCLONE_TRANSFER_TIMEOUT", 0.5)
     popen = publication.subprocess.Popen
     children = []
 
@@ -68,7 +80,7 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
     try:
         with pytest.raises(publication.PublicationError):
             read()
-        pid = int(pidfile.read_text())
+        pid = _read_pid(pidfile)
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
         # The transfer fault has cleared. A fresh Python process may need more
@@ -84,7 +96,7 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
             with pytest.raises(publication.PublicationError):
                 read()
             with pytest.raises(ProcessLookupError):
-                os.kill(int(pidfile.read_text()), 0)
+                os.kill(_read_pid(pidfile), 0)
             payload.write_bytes(complete)
             assert read() == complete
     finally:
