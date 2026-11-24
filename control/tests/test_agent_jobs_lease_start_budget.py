@@ -21,9 +21,9 @@ from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.retirement import authorize_operator_resume_in_session
 from vonk_control.agent_operation_facts import START_STALL_WINDOW, job_start_deadline
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.inventory.items import (
     runtime_value,
 )

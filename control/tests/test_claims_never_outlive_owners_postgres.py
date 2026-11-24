@@ -48,9 +48,9 @@ from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.model_cache.service import ModelCacheService

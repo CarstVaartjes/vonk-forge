@@ -15,9 +15,9 @@ from vonk_agent_protocol.agent_operations import RecipeStartResult
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.distribution import DistributionAssignment
 from vonk_control.agent_outcome import stored_report
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.models.execution import InstallationNode, RunNode
 from vonk_control.models.operations import AgentOperation
 

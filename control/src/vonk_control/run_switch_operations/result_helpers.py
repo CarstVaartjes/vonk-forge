@@ -14,7 +14,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.bounded_json import require_mapping
-from vonk_control.distribution_assignment import NodeDistributionAssignment
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.failure_classification import (
     disposition,

@@ -16,9 +16,9 @@ from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.content_identity import ImageContent, same_image
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.types import content_objects, plan_objects
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
 from vonk_control.models.execution import RecipeInstallation
 from vonk_control.oci_image_store import StoreUnknown

@@ -13,11 +13,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.filesystem import RecipeBuildObjectSource
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import CompositeObjectSource, MemoryObjectSource
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
 from vonk_control.model_cache.service import ModelCacheService

@@ -39,9 +39,9 @@ from vonk_control.catalog.sync_contract import (
     ManagedCatalogSyncRequest,
     reviewed_catalog_content,
 )
+from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.types import content_objects, plan_objects
-from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor.identity import DistributionIdentity
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
