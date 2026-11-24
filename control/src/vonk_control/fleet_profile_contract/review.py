@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -63,6 +64,21 @@ class ProfileLoadAction(StrEnum):
     BLOCKED = "blocked"
 
 
+@dataclass(frozen=True, slots=True)
+class SavedProfileRevision:
+    """The review is of the saved profile at ``revision``."""
+
+    revision: int
+
+
+@dataclass(frozen=True, slots=True)
+class UnsavedProfileReview:
+    """The review is of an unsaved draft: it binds no saved revision."""
+
+
+type ProfileReviewBinding = SavedProfileRevision | UnsavedProfileReview
+
+
 class FleetProfileReviewedDecision(StrictModel):
     """The reviewable semantic decision that owns the reconciliation digest."""
 
@@ -89,6 +105,14 @@ class FleetProfileReviewedDecision(StrictModel):
     #: True when preparation is all that stands between this plan and admission.
     waits_for_preparation: bool = False
     reasons: list[FleetProfileReason] = Field(max_length=128)
+
+    @property
+    def binding(self) -> ProfileReviewBinding:
+        """What this review is bound to (``profile_revision`` is null for a draft)."""
+
+        if self.profile_revision is None:
+            return UnsavedProfileReview()
+        return SavedProfileRevision(self.profile_revision)
 
 
 def _stops_a_workload(decision: FleetProfileReviewedDecision) -> bool:

@@ -451,7 +451,7 @@ class FleetProfileService:
                     session,
                     selected.profile_id,
                     selected.intended,
-                    selected.profile_revision,
+                    selected.plan.binding,
                 )
             if not roster_changed and not drift_signature and followed is None:
                 if (

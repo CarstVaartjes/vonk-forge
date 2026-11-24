@@ -372,7 +372,7 @@ class FleetProfileService:
             # A damaged receipt proves no edit: the ordinary admission path
             # retires it.
             return not isinstance(plan, Residue) and _saved_since_review(
-                plan.profile_revision, profile.revision
+                plan.binding, profile.revision
             )
 
     def _finish_pending_admission(

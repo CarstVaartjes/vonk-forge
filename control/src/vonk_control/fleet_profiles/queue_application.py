@@ -287,7 +287,7 @@ class FleetProfileService:
                 self._validate_draft_review_identity(
                     session,
                     profile,
-                    profile_revision=preview.profile_revision,
+                    review=preview.binding,
                     assignments=frozen_assignments,
                 )
             self._reserve_preview_assets(session, preview, now=now)

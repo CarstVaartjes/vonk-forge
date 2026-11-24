@@ -18,7 +18,11 @@ from vonk_control.fleet_profile_contract.applications import (
     FleetProfileIntendedConfiguration,
 )
 from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
-from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.review import (
+    FleetProfilePreview,
+    ProfileReviewBinding,
+    SavedProfileRevision,
+)
 from vonk_control.fleet_profiles.assessment_support import (
     _preview_blockers,
     _profile_preview_is_waitable,
@@ -230,11 +234,10 @@ class FleetProfileService:
                 fresh = self.preview(
                     blocked.profile_id, excluded_application_id=application_id
                 )
+                saved = fresh.binding
                 if (
-                    fresh.profile_revision is None
-                    or _saved_since_review(
-                        blocked.profile_revision, fresh.profile_revision
-                    )
+                    not isinstance(saved, SavedProfileRevision)
+                    or _saved_since_review(blocked.binding, saved.revision)
                     or fresh.scope.node_ids != intended.scope.node_ids
                 ):
                     self._defer_pending_application(
@@ -243,6 +246,11 @@ class FleetProfileService:
                         blockers=_preview_blockers(blocked),
                     )
                     return None
+                # The saved revision is the accepted one, so the plan keeps the
+                # accepted identity: a newer Controller may hash it differently.
+                fresh = fresh.model_copy(
+                    update={"profile_digest": intended.profile_digest}
+                )
             else:
                 fresh = self.preview(
                     blocked.profile_id,
@@ -339,7 +347,7 @@ class FleetProfileService:
                     return False
                 profile = session.get(FleetProfile, row.profile_id)
                 if profile is None or _saved_since_review(
-                    plan.profile_revision, profile.revision
+                    plan.binding, profile.revision
                 ):
                     return False
                 newest = self._execution_assignments(session, self._choices(profile))
@@ -436,7 +444,7 @@ class FleetProfileService:
         session: Session,
         profile_id: str,
         intended: FleetProfileIntendedConfiguration,
-        profile_revision: int,
+        review: ProfileReviewBinding,
     ) -> tuple[FleetProfileIntendedConfiguration, str] | None:
         """The accepted intent moved onto the newest readable revisions, and why.
 
@@ -454,7 +462,7 @@ class FleetProfileService:
         if not unreadable:
             return None
         profile = session.get(FleetProfile, profile_id)
-        if profile is None or _saved_since_review(profile_revision, profile.revision):
+        if profile is None or _saved_since_review(review, profile.revision):
             return None
         try:
             newest = {

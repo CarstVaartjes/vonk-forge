@@ -47,6 +47,9 @@ from vonk_control.fleet_profile_contract.effects import (
 from vonk_control.fleet_profile_contract.review import (
     FleetProfilePreview,
     FleetProfileReviewedDecision,
+    ProfileReviewBinding,
+    SavedProfileRevision,
+    UnsavedProfileReview,
 )
 from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileChildResult,
@@ -607,17 +610,21 @@ def _profile_document(
     )
 
 
-def _saved_since_review(reviewed_revision: int | None, saved_revision: int) -> bool:
+def _saved_since_review(review: ProfileReviewBinding, saved_revision: int) -> bool:
     """Whether the profile was saved again after the review that bound it.
 
     Every real edit bumps the saved ``revision`` (an equal-content replay does
     not), so comparing it with the revision the review recorded is the whole
-    check: the live profile is never re-hashed. A review bound to no saved
-    revision (an unsaved draft) proves no edit; re-planning an accepted intent
-    then binds it to the saved revision (``preview``), so the next save is seen.
+    check: the live profile is never re-hashed. A review of an unsaved draft
+    proves no edit; re-planning an accepted intent binds it to the saved
+    revision (``preview``), so the next save is seen.
     """
 
-    return reviewed_revision is not None and reviewed_revision != saved_revision
+    match review:
+        case SavedProfileRevision(revision=reviewed_revision):
+            return reviewed_revision != saved_revision
+        case UnsavedProfileReview():
+            return False
 
 
 _assignment_id = _choice_id
