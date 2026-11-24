@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from datetime import datetime, timedelta
 
@@ -464,8 +463,6 @@ def _validate_singleton_recovery_start_origin(
         or stop.targets != targets
         or not isinstance(stop_parent, RecipeStopParent)
         or stop_parent.workload_intent_ordinal != workload_intent_ordinal
-        or stop.payload_digest
-        != hashlib.sha256(canonical_message(stop_parent)).hexdigest()
     ):
         return _unproven(
             run.id, _MISMATCH, "singleton recovery Stop has stale exact run authority"

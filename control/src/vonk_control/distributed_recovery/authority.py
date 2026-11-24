@@ -84,8 +84,6 @@ def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) 
         and isinstance((parent := _parent(start)), RecipeStartParent)
         and parent.plan_digest == run.plan_digest
         and plan.plan_digest == run.plan_digest
-        and start.payload_digest
-        == hashlib.sha256(canonical_message(parent)).hexdigest()
     )
 
 
@@ -142,8 +140,6 @@ def _accepted_start_child(
         or child.state != LifecycleState.SUCCEEDED
         or not isinstance(payload, RecipeStartPayload)
         or canonical_message(child.payload) != canonical_message(item.payload)
-        or child.payload_digest
-        != hashlib.sha256(canonical_message(child.payload)).hexdigest()
     ):
         return _unproven(
             start.id, _MISMATCH, "accepted Start payload binding is invalid"
