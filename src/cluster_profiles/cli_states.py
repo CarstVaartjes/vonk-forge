@@ -7,6 +7,8 @@ the words come from ``cli_states_generated``, generated from the contract by
 
 from __future__ import annotations
 
+from typing import Final
+
 from cluster_profiles.cli_states_generated import (
     CANCELLED,
     FAILED,
@@ -51,7 +53,7 @@ ARTIFACT_JOB_IN_FLIGHT = LIVE_LIFECYCLE_STATES - {NEEDS_OPERATOR}
 # -- operations ------------------------------------------------------------------
 
 #: The field of an operation that says some of it was done (a failed update).
-PARTIAL_FIELD = "partial"
+PARTIAL_FIELD: Final = "partial"
 #: The states of a job a CLI user is told has failed.
 FAILED_JOB_STATES = frozenset({FAILED})
 #: An accepted cancel: still being driven (``observing``) or already ended.

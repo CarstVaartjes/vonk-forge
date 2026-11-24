@@ -39,7 +39,7 @@ class CertificateIssuanceBinding(StrictJSONModel):
     generation: CertificateGeneration
 
     @model_validator(mode="after")
-    def exact_effect(self) -> "CertificateIssuanceBinding":
+    def exact_effect(self) -> CertificateIssuanceBinding:
         if int(self.serial).bit_length() > 159:
             raise ValueError("certificate serial exceeds 159 bits")
         if (

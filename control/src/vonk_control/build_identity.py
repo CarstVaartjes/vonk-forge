@@ -48,7 +48,7 @@ def packaged_runtime_identity() -> RuntimeBuildIdentity:
         value = json.loads(
             files("vonk_control").joinpath("build-identity.json").read_text()
         )
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return unknown
     if not isinstance(value, dict) or value.get("schema_version") != 2:
         return unknown

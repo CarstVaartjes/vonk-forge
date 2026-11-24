@@ -153,7 +153,7 @@ def heartbeat(
                     attempt.progress = progress_document(
                         sample_progress(retained, validated, _aware(now))
                     )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 # Progress is optional evidence on a lease heartbeat: a
                 # progress document that does not follow the retained one
                 # is not stored, and the heartbeat still renews the lease.

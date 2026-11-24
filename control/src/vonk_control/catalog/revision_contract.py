@@ -205,7 +205,7 @@ def read_catalog_projection(
         if revision.kind not in {"model", "recipe"}:
             raise ValueError("unknown catalog revision kind")
         return projection_type.model_validate_json(_json(revision.projected))
-    except (TypeError, ValueError, ValidationError):
+    except TypeError, ValueError, ValidationError:
         # Projection JSON is disposable. Re-derive it only from a document
         # whose exact content identity still verifies; damaged source JSON
         # remains unavailable until the normal catalog sync re-ingests it.
@@ -369,7 +369,7 @@ def catalog_document_readable(revision: CatalogDocumentRevision) -> bool:
         shared_catalog_document(
             revision.kind, revision.content_digest, revision.document
         )
-    except (TypeError, ValueError, ValidationError):
+    except TypeError, ValueError, ValidationError:
         return False
     return True
 

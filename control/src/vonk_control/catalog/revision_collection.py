@@ -804,7 +804,7 @@ class CatalogRevisionCollector:
         ):
             try:
                 manifest = CacheManifest.model_validate_json(canonical_message(value))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return None
             found.update(item.content_sha256 for item in manifest.verified_models)
         return frozenset(found)
@@ -831,7 +831,7 @@ class CatalogRevisionCollector:
                     manifest = CacheManifest.model_validate_json(
                         canonical_message(value)
                     )
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     raise _Kept(WaitReason.OBSERVATION_UNAVAILABLE.value) from None
                 if any(
                     reference.content_sha256 == revision.content_digest
@@ -908,7 +908,7 @@ def _model_dependencies(
             model = shared_catalog_document(
                 RunSwitchReasonScopeName.MODEL, digest, document
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if isinstance(model, ModelDefinition):
             found.update(item.content_sha256 for item in model.dependencies)
@@ -1143,7 +1143,7 @@ def streamed_tokens(
             if isinstance(observed, UnprojectedRevision):
                 raise _Kept(WaitReason.OBSERVATION_UNAVAILABLE.value)
             found.update(_TOKEN.findall(canonical_message(row[0]).decode()))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise _Kept(WaitReason.OBSERVATION_UNAVAILABLE.value) from None
     return frozenset(found)
 

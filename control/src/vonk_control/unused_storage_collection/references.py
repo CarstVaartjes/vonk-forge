@@ -276,7 +276,7 @@ def _applied_revision_ids(session: Session) -> frozenset[str] | None:
             plan = FleetProfilePreview.model_validate_json(
                 json.dumps(application.plan), strict=True
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         if (
             plan.profile_id != application.profile_id
@@ -466,7 +466,7 @@ def _assignment_sparks(
         for value in by_recipe.get(recipe) or [None]:
             try:
                 nodes = TypeAdapter(list[NodeId]).validate_python(value, strict=True)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 nodes = list(session.scalars(select(AgentNode.node_id)))
             found.append((recipe, frozenset(nodes)))
     return found

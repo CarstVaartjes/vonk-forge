@@ -113,7 +113,7 @@ class CoreMixin:
             return None
         try:
             return cache._objects_present(_manifest_of(payload))
-        except (TypeError, ValueError, OSError, ModelCacheError):
+        except TypeError, ValueError, OSError, ModelCacheError:
             return None
 
     def _objects_present(self, manifest: ArtifactSetManifest) -> bool:
@@ -146,7 +146,7 @@ class CoreMixin:
             return False  # unreadable: a writer may still be active
         try:
             manifest = _manifest_of(payload)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
         return cache._artifact_effects_settled(operation_id, manifest)
 

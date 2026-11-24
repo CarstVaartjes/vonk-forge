@@ -299,7 +299,7 @@ def test_the_healthcheck_runs_as_its_container_runs_it(monkeypatch) -> None:
         runpy.run_module("vonk_control.worker_healthcheck", run_name="__main__")
     except NameError:
         raise
-    except (OSError, RuntimeError, ValueError):
+    except OSError, RuntimeError, ValueError:
         pass  # the probe reached the process identity or the readiness check
 
 

@@ -80,7 +80,7 @@ class InstallMixin:
         require_same_install_execution(reviewed, plan)
         try:
             service._install_admission.refresh_install_receipts(plan, now=now)
-        except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
+        except SecurityRefusalError, InvalidRequestError, UnknownOutcomeError:
             raise
         except (RuntimeError, ValueError, TypeError, OSError) as error:
             raise retry_later_unless_deterministic(
@@ -111,7 +111,7 @@ class InstallMixin:
                 installation_id = service._install_admission.accept_install_in_session(
                     session, plan, actor=actor, now=now
                 )
-            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
+            except SecurityRefusalError, InvalidRequestError, UnknownOutcomeError:
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
                 raise retry_later_unless_deterministic(

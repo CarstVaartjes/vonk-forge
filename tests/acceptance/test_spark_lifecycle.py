@@ -1197,7 +1197,6 @@ class LocalBrowserController:
         if (
             not hostname
             or any(character in hostname for character in "\0\r\n /:")
-            or not isinstance(port, int)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             or isinstance(port, bool)
             or not 1 <= port <= 65535
         ):
@@ -1286,13 +1285,10 @@ class LocalBrowserController:
             or method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}
             or not path.startswith("/")
             or any(character in path for character in "\0\r\n")
-            or (body is not None and not isinstance(body, bytes))  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
             or (body is not None and len(body) > MAXIMUM_RESPONSE_BYTES)
             or (method == "GET" and body is not None)
             or any(
-                not isinstance(name, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
-                or not isinstance(value, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # refuses an untyped caller at run time
-                or not name
+                not name
                 or name.lower() in {"connection", "content-length", "host"}
                 or any(character in name for character in "\0\r\n:")
                 or any(character in value for character in "\0\r\n")
@@ -3877,7 +3873,6 @@ class SparkLifecycle:
             completed.append("uninstalled")
             if (
                 completed != list(SYNTHETIC_CANARY_STATES)
-                or not isinstance(response_digest, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # the digest is re-checked before it is reported
                 or SHA256.fullmatch(response_digest) is None
             ):
                 raise LifecycleError("synthetic canary evidence is incomplete")
@@ -4443,39 +4438,37 @@ class SparkLifecycle:
                 # reported separately with its own failure text: a probe that
                 # discards the status tells us nothing, and one failing call
                 # must not hide the answer from the other.
-                job_detail = "unavailable"
-                if self.control is not None:  # pyright: ignore[reportUnnecessaryComparison]  # diagnostics stay safe without a login
-                    parts: list[str] = []
-                    try:
-                        _, node_operations = self.control.request(
-                            "GET",
-                            "/api/operations",
-                            query={"node_id": node_id, "limit": 5},
-                        )
-                        operations = require_object(
-                            node_operations, "stalled operation list"
-                        ).get("operations")
-                        if isinstance(operations, list):
-                            for item in operations:
-                                operation = require_object(item, "stalled operation")
-                                parts.append(
-                                    f"op {operation.get('kind')}"
-                                    f"={operation.get('state')}"
-                                    f"/{operation.get('attempt')}"
-                                    f" progress={json.dumps(operation.get('progress'), sort_keys=True)[:160]}"
-                                )
-                    except (
-                        KeyError,
-                        OSError,
-                        SliceError,
-                        TypeError,
-                        ValueError,
-                    ) as error:
-                        parts.append(
-                            "operations unavailable: "
-                            + self._redact_diagnostics(str(error), limit=200)
-                        )
-                    job_detail = " | ".join(parts) or "none"
+                parts: list[str] = []
+                try:
+                    _, node_operations = self.control.request(
+                        "GET",
+                        "/api/operations",
+                        query={"node_id": node_id, "limit": 5},
+                    )
+                    operations = require_object(
+                        node_operations, "stalled operation list"
+                    ).get("operations")
+                    if isinstance(operations, list):
+                        for item in operations:
+                            operation = require_object(item, "stalled operation")
+                            parts.append(
+                                f"op {operation.get('kind')}"
+                                f"={operation.get('state')}"
+                                f"/{operation.get('attempt')}"
+                                f" progress={json.dumps(operation.get('progress'), sort_keys=True)[:160]}"
+                            )
+                except (
+                    KeyError,
+                    OSError,
+                    SliceError,
+                    TypeError,
+                    ValueError,
+                ) as error:
+                    parts.append(
+                        "operations unavailable: "
+                        + self._redact_diagnostics(str(error), limit=200)
+                    )
+                job_detail = " | ".join(parts) or "none"
                 raise LifecycleError(
                     f"{label} did not converge: state={typed.state} "
                     f"step={typed.current_step}/{typed.total_steps} "

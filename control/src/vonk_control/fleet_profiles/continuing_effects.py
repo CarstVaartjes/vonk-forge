@@ -257,7 +257,7 @@ def _continuing_effects(
         try:
             plan = _persisted_profile_plan(application)
             progress = _persisted_profile_progress(application)
-        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+        except FleetProfileConflict, ValidationError, TypeError, ValueError:
             continue
         if (
             isinstance(plan, Residue)

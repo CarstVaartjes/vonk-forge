@@ -332,7 +332,7 @@ class FleetProfileService:
                         child = adapter.get(
                             parent.current_operation_id, session=session
                         )
-                    except (KeyError, RuntimeError, ValueError):
+                    except KeyError, RuntimeError, ValueError:
                         # The child's record is gone: the step is issued again under
                         # its deterministic identity, and its owner reconciles what
                         # it already did (it is adopted, not repeated).

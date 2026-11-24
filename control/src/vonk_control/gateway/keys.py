@@ -116,7 +116,7 @@ def _observe_gateway[T](
                 raise
             if error.status_code in {409, 422}:
                 raise
-        except (CapabilityUnavailableError, GatewayKeyError, OSError, ValueError):
+        except CapabilityUnavailableError, GatewayKeyError, OSError, ValueError:
             pass
         if attempt + 1 < attempts:
             time.sleep(0.05 * (2**attempt))
@@ -987,7 +987,7 @@ class GatewayKeyService:
             ):
                 return None
             return receipt
-        except (OSError, ValueError):
+        except OSError, ValueError:
             return None
 
     def _pending_receipt(self, alias: str) -> GatewayMutationReceipt | None:

@@ -70,7 +70,7 @@ class RemovalScopeMixin:
                 continue
             try:
                 metadata = cache._object_path(digest).lstat()
-            except (FileNotFoundError, NotADirectoryError):
+            except FileNotFoundError, NotADirectoryError:
                 object_status[digest] = (AssetAvailability.MISSING, 0)
                 continue
             except OSError:
@@ -98,7 +98,7 @@ class RemovalScopeMixin:
                         expected_bytes,
                         workers=_PARALLEL_RANGE_WORKERS,
                     )
-                except (OSError, ValueError):
+                except OSError, ValueError:
                     return AssetAvailability.UNKNOWN, None
                 if available == 0:
                     return AssetAvailability.MISSING, 0
@@ -110,7 +110,7 @@ class RemovalScopeMixin:
                 )
             try:
                 metadata = partial.lstat()
-            except (FileNotFoundError, NotADirectoryError):
+            except FileNotFoundError, NotADirectoryError:
                 return AssetAvailability.MISSING, 0
             except OSError:
                 return AssetAvailability.UNKNOWN, None

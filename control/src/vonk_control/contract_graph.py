@@ -59,7 +59,8 @@ def _models(annotation: Any) -> set[type[BaseModel]]:
     return set().union(*(_models(arg) for arg in get_args(annotation)))
 
 
-def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, Any, dict]]:  # pyright: ignore[reportMissingTypeArgument]  # FastAPI.openapi() document: the untyped-mapping guard refuses dict[str, Any]
+def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, Any, FastAPI]]:
+    """Every served route with the application whose OpenAPI document holds it."""
     schema = app.openapi()
     framework_paths = {
         app.openapi_url,
@@ -90,7 +91,7 @@ def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, Any, dict]]: 
                     raise ContractGraphError(
                         f"Missing OpenAPI operation: {method} {path}"
                     )
-            yield path, context, schema
+            yield path, context, app
         elif isinstance(route, Route):
             if not (
                 route.path in framework_paths
@@ -112,7 +113,7 @@ def _reads_raw_body(endpoint: Any) -> bool:
     # bounded readers attach their canonical model with raw_json_body instead.
     try:
         tree = ast.parse(textwrap.dedent(inspect.getsource(endpoint)))
-    except (OSError, TypeError):
+    except OSError, TypeError:
         return False
     return any(
         isinstance(node, ast.Call)
@@ -150,7 +151,10 @@ def discover_contracts(
     operations = []
     agent_models: set[type[BaseModel]] = set()
     identities = set()
-    for path, route, schema in _routes(app):
+    for path, route, owner in _routes(app):
+        # FastAPI caches the document: every route of one application reads
+        # the same schema.
+        schema = owner.openapi()
         models = _models(route.response_model)
         if route.body_field is not None:
             models |= _models(route.body_field.field_info.annotation)

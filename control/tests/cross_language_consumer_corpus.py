@@ -138,7 +138,7 @@ def corpus() -> dict[str, Any]:
             value = model.model_validate_json(text)
             normalized = value.model_dump_json()
             accepted = True
-        except (ValueError, ValidationError):
+        except ValueError, ValidationError:
             normalized, accepted = None, False
         cases.append(
             {

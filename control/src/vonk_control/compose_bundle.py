@@ -39,7 +39,7 @@ def compose_bundle(
 
     try:
         expected = embedded.read_text(encoding="ascii").strip()
-    except (OSError, UnicodeError):
+    except OSError, UnicodeError:
         return None
     if _DIGEST.fullmatch(expected) is None:
         return None

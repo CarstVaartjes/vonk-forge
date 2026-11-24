@@ -134,7 +134,7 @@ def reconcile_abandoned_builds(
             )
         except SecurityRefusalError:
             raise
-        except (UnknownOutcomeError, OSError, RuntimeError, ValueError):
+        except UnknownOutcomeError, OSError, RuntimeError, ValueError:
             # Its owner retains the exact effect and retries reconciliation;
             # this consumer still searches the healthy candidate pool.
             continue

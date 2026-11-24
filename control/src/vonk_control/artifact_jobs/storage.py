@@ -408,7 +408,7 @@ class ArtifactJobService:
             return None
         try:
             request = RecipeJobRunRequest.parse(operation.payload)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return (
             request

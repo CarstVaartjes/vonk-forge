@@ -241,7 +241,7 @@ class RecipeRouteService:
             for _attempt in bounded_attempts():
                 try:
                     return self._execute_once(publication)
-                except (SecurityRefusalError, _RecipeRunContended):
+                except SecurityRefusalError, _RecipeRunContended:
                     raise
                 except RecipeRouteNotReady as error:
                     last = error
@@ -275,7 +275,7 @@ class RecipeRouteService:
                 lambda: self._effect_claim_current(publication.claim)
             ):
                 generation = publication.effect()
-        except (SecurityRefusalError, RecipeRouteSuperseded):
+        except SecurityRefusalError, RecipeRouteSuperseded:
             raise
         except Exception as error:
             if not self._claim_is_current(publication.claim):
@@ -688,7 +688,7 @@ class RecipeRouteService:
         # One pass: the durable owner backoff in _maintain_once is the retry.
         try:
             return self._maintain_once()
-        except (SecurityRefusalError, RecipeRouteOwnerBusy, _RecipeRunContended):
+        except SecurityRefusalError, RecipeRouteOwnerBusy, _RecipeRunContended:
             raise
         except RecipeRouteNotReady:
             return False

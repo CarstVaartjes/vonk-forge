@@ -43,5 +43,5 @@ def verify_password(verifier: str, password: str) -> PasswordVerification:
         return PasswordVerification(
             valid, valid and HASHER.check_needs_rehash(verifier)
         )
-    except (PasswordPolicyError, InvalidHashError, VerificationError):
+    except PasswordPolicyError, InvalidHashError, VerificationError:
         return PasswordVerification(False, False)

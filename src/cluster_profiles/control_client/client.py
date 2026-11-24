@@ -729,7 +729,7 @@ class ControlClient:
             raise ControlResponseTooLarge("control API response exceeds safety limit")
         try:
             problem = json.loads(content)
-        except (RecursionError, UnicodeDecodeError, json.JSONDecodeError):
+        except RecursionError, UnicodeDecodeError, json.JSONDecodeError:
             problem = None
         detail = problem.get("detail") if isinstance(problem, dict) else None
         problem_context = (
@@ -791,7 +791,7 @@ class ControlClient:
             raise ControlMalformedResponse(
                 "control API response exceeds the nesting limit"
             ) from None
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             raise ControlMalformedResponse(
                 "control API returned invalid JSON"
             ) from None

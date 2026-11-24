@@ -93,7 +93,7 @@ def _review_and_submit_profile_load(
     question: str,
     review_when_confirmed: bool,
     lead: Callable[[object], Sequence[str]] | None = None,
-    draft: Callable[[], ReviewedDraft | dict] | None = None,  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+    draft: Callable[[], ReviewedDraft | None] | None = None,
 ) -> dict[str, object]:
     """Show the plan, ask, then submit a load bound to the effects just shown.
 
@@ -104,7 +104,8 @@ def _review_and_submit_profile_load(
     ``review_when_confirmed`` shows a preview (``run`` does), its binding is
     still forwarded unchanged, including when confirmation was supplied.
 
-    With ``draft`` the plan shown is the unsaved edit's. Consent saves it, then
+    With ``draft`` the plan shown is the unsaved edit's (``None`` when the
+    profile read did not complete). Consent saves it, then
     the load follows; a declined review sends nothing. A profile that moved
     under the edit (save conflict) or a stale review rebuilds the draft on the
     newest profile and asks again, so the newest request wins.
@@ -114,10 +115,14 @@ def _review_and_submit_profile_load(
         return _submit_profile_load(client, number, args, factory)
     review_attempt = 1
     while True:
-        reviewed = draft() if draft is not None else None
-        if isinstance(reviewed, dict):
-            # The profile could not be read in time; its observation ends the run.
-            return reviewed
+        if draft is None:
+            reviewed = None
+        else:
+            reviewed = draft()
+            if reviewed is None:
+                # The profile could not be read in time; its observation ends
+                # the run with the last value it confirmed.
+                return dict(args.observation.result)
 
         # Re-observe missing or unreadable bindings before asking for consent.
         # Review consent never authorizes an unbound current-plan submission.
@@ -222,7 +227,7 @@ def _load_profile(
     question: str,
     review_when_confirmed: bool = False,
     lead: Callable[[object], Sequence[str]] | None = None,
-    draft: Callable[[], ReviewedDraft | dict] | None = None,  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+    draft: Callable[[], ReviewedDraft | None] | None = None,
 ) -> dict[str, object]:
     """The one load path: review, confirm, submit, then follow the application.
 

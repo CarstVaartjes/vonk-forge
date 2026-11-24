@@ -273,7 +273,7 @@ class CheckpointsMixin:
                 cache._object_path(digest),
                 os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
             )
-        except (FileNotFoundError, NotADirectoryError):
+        except FileNotFoundError, NotADirectoryError:
             return None
         except OSError:
             # Local availability is unconfirmed; preview remains readable and

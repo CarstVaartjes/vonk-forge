@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -134,7 +133,6 @@ def _claim_operation(
         or operation.kind != OPERATION_KIND
         or operation.state not in allowed_states
         or operation.current_attempt != claim.execution_attempt
-        or not isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
         or not isinstance(payload, AvailabilityJobPayload)
         or payload.claim_owner != claim.claim_owner
         or payload.removal_fence is not None
@@ -434,14 +432,6 @@ def _current_model_child(
             and isinstance(operation.artifact_set_sha256, str)
         ):
             recipe_revision_id = payload.recipe_revision_id
-            if not isinstance(recipe_revision_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-                raise RecipeImageAvailabilityUnknown(
-                    RecipeImageCode.MODEL_CACHE_INVALID,
-                    "availability operation lacks its exact recipe revision",
-                    retryable=True,
-                    recovery_actions=("retry",),
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
             preview = AvailabilityDownloadPreview.read(
                 self._model_cache.download_preview(
                     recipe_revision_id=recipe_revision_id
@@ -496,22 +486,20 @@ def _update_model_progress(
 ) -> bool:
     child_id = child.id
     with self._sessions.begin() as session:
-        model_operation = None
-        if isinstance(child_id, str):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            model_operation = session.scalar(
-                select(ModelCacheOperation)
-                .where(ModelCacheOperation.id == child_id)
-                .with_for_update(nowait=True)
-                .execution_options(populate_existing=True)
+        model_operation = session.scalar(
+            select(ModelCacheOperation)
+            .where(ModelCacheOperation.id == child_id)
+            .with_for_update(nowait=True)
+            .execution_options(populate_existing=True)
+        )
+        if model_operation is None and self._model_cache is not None:
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.MODEL_CHILD_MISSING,
+                "durable ModelCache child operation is unavailable",
+                retryable=True,
+                recovery_actions=(),
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-            if model_operation is None and self._model_cache is not None:
-                raise RecipeImageAvailabilityUnknown(
-                    RecipeImageCode.MODEL_CHILD_MISSING,
-                    "durable ModelCache child operation is unavailable",
-                    retryable=True,
-                    recovery_actions=(),
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
         operation = session.scalar(
             select(Job)
             .where(Job.id == claim.operation_id, Job.kind == OPERATION_KIND)
@@ -523,7 +511,6 @@ def _update_model_progress(
             operation is None
             or not isinstance(payload, AvailabilityJobPayload)
             or operation.current_attempt != claim.execution_attempt
-            or not isinstance(operation.payload, Mapping)  # pyright: ignore[reportUnnecessaryIsInstance]  # stored JSON may not have the shape its column type names
             or payload.claim_owner != claim.claim_owner
         ):
             raise _AvailabilityClaimLost

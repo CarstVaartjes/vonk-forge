@@ -125,7 +125,7 @@ class GithubMixin:
                     return False
                 raw.extend(chunk)
             error = _GitHubErrorMetadata.model_validate_json(raw)
-        except (httpx2.HTTPError, TypeError, ValueError, ValidationError):
+        except httpx2.HTTPError, TypeError, ValueError, ValidationError:
             return False
         return "secondary rate limit" in error.message.casefold()
 

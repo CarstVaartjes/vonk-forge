@@ -433,7 +433,7 @@ class ModelCacheOperationProvider:
                     return page
             except SecurityRefusalError:
                 raise
-            except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            except OSError, RuntimeError, TypeError, ValueError, KeyError:
                 continue
         return page
 
@@ -455,7 +455,7 @@ class ModelCacheOperationProvider:
         for item in require_sequence(page["operations"], "page operations"):
             try:
                 items.append(self._summary(item))
-            except (TypeError, ValueError, KeyError):
+            except TypeError, ValueError, KeyError:
                 unreadable = True
         next_cursor = self._next_cursor(
             page.get("_next_boundary"),
@@ -465,7 +465,7 @@ class ModelCacheOperationProvider:
         )
         try:
             total = require_integer(page["total"], "page total")
-        except (TypeError, ValueError, KeyError):
+        except TypeError, ValueError, KeyError:
             total = None
             unreadable = True
         unavailable = unreadable or (

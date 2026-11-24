@@ -145,7 +145,7 @@ class RunSwitchFleetProfileAdapter(
                 # reading session; the lifecycle cancellation budget ends an
                 # unconfirmed stop without parking the application.
                 continue
-            except (KeyError, RunSwitchOperationConflict):
+            except KeyError, RunSwitchOperationConflict:
                 continue
 
     def _failed_children(
@@ -165,7 +165,7 @@ class RunSwitchFleetProfileAdapter(
         for operation_id in sorted(operation_ids):
             try:
                 children.append(self._run_switch.get(operation_id))
-            except (KeyError, RuntimeError, TypeError, ValueError):
+            except KeyError, RuntimeError, TypeError, ValueError:
                 continue
         return state, children
 

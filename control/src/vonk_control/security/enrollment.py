@@ -165,7 +165,7 @@ def require_expired_proof(
         raise EnrollmentDenied("expired renewal key is not Ed25519")
     try:
         public_key.verify(bytes.fromhex(proof.signature), proof.proof_bytes())
-    except (InvalidSignature, ValueError, UnicodeEncodeError):
+    except InvalidSignature, ValueError, UnicodeEncodeError:
         raise EnrollmentDenied("expired renewal proof is invalid") from None
 
 

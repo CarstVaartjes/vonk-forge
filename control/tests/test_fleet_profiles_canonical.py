@@ -1351,7 +1351,7 @@ def test_profile_save_bounds_document_parses_and_database_round_trips(
     def reject_catalog_hash(data=b"", *args, **kwargs):
         try:
             payload = json.loads(data)
-        except (TypeError, ValueError, UnicodeError):
+        except TypeError, ValueError, UnicodeError:
             payload = None
         assert not (
             isinstance(payload, dict)

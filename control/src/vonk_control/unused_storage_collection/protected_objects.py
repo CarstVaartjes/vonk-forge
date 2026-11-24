@@ -54,8 +54,6 @@ def protected_model_objects(session: Session, references: AbstractSet[str]) -> s
             .execution_options(yield_per=1)
         ):
             digest = revision.content_digest
-            if digest is None:  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
-                raise ValueError("model reference has no content identity")
             unresolved.discard(digest)
             visited.add(digest)
             # The row's digest was verified at ingress; it is read, never re-hashed.

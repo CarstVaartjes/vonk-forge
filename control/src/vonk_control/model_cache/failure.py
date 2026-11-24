@@ -90,7 +90,7 @@ class FailureMixin:
                     measured_free,
                     max(0, measured_required - measured_free),
                 )
-            except (OSError, RuntimeError, ValueError):
+            except OSError, RuntimeError, ValueError:
                 pass
         failure_code = getattr(error, "code", None)
         if isinstance(error, OSError) and error.errno == errno.ENOSPC:

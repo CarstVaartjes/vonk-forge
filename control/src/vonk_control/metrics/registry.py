@@ -834,7 +834,7 @@ class OperationalMetricsCollector:
                 projected = project_progress(
                     read_stored_model(OperationProgress, progress), now
                 )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if projected.activity == "possibly_stalled":
                 stalled[kind] += 1

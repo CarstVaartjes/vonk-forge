@@ -171,7 +171,7 @@ def _parked_retry_evidence(
         canonical_payload(
             AgentOperation(operation.kind), column_value(operation, "payload")
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     if agent_operation_states.attempt_lapsed(attempt):
         # Expiry never proves the old executor stopped. Only exact-resume
@@ -190,7 +190,7 @@ def _parked_retry_evidence(
             column_value(attempt, "result"),
             state=agent_operation_states.attempt_wire_state(attempt),
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     if not isinstance(result, WireModel):
         return False

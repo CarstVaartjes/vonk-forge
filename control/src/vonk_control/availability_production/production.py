@@ -1067,7 +1067,7 @@ def _build_dependency(
         return read_stored_model(
             RecipeBuildDependency, json.dumps(value, allow_nan=False), from_json=True
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return BuildUnsettled(
             RecipeImageCode.BUILD_INVALID,
             "accepted build dependency is malformed",

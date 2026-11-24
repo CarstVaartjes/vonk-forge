@@ -102,7 +102,7 @@ class ArtifactMaintenanceCadence:
                     # A schedule cannot postpone work beyond its owning cadence.
                     # A damaged timestamp or backwards clock is re-observed now.
                     next_due_at = now
-            except (OSError, ValueError, UnicodeError):
+            except OSError, ValueError, UnicodeError:
                 # Cadence is derived bookkeeping, never an artifact authority.
                 # Replace it atomically under the shared lock and reconcile now.
                 state = _CadenceState(next_due_at=now.isoformat())
@@ -179,7 +179,7 @@ class ArtifactMaintenanceCadence:
     def _persist_state(self, state: _CadenceState) -> None:
         try:
             self._write_state(state)
-        except (OSError, ValueError):
+        except OSError, ValueError:
             # The local next-check time and kernel lock still rate-limit this
             # process. A derived write failure cannot suppress reconciliation.
             self._logger.exception("artifact maintenance cadence write deferred")

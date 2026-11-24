@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -11,11 +12,13 @@ from threading import Event
 import pytest
 from sqlalchemy import select
 
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_operations import (
     AgentOperation as ProtocolAgentOperation,
 )
 from vonk_agent_protocol.contracts import AgentProgress, AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
+    FailureCode,
     InvalidRequestReason,
     LifecycleState,
 )
@@ -752,11 +755,24 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         reservation = session.scalar(
             select(ResourceReservation).where(ResourceReservation.owner_id == build_id)
         )
-        assert stored is not None and stored.state == "failed"
-        assert parent_row is not None and parent_row.state == "failed"
+        rejected = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        assert stored is not None
+        assert stored.state == "failed"
+        assert rejected is not None
+        reason_code = AgentFailureResult.model_validate_json(
+            json.dumps(rejected.result)
+        ).error_code
+        assert reason_code == FailureCode.RECIPE_BUILD_FAILED
+        assert parent_row is not None
+        assert parent_row.state == "failed"
         assert node is not None
         assert runtime_value(node, lambda identity: identity.binary_digest) == "e" * 64
-        assert build is not None and build.state == "failed"
+        assert build is not None
+        assert build.state == "failed"
         assert reservation is not None
         assert reservation.state == "released"
 
@@ -849,7 +865,18 @@ def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) ->
     assert claim is None
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "failed"
+        rejected = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        assert stored is not None
+        assert stored.state == "failed"
+        assert rejected is not None
+        reason_code = AgentFailureResult.model_validate_json(
+            json.dumps(rejected.result)
+        ).error_code
+        assert reason_code == FailureCode.RECIPE_BUILD_FAILED
 
 
 def test_concurrent_agents_cannot_claim_the_same_operation(service) -> None:

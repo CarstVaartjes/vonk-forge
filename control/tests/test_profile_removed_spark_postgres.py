@@ -8,6 +8,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_contacts import record_contact
@@ -407,9 +408,12 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                 == application.id,
             )
         )
-        assert run_switch is not None and run_switch.state == "failed"
+        assert run_switch is not None
+        assert run_switch.state == "failed"
         progress = run_switch.result
         assert progress is not None
+        reason_code = progress["failure_code"]
+        assert reason_code == RunSwitchCode.PROFILE_INCOMPLETE_MULTI_SPARK_MODEL
     with sessions.begin() as session:
         rejoined = session.get(AgentNode, removed_node)
         assert rejoined is not None

@@ -141,7 +141,7 @@ def job_response(
                 _job_operation_response(item, now=operation_page.projected_at)
                 for item in items
             ]
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except OSError, RuntimeError, TypeError, ValueError:
             warn_unreadable_once("job operations", job.id)
             operation_page = None
     targets = list(job.targets)
@@ -220,7 +220,7 @@ def decode_offset(
             order="index-asc/v1",
             context={"job_id": job_id},
         )
-    except (UnicodeError, ValueError):
+    except UnicodeError, ValueError:
         raise CursorError("target cursor is invalid") from None
     if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
         raise CursorError("target cursor is invalid")
@@ -303,7 +303,7 @@ def _operation_item(
     if attempt is not None:
         try:
             progress = _progress_projection(attempt.progress, operation.state, now=now)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             progress_issue = "Stored progress evidence is unreadable; operation identity and state remain known."
             if status_reason is None:
                 status_reason = progress_issue

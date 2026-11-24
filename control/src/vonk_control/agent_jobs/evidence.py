@@ -288,7 +288,7 @@ def _exact_service_stop_receipt_covers_start(
                 stop_document = column_value(stop_parent, "payload")
                 if not isinstance(stop_document, RecipeStopParent):
                     continue
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             ordinal = stop_document.workload_intent_ordinal
             if (
@@ -358,7 +358,7 @@ def _exact_service_stop_receipt_covers_start(
                         column_value(attempt, "result"),
                         state=agent_operation_states.attempt_wire_state(attempt),
                     )
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     proven = False
                     break
                 if not isinstance(receipt, RecipeStopResult):
@@ -366,7 +366,7 @@ def _exact_service_stop_receipt_covers_start(
                     break
             if proven:
                 return True
-    except (TypeError, ValueError, UnknownOutcomeError):
+    except TypeError, ValueError, UnknownOutcomeError:
         return False
     return False
 
@@ -413,5 +413,5 @@ def _profile_stop_covers_jobrun_mutations(
             == 1
             for old in active_mutations
         )
-    except (ProfileStopAuthorityError, TypeError, ValueError):
+    except ProfileStopAuthorityError, TypeError, ValueError:
         return False

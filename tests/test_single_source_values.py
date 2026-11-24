@@ -588,8 +588,7 @@ def test_python_targets_agree_across_projects() -> None:
     """CI runs Python 3.14; the agent protocol wheel also runs on adapter 3.12.
 
     So three projects require 3.14 and the protocol wheel requires 3.12. Ruff
-    checks the protocol at its own 3.12 floor and everything else at 3.13 (the
-    3.14 target would make the formatter rewrite every `except (A, B):`).
+    checks the protocol at its own 3.12 floor and the projects at 3.14.
     """
 
     def load(path: str) -> dict[str, Any]:
@@ -604,10 +603,9 @@ def test_python_targets_agree_across_projects() -> None:
         assert load(path)["project"]["requires-python"] == ">=3.14", path
     protocol = load("agent_protocol/pyproject.toml")
     assert protocol["project"]["requires-python"] == ">=3.12"
-    assert root["tool"]["ruff"]["per-file-target-version"] == {
-        "agent_protocol/**": "py312"
-    }
-    assert root["tool"]["ruff"]["target-version"] in {"py312", "py313", "py314"}
+    targets = root["tool"]["ruff"]["per-file-target-version"]
+    assert targets["agent_protocol/**"] == "py312"
+    assert root["tool"]["ruff"]["target-version"] == "py314"
     environments = root["tool"]["pyright"]["executionEnvironments"]
     assert {"root": "agent_protocol/src", "pythonVersion": "3.12"}.items() <= (
         environments[0].items()

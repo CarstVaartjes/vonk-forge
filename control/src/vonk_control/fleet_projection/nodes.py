@@ -104,12 +104,12 @@ def _node(
     inventory_unreadable = False
     try:
         inventory_state = self._inventory(inventory, current)
-    except (AttributeError, TypeError, ValueError):
+    except AttributeError, TypeError, ValueError:
         inventory_state = None
         inventory_unreadable = True
     try:
         telemetry_state = self._telemetry_state(telemetry, current)
-    except (AttributeError, TypeError, ValueError):
+    except AttributeError, TypeError, ValueError:
         telemetry_state = None
         telemetry_unreadable = True
     if connection.online_state != "online":
@@ -324,7 +324,7 @@ def _node(
         labels = TypeAdapter(
             Annotated[dict[Text64, Text256], Field(max_length=64)]
         ).validate_python(labels, strict=True)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         labels = None
         projection_issues.append(
             "Stored node labels are unreadable; labels are unknown."

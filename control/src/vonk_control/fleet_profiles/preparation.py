@@ -104,7 +104,7 @@ class FleetProfileService:
                 child = self._switch_adapter.get(
                     row.current_operation_id, session=session
                 )
-            except (KeyError, RuntimeError, ValueError):
+            except KeyError, RuntimeError, ValueError:
                 return None
             if child.state not in _CHILD_PENDING_STATES:
                 return None
@@ -149,7 +149,7 @@ class FleetProfileService:
             progress = _stored_progress(row)
             if isinstance(progress, Residue):
                 return False
-        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+        except FleetProfileConflict, ValidationError, TypeError, ValueError:
             # A damaged receipt cannot prove that it still carries the current
             # recoverable intent, so it simply does not advertise retry.
             return False
@@ -157,7 +157,7 @@ class FleetProfileService:
             return False
         try:
             superseded = _superseding_intent(session, row, progress)
-        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+        except FleetProfileConflict, ValidationError, TypeError, ValueError:
             return False
         if superseded:
             return False
@@ -170,7 +170,7 @@ class FleetProfileService:
                 session, _application_order_key(session, row), effect_nodes
             ):
                 return False
-        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+        except FleetProfileConflict, ValidationError, TypeError, ValueError:
             return False
         # Only the accepted order and overlapping node fences own effects.
         # A historical retry child or an older/nonoverlapping sibling is not

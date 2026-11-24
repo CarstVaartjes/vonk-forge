@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import Nullable, func, select
 from sqlalchemy.orm import Session, defer
 
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
@@ -229,9 +229,11 @@ class RevisionsMixin:
         pending: list[ArtifactSetManifest] = []
         published = False
         with cache._session() as session:
-            content = ModelCacheOperation.payload["manifest"][
-                "model_content_sha256"
-            ].as_string()
+            content = Nullable(
+                ModelCacheOperation.payload["manifest"][
+                    "model_content_sha256"
+                ].as_string()
+            )
             # Any one successful request proves an identical set/content pair;
             # the representative UUID is not used to elect the newest revision.
             proofs = session.execute(
@@ -250,7 +252,7 @@ class RevisionsMixin:
                 .group_by(ModelCacheOperation.artifact_set_sha256, content)
             ).all()
             for operation_id, set_digest, digest in proofs:
-                if set_digest is None or operation_id is None or digest is None:  # pyright: ignore[reportUnnecessaryComparison]  # grouped query columns can be NULL
+                if set_digest is None or digest is None:
                     continue
                 row, held = stored.get(set_digest, (None, None))
                 if (

@@ -163,7 +163,7 @@ def violations(root: Path, files: list[str] | None = None) -> list[str]:
         for file in files:
             try:
                 text = _executable_text(file, (root / file).read_text())
-            except (UnicodeError, IsADirectoryError):
+            except UnicodeError, IsADirectoryError:
                 continue
             matches: list[tuple[int, str]] = []
             if value.family == Family.PROTOCOL_WHEEL:
@@ -177,7 +177,7 @@ def violations(root: Path, files: list[str] | None = None) -> list[str]:
                 for match in re.finditer(r"[\[{(][^\[\]{}()]*[\]})]", text):
                     try:
                         collection = ast.literal_eval(match.group())
-                    except (ValueError, SyntaxError):
+                    except ValueError, SyntaxError:
                         continue
                     if isinstance(collection, (set, tuple, list, dict)) and (
                         set(collection) == owned

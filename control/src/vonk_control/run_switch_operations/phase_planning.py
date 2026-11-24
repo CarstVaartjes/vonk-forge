@@ -423,7 +423,7 @@ class PhasePlanningMixin:
                 run_id, profile_target_node_ids=target_node_ids
             )
             return plan.plan_digest if plan.allowed else None
-        except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError):
+        except KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError:
             return None
 
     @staticmethod

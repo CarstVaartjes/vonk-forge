@@ -374,7 +374,7 @@ class ExecutorPhasesMixin:
                 raise RunSwitchInstallPreflightExpired(
                     f"{RunSwitchCode.INSTALL_PREFLIGHT_EXPIRED}: {error}"
                 ) from error
-            except (InstallAdmissionBusy, RunSwitchRetryLater):
+            except InstallAdmissionBusy, RunSwitchRetryLater:
                 raise
             except (
                 KeyError,
@@ -412,7 +412,7 @@ class ExecutorPhasesMixin:
             ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
             phase_results = progress.phase_results
-            if installation_id is None and isinstance(phase_results, list):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            if installation_id is None:
                 for result in reversed(phase_results):
                     if isinstance(
                         result,
@@ -448,7 +448,7 @@ class ExecutorPhasesMixin:
                         ),
                         workload_intent_ordinal=ordinal,
                     )
-            except (InstallAdmissionBusy, RunSwitchRetryLater):
+            except InstallAdmissionBusy, RunSwitchRetryLater:
                 raise
             except (
                 KeyError,
@@ -471,7 +471,7 @@ class ExecutorPhasesMixin:
             ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
             phase_results = progress.phase_results
-            if installation_id is None and isinstance(phase_results, list):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            if installation_id is None:
                 for result in reversed(phase_results):
                     if isinstance(
                         result,
@@ -592,7 +592,7 @@ class ExecutorPhasesMixin:
                             request_id=reconcile_request_id,
                             workload_intent_ordinal=ordinal,
                         )
-                except (RunAdmissionBusy, RunSwitchRetryLater):
+                except RunAdmissionBusy, RunSwitchRetryLater:
                     # A competing capacity writer is recoverable.  Preserve
                     # the exact phase checkpoint so the outer service parks
                     # this operation and retries after the writer releases
@@ -675,7 +675,7 @@ class ExecutorPhasesMixin:
                         request_id=uninstall_request_id,
                         workload_intent_ordinal=ordinal,
                     )
-            except (RunAdmissionBusy, RunSwitchRetryLater):
+            except RunAdmissionBusy, RunSwitchRetryLater:
                 # Capacity contention is a retryable admission outcome.  Do
                 # not wrap it as uninstall-start-failed; the parent service
                 # will release its transaction and schedule the same exact
@@ -703,12 +703,12 @@ class ExecutorPhasesMixin:
                 return service._verify_installation(plan, progress)
             run_id = plan.run_id
             phase_results = progress.phase_results
-            if run_id is None and isinstance(phase_results, list):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            if run_id is None:
                 for result in reversed(phase_results):
                     if isinstance(result, RunSwitchStartResult | RunSwitchStopResult):
                         run_id = result.run_id
                         break
-            if run_id is None or service._lifecycle is None:  # pyright: ignore[reportUnnecessaryComparison]  # a None check pyright narrows away is kept unchanged
+            if run_id is None:
                 raise RunSwitchRetryLater(
                     RunSwitchCode.FINAL_VERIFICATION_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,

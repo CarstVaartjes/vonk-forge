@@ -808,9 +808,7 @@ class TerminalHistoryCollector:
         # Otherwise a slow query can consume every pass without ever reaching
         # its first candidate. No absence is inferred on error.
         self._pending = tuple(
-            (identity, observed_at)
-            for identity, observed_at in candidates
-            if observed_at is not None  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+            (identity, observed_at) for identity, observed_at in candidates
         )
         if not candidates:
             self._after.pop(rule.table, None)

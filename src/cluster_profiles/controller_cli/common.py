@@ -79,7 +79,7 @@ def _log_since(value: str) -> str:
         timestamp = datetime.fromisoformat(value)
         if timestamp.tzinfo is not None:
             return value
-    except (ValueError, OverflowError):
+    except ValueError, OverflowError:
         pass
     raise ValueError(
         "--since requires a duration such as 15m or a timestamp with a timezone"
@@ -149,7 +149,7 @@ class _ValueList(argparse.Action):
                 continue
             try:
                 value = self._item(text)
-            except (ValueError, argparse.ArgumentTypeError):
+            except ValueError, argparse.ArgumentTypeError:
                 raise argparse.ArgumentError(self, f"invalid value {text!r}") from None
             if value not in current:
                 current.append(value)
@@ -197,7 +197,7 @@ def _request_key(args: argparse.Namespace, factory: Callable[[], str]) -> str:
     value = getattr(args, "request_key", None) or factory()
     try:
         parsed = uuid.UUID(value)
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         raise ValueError("--request-key must be a UUID") from None
     resolved = str(parsed)
     args.request_key = resolved
@@ -429,7 +429,7 @@ def _revision(value: str) -> int:
 def _uuid_argument(value: str) -> str:
     try:
         parsed = uuid.UUID(value)
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         raise argparse.ArgumentTypeError("grant identity must be a UUID4") from None
     if parsed.version != 4 or str(parsed) != value:
         raise argparse.ArgumentTypeError("grant identity must be a canonical UUID4")

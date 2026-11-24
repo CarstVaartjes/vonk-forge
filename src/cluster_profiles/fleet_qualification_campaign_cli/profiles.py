@@ -163,10 +163,10 @@ def _apply_profile(
             f"profile application {application_id} observation deadline elapsed"
         )
 
-    except (ControlUnauthorized, ControlForbidden):
+    except ControlUnauthorized, ControlForbidden:
         _forget_key(request_directory, scope, key)
         raise
-    except (ControlClientError, QualificationError, OSError):
+    except ControlClientError, QualificationError, OSError:
         _forget_key(request_directory, scope, key)
         raise
 

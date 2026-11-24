@@ -141,7 +141,7 @@ def _recover_progress(
             return RunSwitchOperationResult.model_validate_json(
                 canonical_message(unmeasured), strict=True
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
         # A phase index is derived from the accepted plan. A readable phase
         # and subphase uniquely reconnect an issued child even if its index
@@ -150,7 +150,7 @@ def _recover_progress(
             checkpoint = RunSwitchOperationResult.model_validate_json(
                 canonical_message({**unmeasured, "phase_index": 0}), strict=True
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             try:
                 checkpoint = RunSwitchOperationResult.model_validate_json(
                     canonical_message(
@@ -162,7 +162,7 @@ def _recover_progress(
                 # requires fresh planning instead of attributing another run.
                 if checkpoint.phase == ProfileChildPhase.STOP:
                     checkpoint = None
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 checkpoint = None
         if checkpoint is not None:
             phases = [
@@ -178,7 +178,7 @@ def _recover_progress(
         retained = RunSwitchStoredLifecycle.model_validate_json(
             canonical_message(job.result), strict=True
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         retained = RunSwitchStoredLifecycle()
 
     progress = RunSwitchOperationResult(
@@ -290,7 +290,7 @@ def _child_progress_payload(child: object) -> RunSwitchObservedEvidence:
         observed = RunSwitchObservedEvidence.model_validate_json(
             canonical_message(raw), strict=True
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         observed = RunSwitchObservedEvidence(uncertain=True)
     if isinstance(child, RecipeOperationView) and child.progress is not None:
         measured = child.progress

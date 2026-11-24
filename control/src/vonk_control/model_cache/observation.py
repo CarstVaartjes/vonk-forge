@@ -93,7 +93,7 @@ class StorageObserver:
             if len(raw) > maximum_bytes:
                 return None
             result = ModelCacheStorageObservation.model_validate_json(raw)
-        except (FileNotFoundError, ValidationError):
+        except FileNotFoundError, ValidationError:
             return None  # derived, damaged indexes are rebuilt from receipts
         try:
             if (

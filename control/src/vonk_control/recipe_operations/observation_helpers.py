@@ -239,7 +239,7 @@ def record_build_evidence(
     session.refresh(build, with_for_update=True)
     try:
         result = RecipeBuildEvidence.model_validate_json(canonical_message(evidence))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     image_digest = result.image_digest
     layout_digest = result.oci_layout_sha256

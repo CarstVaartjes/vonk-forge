@@ -349,7 +349,7 @@ def _canonical_build_resources(
             RecipeBuildCode.SECURITY_INVALID,
             "canonical runtime compiler did not publish a build security envelope",
         )
-    if any(not isinstance(item, str) or not item for item in security.capabilities):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+    if any(not item for item in security.capabilities):
         raise RecipeBuildUnknown(
             RecipeBuildCode.SECURITY_INVALID, "canonical build capabilities are invalid"
         )
@@ -609,7 +609,7 @@ def rederive_source_bundle_from_closure(
             "recipe source closure access was denied",
             reason=SecurityRefusalReason.PERMISSION_DENIED,
         ) from error
-    except (OSError, ValueError, SourceBundleError):
+    except OSError, ValueError, SourceBundleError:
         return None
     return bundle.archive if bundle.sha256 == source_sha256 else None
 
