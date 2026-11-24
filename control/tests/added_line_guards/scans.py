@@ -724,9 +724,19 @@ BOOKKEEPING_DRIFT = re.compile(
 )
 
 
+# Modules that moved into security/ without being edges; judged as before.
+NOT_SECURITY_EDGES = frozenset(
+    {
+        "control/src/vonk_control/security/edges.py",
+        "control/src/vonk_control/security/passwords.py",
+    }
+)
+
+
 def is_security_edge(path: str) -> bool:
-    return path in SECURITY_EDGES or path.startswith(
-        "control/src/vonk_control/security/"
+    return path in SECURITY_EDGES or (
+        path.startswith("control/src/vonk_control/security/")
+        and path not in NOT_SECURITY_EDGES
     )
 
 
@@ -789,6 +799,13 @@ REHASH_INGRESS = (
     "control/src/vonk_control/model_cache/transfer.py",
     "control/src/vonk_control/model_cache/split_transfer.py",
     "control/src/vonk_control/model_cache/http.py",
+)
+# Modules that moved into recipe_packages/ without being ingress; judged as before.
+NOT_RECIPE_PACKAGE_INGRESS = frozenset(
+    {
+        "control/src/vonk_control/recipe_packages/library_types.py",
+        "control/src/vonk_control/recipe_packages/release.py",
+    }
 )
 
 
@@ -1277,11 +1294,20 @@ _MEMBERSHIP_KEYS = frozenset({"artifact_set_sha256", "artifact_sha256"})
 
 # The one reader outside the model cache that may require NAS coverage.
 NAS_COVERAGE_READER = "control/src/vonk_control/distribution/model_cache.py"
-# Flat model_cache_* modules that moved into the package: they were scanned
+# Flat modules that moved into the model_cache package: they were scanned
 # before the move, so the package exemption for the storage modules excludes them.
 MOVED_FLAT_MODEL_CACHE_MODULES = frozenset(
     f"control/src/vonk_control/model_cache/{name}.py"
-    for name in ("api", "contract", "progress", "ranges", "states", "streams")
+    for name in (
+        "api",
+        "contract",
+        "file_verification",
+        "fleet_removal_contract",
+        "progress",
+        "ranges",
+        "states",
+        "streams",
+    )
 )
 
 

@@ -56,8 +56,18 @@ _WORDS = {
 _COMBINE = (ast.Add, ast.BitOr)
 
 
+#: Modules that moved under a contract name or package; still judged, as they
+#: were before the move.
+MOVED_IN_SCOPE = frozenset(
+    {
+        "control/src/vonk_control/distribution/assignment_contract.py",
+        "control/src/vonk_control/fleet_profile_contract/child_phases.py",
+    }
+)
+
+
 def in_scope(path: str) -> bool:
-    return (
+    return path in MOVED_IN_SCOPE or (
         path.startswith((SCOPE, CLI_SCOPE))
         and path.endswith(".py")
         and not path.endswith(
