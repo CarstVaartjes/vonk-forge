@@ -209,7 +209,6 @@ class JobAdapter:
         now: datetime,
         *,
         attempt: JobAttempt | None = None,
-        result: Mapping[str, object] | None | object = None,
         reason: str | object | None = None,
     ) -> None:
         """The only writer of ``Job.state`` and ``JobAttempt.state`` of a generic job."""
@@ -232,8 +231,6 @@ class JobAdapter:
         job.updated_at = now
         if after.terminal and attempt is not None:
             attempt.state = stored
-        if result is not None:
-            job.result = dict(result) if isinstance(result, Mapping) else None
         if reason is not None:
             job.status_reason = (
                 redact_text(str(reason))[:_MAX_REASON] if reason else None
@@ -249,7 +246,6 @@ class JobAdapter:
         now: datetime,
         *,
         attempt: JobAttempt | None = None,
-        result: Mapping[str, object] | None = None,
         reason: str | None = None,
         guard: str | None = None,
     ) -> Settled:
@@ -266,7 +262,7 @@ class JobAdapter:
                 return False
             # The mapper checks the read version at flush. A bulk state CAS
             # would bypass that fence and let a stale decision overwrite it.
-            self.apply(job, after, now, attempt=attempt, result=result, reason=reason)
+            self.apply(job, after, now, attempt=attempt, reason=reason)
             return True
 
         return settle_event(
@@ -357,7 +353,7 @@ class JobAdapter:
         after = transition(row, event, self, now).row
         if not after.terminal:
             return False
-        self.apply(job, after, now, attempt=attempt, result=result)
+        self.apply(job, after, now, attempt=attempt)
         job.result = dict(result) if result is not None else None
         job.status_reason = redact_text(reason)[:_MAX_REASON] if reason else None
         return True

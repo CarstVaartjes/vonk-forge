@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from types import MappingProxyType
 from typing import IO, TYPE_CHECKING, Literal
 
@@ -769,19 +769,6 @@ class CatalogService:
         # another root/head read solely to discover the already-selected id.
         return service.resolve(candidate.id, actor=actor), True
 
-    def resolve_recipe_revision(
-        self, document: Mapping[str, object], *, actor: str
-    ) -> str:
-        try:
-            recipe = read_recipe(document)
-        except (TypeError, ValueError) as error:
-            raise CatalogValidationError(
-                CatalogCode.DOCUMENT_INVALID, "recipe document is invalid"
-            ) from error
-        with self._sessions() as session:
-            _resolve_recipe(session, recipe)
-        return document_sha256(document)
-
 
 def _get_active_recipe(
     session: Session, recipe_id: str
@@ -799,14 +786,6 @@ def _get_active_recipe(
             ),
         )
     )
-
-
-def _resolve_recipe(session: Session, recipe: RecipeDefinition) -> None:
-    service = CatalogEntityService(
-        session, clock=lambda: datetime.now(UTC), cursors=None
-    )
-    for selection in recipe.models:
-        service.resolve_reference(selection.model)
 
 
 def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
