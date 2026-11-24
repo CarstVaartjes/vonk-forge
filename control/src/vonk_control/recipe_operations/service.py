@@ -18,7 +18,6 @@ from vonk_control.recipe_operations.action_plans import ActionPlansMixin
 from vonk_control.recipe_operations.build import BuildMixin
 from vonk_control.recipe_operations.build_cancellation import BuildCancellationMixin
 from vonk_control.recipe_operations.cancellation import CancellationMixin
-from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.recipe_operations.install import InstallMixin
 from vonk_control.recipe_operations.installation_preparation import (
     InstallationPreparationMixin,
@@ -168,9 +167,3 @@ class RecipeOperationService(
         actor: str,
     ) -> ClusterMappingPlan:
         return self._mappings.preview(recipe_revision_id, node_ids, parameters, actor)
-
-    def create_mapping(self, plan: ClusterMappingPlan, *, actor: str) -> str:
-        try:
-            return self._mappings.materialize(plan, actor=actor, now=self._clock())
-        except (RuntimeError, ValueError) as error:
-            raise RecipeRequestInvalid(str(error)) from error

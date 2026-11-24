@@ -25,11 +25,11 @@ longer occurs fails as stale, so a fixed copy must be removed from the list.
 from __future__ import annotations
 
 import ast
-import json
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import NotRequired, TypedDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
@@ -206,30 +206,40 @@ def python_models(root: Path = ROOT) -> dict[tuple[str, str], tuple[str, ...]]:
     return models
 
 
-class RegistryModule(TypedDict):
+class RegistryModule(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
     module: str
+    kind: str | None = None
+    reason: str | None = None
 
 
-class AllowedDuplicate(TypedDict):
+class AllowedDuplicate(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
     models: list[str]
+    reason: str | None = None
 
 
-class ModelRegistry(TypedDict):
-    """The parts of ``tools/python-model-registry.json`` the scan reads."""
+class ModelRegistry(BaseModel):
+    """``tools/python-model-registry.json``, validated where it is read."""
 
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    schema_version: int = Field(alias="schema")
+    note: str
     modules: list[RegistryModule]
-    allowed_duplicates: NotRequired[list[AllowedDuplicate]]
+    allowed_duplicates: list[AllowedDuplicate] = []
 
 
 def python_registry_problems(
     root: Path = ROOT, registry: ModelRegistry | None = None
 ) -> list[str]:
-    document: ModelRegistry = (
-        json.loads((root / "tools/python-model-registry.json").read_text())
+    document = (
+        ModelRegistry.model_validate_json(
+            (root / "tools/python-model-registry.json").read_text()
+        )
         if registry is None
         else registry
     )
-    modules = {entry["module"] for entry in document["modules"]}
+    modules = {entry.module for entry in document.modules}
     problems: list[str] = []
     models = python_models(root)
     for file, name in models:
@@ -243,9 +253,7 @@ def python_registry_problems(
         f"registry module {module} defines no model (stale entry)"
         for module in sorted(modules - present)
     )
-    allowed = {
-        tuple(sorted(item["models"])) for item in document.get("allowed_duplicates", [])
-    }
+    allowed = {tuple(sorted(item.models)) for item in document.allowed_duplicates}
     by_name: dict[str, list[str]] = defaultdict(list)
     by_fields: dict[tuple[str, ...], list[str]] = defaultdict(list)
     for (file, name), fields in models.items():

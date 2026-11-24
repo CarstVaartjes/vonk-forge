@@ -68,7 +68,7 @@ class RequestsMixin:
         if job.kind != UPDATE_KIND:
             raise RecipeImageAvailabilityUnknown(
                 RecipeUpdateCode.OPERATION_INVALID,
-                "stored update scope does not match its accepted identity",
+                "stored update is not an update operation",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 retryable=False,
             )
