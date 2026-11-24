@@ -1,7 +1,7 @@
 import "./activity-preview.css";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { ControlApi, VisualFleetNode } from "../../api/types";
-import { activityPreviewRows, unsuccessfulCount } from "../../pages/activity";
+import { activityPreviewRows, unsuccessfulCount } from "../../pages/activity-records";
 import { nodeDisplayName } from "../../lib/fleet";
 import { exactTime, formatDate } from "../../lib/time";
 import { StatusPill } from "./status-pill";

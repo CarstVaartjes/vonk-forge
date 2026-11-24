@@ -124,7 +124,7 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/components/ui/toast.tsx` | `Toasts` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/hooks/fleet-stream-state.ts` | `FleetStreamState` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/hooks/use-operation-observer.ts` | `Options` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/pages/activity.tsx` | `ActivitySummary` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/pages/activity-status.tsx` | `ActivitySummary` | UI-only view model derived from generated API types for one screen; not an API document |
 | `control/web/src/pages/login.tsx` | `LoginFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 
 ## Python contract modules

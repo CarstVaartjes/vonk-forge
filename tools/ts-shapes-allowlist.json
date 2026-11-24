@@ -303,7 +303,7 @@
       "reason": "UI-only pairing of one alias's generated series with the generated response that carries its spec; not an API document"
     },
     {
-      "file": "control/web/src/pages/activity.tsx",
+      "file": "control/web/src/pages/activity-status.tsx",
       "type": "ActivitySummary",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
