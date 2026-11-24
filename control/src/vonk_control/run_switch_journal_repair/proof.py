@@ -47,7 +47,6 @@ from vonk_control.run_switch_operations.image_receipts import (
 )
 from vonk_control.run_switch_operations.observation_helpers import _phase_request_key
 from vonk_control.run_switch_operations.planning_helpers import (
-    _digest,
     _run_switch_payload,
     _scope_intent_status,
 )
@@ -72,7 +71,6 @@ def _prove(
         or parent.operation_kind != job.kind
         or parent.action != plan.action
         or parent.plan_digest != plan.plan_digest
-        or job.payload_digest != _digest(job.payload)
         or job.authority_revision != (plan.recipe_content_sha256 or plan.plan_digest)
         or tuple(sorted(job.targets)) != tuple(sorted(_plan_target_node_ids(plan)))
         or len(set(job.targets)) != len(job.targets)
@@ -222,7 +220,6 @@ def _prove(
         not isinstance(child_parent, RecipeInstallParent)
         or child.request_id != str(uuid.uuid5(uuid.UUID(key), "runtime-install"))
         or child.actor != job.actor
-        or child.payload_digest != _digest(child_parent)
         or child_parent.workload_intent_ordinal != parent.workload_intent_ordinal
         or child_parent.owner_kind != "installation"
         or tuple(sorted(child.targets)) != tuple(sorted(job.targets))
@@ -266,7 +263,6 @@ def _prove(
         if (
             operation.authority_revision != child.authority_revision
             or operation.workload_intent_ordinal != parent.workload_intent_ordinal
-            or operation.payload_digest != _digest(operation.payload)
             or (operation.current_attempt > 0 and attempt is None)  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
         ):
             return None
