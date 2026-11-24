@@ -15,6 +15,7 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
@@ -643,13 +644,24 @@ def test_blocked_pending_load_is_superseded_by_a_saved_edit_not_replanned(
     assert replans == []
 
 
+_RECIPE_UNAVAILABLE = FleetProfileReason(
+    code=ProfileReasonCode.RECIPE_UNAVAILABLE,
+    detail="A recipe choice has no readable revision",
+    severity=ProfileReasonSeverity.ERROR.value,
+)
+
+
+@pytest.mark.parametrize(
+    "reasons", [[], [_RECIPE_UNAVAILABLE]], ids=["waiting", "recipe-unavailable"]
+)
 def test_pending_load_hashed_by_an_older_controller_is_admitted_not_superseded(
-    postgres_engine: Engine,
+    postgres_engine: Engine, reasons: list[FleetProfileReason]
 ) -> None:
     """Only a save supersedes a waiting load, not a profile that hashes differently.
 
     An upgrade may change how a saved profile is hashed; the load accepted
-    before it names the same saved revision and is admitted.
+    before it names the same saved revision and is admitted, also when its
+    choices are resolved again from the saved profile.
     """
 
     Base.metadata.create_all(postgres_engine)
@@ -658,7 +670,9 @@ def test_pending_load_hashed_by_an_older_controller_is_admitted_not_superseded(
     service = _service(sessions)
     profile = service.create(_input(recipe_revision_id), actor="admin")
     pending = service._create_pending_application(
-        service.preview(profile.id).model_copy(update={"allowed": False}),
+        service.preview(profile.id).model_copy(
+            update={"allowed": False, "reasons": reasons}
+        ),
         request_key=_uuid(896),
         actor="admin",
         operation_kind="fleet-profile.apply",
@@ -680,7 +694,7 @@ def test_pending_load_hashed_by_an_older_controller_is_admitted_not_superseded(
     service._observe_pending_admissions(NOW)
 
     admitted = service.application(pending.id)
-    assert admitted.state != "superseded", admitted.status_reason
+    assert admitted.state == "queued", admitted.status_reason
     assert admitted.progress.admission_pending is False, admitted.status_reason
 
 

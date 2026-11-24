@@ -305,7 +305,7 @@ class FleetProfileService:
                     ),
                 )
                 return True
-            if self._superseded_by_saved_profile(application_id):
+            if self._superseded_by_saved_profile(application_id, plan.profile_revision):
                 return True
             self._defer_pending_application(
                 application_id,
@@ -339,14 +339,16 @@ class FleetProfileService:
         replaced. Every re-plan in the admission observer goes through here.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        if self._superseded_by_saved_profile(application_id):
+        if self._superseded_by_saved_profile(application_id, plan.profile_revision):
             return None
         return self._replan_blocked_application(application_id, plan, actor)
 
-    def _superseded_by_saved_profile(self, application_id: str) -> bool:
+    def _superseded_by_saved_profile(
+        self, application_id: str, accepted_revision: int | None
+    ) -> bool:
         """End a waiting load a newer profile save replaced; the newest steers."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        if not self._profile_saved_since_accepted(application_id):
+        if not self._profile_saved_since_accepted(application_id, accepted_revision):
             return False
         self._finish_pending_admission(
             application_id,
@@ -356,8 +358,10 @@ class FleetProfileService:
         )
         return True
 
-    def _profile_saved_since_accepted(self, application_id: str) -> bool:
-        """Whether the saved profile is no longer the one this load accepted."""
+    def _profile_saved_since_accepted(
+        self, application_id: str, accepted_revision: int | None
+    ) -> bool:
+        """Whether the profile was saved since this load accepted ``accepted_revision``."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         with self._sessions() as session:
             row = session.get(FleetProfileApplication, application_id)
@@ -368,12 +372,7 @@ class FleetProfileService:
             profile = session.get(FleetProfile, row.profile_id)
             if profile is None:
                 return True
-            plan = _persisted_profile_plan(row)
-            # A damaged receipt proves no edit: the ordinary admission path
-            # retires it.
-            return not isinstance(plan, Residue) and _saved_since_review(
-                plan.binding, profile.revision
-            )
+            return _saved_since_review(accepted_revision, profile.revision)
 
     def _finish_pending_admission(
         self,

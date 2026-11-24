@@ -30,7 +30,6 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileNode,
 )
-from vonk_control.fleet_profile_contract.review import ProfileReviewBinding
 from vonk_control.fleet_profiles.contracts import (
     FleetProfileInvalid,
     FleetProfileStalePlanConflict,
@@ -395,13 +394,13 @@ class FleetProfileService:
         session: Session,
         profile: FleetProfile,
         *,
-        review: ProfileReviewBinding,
+        profile_revision: int | None,
         assignments: tuple[FleetProfileAssignment, ...],
     ) -> None:
         """Recheck the saved draft and exact recipe heads bound by a review."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        if _saved_since_review(review, profile.revision):
+        if _saved_since_review(profile_revision, profile.revision):
             raise FleetProfileStalePlanConflict(
                 "Fleet profile changed during application admission"
             )

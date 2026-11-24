@@ -200,7 +200,7 @@ class FleetProfileService:
                         preview.profile_id, reason=InvalidRequestReason.NOT_FOUND
                     )
                 if selection_precondition is None:
-                    if _saved_since_review(preview.binding, profile.revision):
+                    if _saved_since_review(preview.profile_revision, profile.revision):
                         raise FleetProfileStalePlanConflict(
                             "Fleet profile changed before its admission intent was persisted"
                         )
