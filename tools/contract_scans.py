@@ -28,6 +28,7 @@ import ast
 import re
 from collections import defaultdict
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -209,7 +210,7 @@ def python_models(root: Path = ROOT) -> dict[tuple[str, str], tuple[str, ...]]:
 class RegistryModule(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     module: str
-    kind: str | None = None
+    kind: Literal["agent-protocol", "controller-contract", "declared"]
     reason: str | None = None
 
 
