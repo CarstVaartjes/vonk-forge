@@ -25,7 +25,17 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, Any, Literal, Optional, TypedDict, Union, cast, get_args
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    Optional,
+    Required,
+    TypedDict,
+    Union,
+    cast,
+    get_args,
+)
 
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, Field, TypeAdapter, create_model
@@ -342,7 +352,7 @@ JsonSchema = TypedDict(
     "JsonSchema",
     {
         "$schema": str,
-        "$defs": "dict[str, JsonSchema]",
+        "$defs": "Required[dict[str, JsonSchema]]",
         "title": str,
     },
     total=False,
@@ -411,7 +421,7 @@ def bundled(published: JsonSchema, definitions: JsonSchema) -> JsonSchema:
         JsonSchema,
         _retarget(published, f"{DEFINITIONS_FILENAME}{_DEFS_PREFIX}", _DEFS_PREFIX),
     )
-    return {**schema, "$defs": definitions.get("$defs", {})}
+    return {**schema, "$defs": definitions["$defs"]}
 
 
 def schema_registry(directory: Path) -> Any:

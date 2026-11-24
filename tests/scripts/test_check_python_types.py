@@ -77,6 +77,7 @@ def test_real_hook_checks_whitespace_paths_with_prepared_environment(
     helper = tmp_path / "scripts/check_environment.py"
     helper.write_text(
         "def ensure_control(root, environment): pass\n\ndef ensure_web(root): pass\n"
+        "\ndef pyright_environment(): return {}\n"
     )
     probe = tmp_path / 'probe with space and "quote".py'
     probe.write_text(source)

@@ -65,6 +65,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/test_console_script_entry_points.py",
+        "Every [project.scripts] target of the four pyprojects names a module file that defines its callable.",
+    ),
+    (
         "tests/scripts/test_touched_tests.py",
         "scripts/test changed selects a test its patch edits, one importing a touched module directly or through test support modules, and not an unrelated one.",
     ),
