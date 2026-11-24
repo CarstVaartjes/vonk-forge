@@ -43,6 +43,7 @@ from vonk_control.agent_operation_facts import (
     aware,
     fencing_intent,
 )
+from vonk_control.agent_upgrades.package_activation import matches_receipt
 from vonk_control.cancelled_runtime import cancellation_stop_current
 from vonk_control.disk_reservations import outstanding_disk_charges
 from vonk_control.gpu.health import gpu_health_reason
@@ -65,7 +66,6 @@ from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.offline_stops import is_deferred_stop
 from vonk_control.operations.blockers import make_blocker
 from vonk_control.own_cleanup import CLEANUP_KINDS
-from vonk_control.package_activation import matches_receipt
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds.common import (
     BUILD_ARTIFACT_FORMAT,

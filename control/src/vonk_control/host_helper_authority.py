@@ -52,6 +52,7 @@ from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdent
 from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 from vonk_control import agent_operation_states
 from vonk_control.agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
+from vonk_control.agent_upgrades.package_activation import matches_receipt
 from vonk_control.gpu.clock import selected_gpu_clock
 from vonk_control.host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
@@ -69,7 +70,6 @@ from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.offline_stops import is_deferred_stop
 from vonk_control.own_cleanup import CLEANUP_ACTIONS
 from vonk_control.owner_liveness import run_has_live_operation
-from vonk_control.package_activation import matches_receipt
 from vonk_control.strict_json import read_stored_model
 from vonk_control.swap import selected_swap
 from vonk_control.untracked_installations import run_wanted_here
