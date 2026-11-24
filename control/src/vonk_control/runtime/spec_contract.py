@@ -2,7 +2,7 @@
 
 ``compile_runtime_spec`` turns a canonical recipe role into this document and
 every later step reads it: the model-cache and image services bind exact bytes
-to it, ``compiled_execution_plan`` projects it into the plan an agent receives,
+to it, ``execution_plan.compiled`` projects it into the plan an agent receives,
 and the execution identity is the digest of its launch-affecting parts.  The
 models are closed (unknown fields refuse), so a retired authority cannot ride
 along, and the two identity digests are built here from the typed values, in the

@@ -1,6 +1,6 @@
 """The one failure-disposition table every client reads.
 
-The Controller (``failure_classification.disposition``), the Spark agent
+The Controller (``failures.classification.disposition``), the Spark agent
 (``ClientError::disposition`` in Rust) and the CLI (its generated table) decide
 what a failure does to its work from these rows, so a status, a failure kind or
 a wait reason cannot mean "retry" on one side and "fail" on the other.

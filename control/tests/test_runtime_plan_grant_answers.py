@@ -106,7 +106,7 @@ def _run(session: Session) -> RecipeRun:
 #: What leaves the run not ready for its Start, by its production writer.
 #: None is ever readied again for the same order, so none is a wait.
 _NOT_READY: dict[str, Callable[[Session], None]] = {
-    # ``installed_bytes.py``: a Spark's listing lost the installed ranks.
+    # ``installations/installed_bytes.py``: a Spark's listing lost the installed ranks.
     "installation-partial": lambda session: setattr(
         _installation(session), "state", InstallationState.PARTIAL
     ),

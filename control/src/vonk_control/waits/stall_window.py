@@ -42,7 +42,7 @@ class Wait:
 
 
 class Liveness(Protocol):
-    """An owner as ``reservation_owners.owner`` resolves it: unknown is live."""
+    """An owner as ``reservations.owners.owner`` resolves it: unknown is live."""
 
     @property
     def live(self) -> bool: ...

@@ -130,7 +130,7 @@ def reinstall_in_flight(session: Session, installation_id: str) -> str | None:
     """The live install a held run's jobs wait for, while it is not installed.
 
     A lost image makes the installation partial under its held job run
-    (``installed_bytes.demote_ranks_on_lost_image``); the next submission
+    (``installations.installed_bytes.demote_ranks_on_lost_image``); the next submission
     installs it again (``start_installation``) and its job waits for exactly
     that install: dispatch holds the order and the job shows the wait. With no
     live install there is nothing to wait for, so the order goes on and the

@@ -216,7 +216,7 @@ def scan_repeats(source: str) -> list[int]:
 
 # ---------------------------------------------------------------------------
 # One failure disposition (whole-tree).  The verdict of a failure is
-# ``failure_classification.disposition``; a failed lifecycle report is built by
+# ``failures.classification.disposition``; a failed lifecycle report is built by
 # ``Reported.failed`` (which derives ``retryable``/``consumes_retry``); the one
 # failure limit and retry clock live in ``recovery_policy`` and the lifecycle
 # core.  Nothing else hand-sets a retry flag, keeps a private limit, counts its

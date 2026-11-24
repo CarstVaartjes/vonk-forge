@@ -2,7 +2,7 @@
 
 A Run/Switch that waits for a target Spark to return, for its start to load a
 model, or for its child operation to finish is waiting on a live owner, and
-that wait never expires (``stall_window.progress_verdict``). Its observation
+that wait never expires (``waits.stall_window.progress_verdict``). Its observation
 window runs only while nothing it waits on is live, and restarts when that
 owner ended: a start that loaded for an hour leaves the full verification
 window for the route evidence that follows.

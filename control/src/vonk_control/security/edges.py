@@ -3,7 +3,7 @@
 A :class:`~vonk_agent_protocol.outcome.SecurityRefusalError` is terminal and never
 retried, so it is only for a real security boundary.  Each closed
 :class:`~vonk_agent_protocol.lifecycle_vocabulary.SecurityRefusalReason` names exactly one of the
-edges below; :mod:`failure_classification` treats a code as a security refusal
+edges below; :mod:`failures.classification` treats a code as a security refusal
 only through this map.
 
 Bookkeeping drift is never a security edge.  An owner that is unavailable is a

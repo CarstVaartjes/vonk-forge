@@ -654,7 +654,7 @@ def _serving_run_ids(session: Session, node_id: str) -> frozenset[str]:
     """Runs already serving on this Spark: not new demand for a build.
 
     Observed free memory already reflects what a serving run holds, so it is
-    kept like a run a plan keeps (``memory_reservations.kept_run_residual``).
+    kept like a run a plan keeps (``reservations.memory.kept_run_residual``).
     A starting run is still growing into its claim and stays charged.
     """
     return frozenset(

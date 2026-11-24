@@ -63,7 +63,7 @@ def end_unclaimed_probes(
         )
 
 
-# Security refusals (failure_classification.is_security_failure) park the
+# Security refusals (failures.classification.is_security_failure) park the
 # preflight; everything else is transient and retried with backoff.
 def _child_error_code(result: object) -> str | None:
     """Read the typed failure code from a child attempt result, never free text."""

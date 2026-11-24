@@ -344,7 +344,7 @@ def test_runtime_preflight_never_becomes_an_off_lane_operation() -> None:
     ``record_preflight`` stores the receipt's fingerprint as the node's current
     fingerprint: a probe runs on the claim lane, so its receipt is the newest
     host sample and no claim is sampled between the probe and its result.  The
-    claim-side comparisons (``agent_jobs/claim.py``, ``agent_acceptance.py``)
+    claim-side comparisons (``agent_jobs/claim.py``, ``operator_acceptance/agent.py``)
     read committed node state after the claim handler, so the on-lane ordering
     is the only thing keeping a claim body equal to the stored value.  If probes
     move off the lane, a receipt could be older than a claim sample: revisit

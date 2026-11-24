@@ -156,7 +156,7 @@ class FleetProfileConflict(RuntimeError):
     """A Fleet profile is invalid, stale, or cannot be safely applied.
 
     What a retry does with it is its one disposition
-    (``failure_classification.disposition``); a conflict that ends the
+    (``failures.classification.disposition``); a conflict that ends the
     application ``superseded`` names its ``supersede_code``.
     """
 

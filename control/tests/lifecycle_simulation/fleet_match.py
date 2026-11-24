@@ -7,7 +7,7 @@ ranks, and the run-switch receipts that started each run.
 
 - On every Spark the profile covers, the live runs are exactly its running
   assignments there (same recipe revision and alias), each serving by the
-  load's own readiness rule (``run_readiness``: a service run published, a job
+  load's own readiness rule (``runs.readiness``: a service run published, a job
   run held with its route withdrawn); an idle profile leaves nothing running.
 - Every such run belongs to the load's intent: the load (or a load it
   retries) started it, its plan keeps it as it is, or its plan adopted the
