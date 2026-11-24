@@ -146,8 +146,6 @@ def _local_state_snapshot(
     except (*AVAILABILITY_ERRORS, RuntimeError, TypeError, ValueError):
         _note_unreadable("local-state", "provider", "observation is unavailable")
         return None
-    if not isinstance(candidate, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]  # a provider's observation is checked before use
-        return None
     snapshot: dict[str, LibraryLocalState] = {}
     for digest in digests:
         raw = candidate.get(digest)
@@ -180,8 +178,6 @@ def _local(
     observed = snapshot.get(digest)
     raw = observed.model_dump(mode="json") if observed is not None else {}
     try:
-        if not isinstance(raw, Mapping):  # pyright: ignore[reportUnnecessaryIsInstance]  # a provider's observation is checked before use
-            raise TypeError("local observation is not a mapping")
         return LibraryLocalState.model_validate_json(
             canonical_message(raw or {"controller": "not_cached"})
         )

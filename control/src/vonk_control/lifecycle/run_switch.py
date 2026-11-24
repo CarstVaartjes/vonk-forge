@@ -355,7 +355,7 @@ class RunSwitchAdapter:
             return None, None
         requested = aware(cancellation.requested_at)
         key = cancellation.request_key
-        return requested, key if isinstance(key, str) else None  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+        return requested, key
 
     # ----------------------------------------------------- the kind's facts
 
@@ -619,7 +619,7 @@ class RunSwitchAdapter:
             given
             if explicit
             else cancellation.reason
-            if cancellation is not None and isinstance(cancellation.reason, str)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+            if cancellation is not None
             else None
         )
         if after.effect is Effect.UNKNOWN and not explicit:

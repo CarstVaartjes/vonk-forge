@@ -365,9 +365,7 @@ def _proves_fresh_absence(run: RecipeRun, node: RunNode, now: datetime) -> bool:
         or run_nodes[0].endpoint_owner is not True
     ):
         return False
-    if node.observation_endpoint_ready is not False or not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-        node.observation_observed_at, datetime
-    ):
+    if node.observation_endpoint_ready is not False:
         return False
     observed_at = _aware(node.observation_observed_at)
     age = _aware(now) - observed_at
@@ -597,16 +595,7 @@ def _encode_phases(phases: RecoveryStartPhases) -> list[list[RecoveryStartItem]]
 def _decode_phases(
     value: list[list[RecoveryStartItem]] | None,
 ) -> RecoveryStartPhases | None:
-    if (
-        not isinstance(value, list)
-        or not value
-        or any(
-            not isinstance(group, list)  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
-            or not group
-            or any(not isinstance(item, RecoveryStartItem) for item in group)  # pyright: ignore[reportUnnecessaryIsInstance]  # an unexpected value is treated as unknown, not trusted
-            for group in value
-        )
-    ):
+    if not isinstance(value, list) or not value or any(not group for group in value):
         return None
     return tuple(
         tuple((item.node_id, item.payload) for item in group) for group in value

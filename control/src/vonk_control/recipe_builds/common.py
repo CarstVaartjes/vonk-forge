@@ -349,7 +349,7 @@ def _canonical_build_resources(
             RecipeBuildCode.SECURITY_INVALID,
             "canonical runtime compiler did not publish a build security envelope",
         )
-    if any(not isinstance(item, str) or not item for item in security.capabilities):  # pyright: ignore[reportUnnecessaryIsInstance]  # a typed value is re-checked where it is consumed
+    if any(not item for item in security.capabilities):
         raise RecipeBuildUnknown(
             RecipeBuildCode.SECURITY_INVALID, "canonical build capabilities are invalid"
         )

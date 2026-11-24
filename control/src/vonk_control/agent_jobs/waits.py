@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, select
+from sqlalchemy import Nullable, and_, select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
@@ -57,7 +57,7 @@ def record_queue_waits(
         return {}
     holders: dict[str, list[tuple[AgentOperation, AgentOperationAttempt | None]]] = {}
     for running, attempt in session.execute(
-        select(AgentOperation, AgentOperationAttempt)
+        select(AgentOperation, Nullable(AgentOperationAttempt))
         .outerjoin(
             AgentOperationAttempt,
             and_(
@@ -73,7 +73,7 @@ def record_queue_waits(
         .order_by(AgentOperation.created_at, AgentOperation.id)
     ):
         unconfirmed = running.state == agent_operation_states.OBSERVING or (
-            attempt is not None and agent_operation_states.attempt_is_observing(attempt)  # pyright: ignore[reportUnnecessaryComparison]  # outer-joined attempt rows can be missing
+            attempt is not None and agent_operation_states.attempt_is_observing(attempt)
         )
         if (
             running.state != agent_operation_states.RUNNING

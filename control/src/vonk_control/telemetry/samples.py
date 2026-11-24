@@ -89,7 +89,7 @@ _SAMPLE_FIELDS = tuple(
 
 def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
     resources = row.resource_snapshot
-    if resources is None or isinstance(resources.host_resources, Residue):  # pyright: ignore[reportUnnecessaryComparison]  # a stored row or query value is checked, not trusted
+    if resources is None or isinstance(resources.host_resources, Residue):
         raise ValueError("telemetry resource evidence is unreadable")
     return TelemetrySampleView.model_validate_json(
         canonical_message(
