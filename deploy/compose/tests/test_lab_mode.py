@@ -19,9 +19,9 @@ def test_compose_keeps_tailscale_opt_in_and_publishes_local_ca_https() -> None:
     assert tailscale["services"]["tailscale-configurator"]["profiles"] == [
         "secure-remote"
     ]
-    assert compose["services"]["caddy"]["ports"][0]["host_ip"] == (
-        "${NAS_LAN_IP:?set reserved NAS LAN IP}"
-    )
+    assert compose["services"]["caddy"]["ports"] == [
+        {"target": 8443, "published": 8443, "protocol": "tcp"}
+    ]
     assert (
         "tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key"
         in caddyfile

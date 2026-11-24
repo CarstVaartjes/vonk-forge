@@ -108,9 +108,7 @@ def render(
     if channel != "pinned":
         canonical_renderer._resolve_extension_images(document, channel)
     canonical_renderer._stamp_bundle_digest(
-        document["services"],
-        canonical_renderer.bundle_digest(template),
-        document.get("networks") or {},
+        document["services"], canonical_renderer.bundle_digest(template)
     )
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_CONTROL_HOSTNAME" not in rendered:

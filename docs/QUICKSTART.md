@@ -43,8 +43,9 @@ Import `secrets/step-ca/root-certificate` into the trust store used by your
 browser and Spark clients. Then open `https://vonk-forge.local:8443` and sign
 in as `admin` using the password in `secrets/admin-password`.
 
-The LAN listener is bound to the address you entered. Keep the host firewall
-limited to your trusted LAN and do not forward port 8443 from the internet.
+Port 8443 is published on all NAS interfaces; Docker-published ports bypass
+the host's INPUT firewall rules. Keep the NAS on a trusted LAN and do not
+forward port 8443 from the internet.
 
 ## Add a Spark
 

@@ -192,7 +192,7 @@ a UI's delete action does not always remove them.
 The volumes are `postgres-data` (database), `control-state`, `agent-artifacts`,
 `model-cache`, `caddy-data`, `caddy-config`, `litellm-supervisor-state`,
 `prometheus-data`, `route-publications`,
-`normalized-private-keys`, `runtime-assets`, `image-janitor-state`, and, for
+`normalized-private-keys`, `runtime-assets`, and, for
 Secure remote, `tailscale-state` and `tailscale-socket`. List yours:
 
 ```sh

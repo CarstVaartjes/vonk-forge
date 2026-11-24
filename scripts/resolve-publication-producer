@@ -153,7 +153,6 @@ PRODUCERS = {
             "deploy/compose/Caddyfile",
             "deploy/compose/caddy/entrypoint.sh",
             "deploy/compose/compose.yaml",
-            "deploy/compose/image-janitor/janitor.py",
             "deploy/compose/litellm/**",
             "deploy/compose/python-bootstrap.lock",
             "deploy/compose/uv-bootstrap.lock",

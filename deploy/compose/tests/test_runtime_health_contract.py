@@ -14,7 +14,6 @@ ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
     "runtime-init",
-    "image-janitor",
     "caddy",
     "control-api",
     "control-worker",
@@ -79,7 +78,6 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
     assert services["tailscale-configurator"]["profiles"] == ["secure-remote"]
 
     expected_evidence = {
-        "image-janitor": ("unused.json", "network-tick-ok", "st_mtime"),
         "runtime-init": ("/tmp/runtime-staged",),
         "postgres": ("pg_isready", "psql", "SELECT 1"),
         "control-api": ("vonk_control.healthcheck",),
@@ -131,8 +129,7 @@ def test_dependencies_only_order_startup_and_are_acyclic() -> None:
     Scope: this covers compose dependency edges only. Namespace/volume joins
     (see test_joins_on_restartable_services_are_explicitly_allowed) and
     outright dependency start failures (e.g. a port bind) can still leave a
-    container Created; the image-janitor's Created-start net (PR #2166)
-    starts those after CREATED_GRACE.
+    container Created until the next `compose up` (Redeploy) starts it.
     """
     for selection in (True, False):
         services = _rendered(secure_remote=selection)["services"]
@@ -171,8 +168,7 @@ def test_dependencies_only_order_startup_and_are_acyclic() -> None:
 # edges cannot prevent that. Each allowed joiner needs a reason.
 ALLOWED_JOINS = {
     "tailscale-configurator": (
-        "image-janitor starts Created containers after CREATED_GRACE, "
-        "including shared-network ones (PR #2166)"
+        "a configurator left Created by a refused join starts on the next Redeploy"
     ),
 }
 
