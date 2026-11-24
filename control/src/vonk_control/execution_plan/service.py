@@ -28,14 +28,14 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
-from vonk_control.compiled_execution_plan import (
+from vonk_control.distribution.sources import verified_model_receipts
+from vonk_control.execution_plan.compiled import (
     CompiledExecutionPlanError,
     DistributionObjectReceipt,
     VerifiedModelObject,
     VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
-from vonk_control.distribution.sources import verified_model_receipts
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.mapping import ClusterMappingNode

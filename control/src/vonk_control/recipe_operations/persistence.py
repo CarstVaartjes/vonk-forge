@@ -40,7 +40,7 @@ from vonk_control.admission_locking import (
 from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.bounded_json import require_mapping
-from vonk_control.compiled_execution_plan import (
+from vonk_control.execution_plan.compiled import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,

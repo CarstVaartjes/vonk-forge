@@ -20,7 +20,7 @@ from vonk_control.availability_production.production import (
 )
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.execution_plan.service import ControllerExecutionPlanService
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.items import runtime_value
 from vonk_control.models.cache import RecipeBuild

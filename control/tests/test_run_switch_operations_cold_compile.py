@@ -15,7 +15,7 @@ from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperatio
 from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.execution_plan.service import ControllerExecutionPlanService
 from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision

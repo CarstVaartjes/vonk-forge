@@ -41,7 +41,7 @@ from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog.entities import _digest
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
-from vonk_control.execution_plan_service import (
+from vonk_control.execution_plan.service import (
     ControllerExecutionPlanService,
 )
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo

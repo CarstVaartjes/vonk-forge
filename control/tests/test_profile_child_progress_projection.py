@@ -25,7 +25,7 @@ from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.execution_plan_service import (
+from vonk_control.execution_plan.service import (
     ControllerExecutionPlanService,
     _build_package,
 )

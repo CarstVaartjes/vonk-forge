@@ -8,12 +8,12 @@ from sqlalchemy import delete, select
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
-from vonk_control.compiled_execution_plan import (
-    VerifiedRuntimeImage,
-)
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.sources import verified_model_receipts
-from vonk_control.execution_plan_service import _runtime_image_receipt
+from vonk_control.execution_plan.compiled import (
+    VerifiedRuntimeImage,
+)
+from vonk_control.execution_plan.service import _runtime_image_receipt
 from vonk_control.failures.classification import disposition
 from vonk_control.models.cache import (
     ModelCacheOperation,

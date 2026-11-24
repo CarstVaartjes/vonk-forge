@@ -42,7 +42,7 @@ from vonk_control.db.connections import build_engine, session_factory
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
-from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.execution_plan.service import ControllerExecutionPlanService
 from vonk_control.failures.evidence import FailureEvidenceService
 from vonk_control.fleet_events.outbox import FleetEventRepository
 from vonk_control.fleet_events.stream import FleetStream

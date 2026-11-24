@@ -188,7 +188,7 @@ module defines its own.
 | `control/src/vonk_control/cli_update_contract.py` | controller-contract | 1 | Authenticated CLI compatibility observation; its canonical schema is generated into the installed updater package. |
 | `control/src/vonk_control/cluster_mappings.py` | declared | 2 | The identity document whose digest binds a cluster mapping plan to its exact placement. |
 | `control/src/vonk_control/compiled_artifact_contract.py` | controller-contract | 12 | Canonical compiled contract for artifact-producing recipe jobs. |
-| `control/src/vonk_control/compiled_execution_plan.py` | declared | 7 | Verified Controller receipts for the compiled Spark execution plan. |
+| `control/src/vonk_control/execution_plan/compiled.py` | declared | 7 | Verified Controller receipts for the compiled Spark execution plan. |
 | `control/src/vonk_control/distribution/assignment_contract.py` | declared | 1 | The Controller's record of one node's artifact distribution grant. |
 | `control/src/vonk_control/endpoint_contract.py` | controller-contract | 1 | Secret-free projection of one published recipe endpoint. |
 | `control/src/vonk_control/enrollment/contract.py` | controller-contract | 7 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |

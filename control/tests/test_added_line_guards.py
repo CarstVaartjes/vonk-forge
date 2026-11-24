@@ -1864,7 +1864,7 @@ def test_nas_coverage_is_required_only_where_nas_bytes_are_read() -> None:
     target Spark already holds (a re-download after NAS eviction)."""
     source = "def receipts(cache, digest):\n    return cache.resolve_verified_artifact_set(digest)\n"
     assert check_source(
-        "control/src/vonk_control/execution_plan_service.py",
+        "control/src/vonk_control/execution_plan/service.py",
         source,
         {2},
         modes=("model-sets",),

@@ -29,7 +29,7 @@ from control.tests.test_compiled_execution_plan import (
     compile_verified_execution_plan,
     execution_identity_sha256,
 )
-from vonk_control.execution_plan_service import _bind_runtime_artifacts
+from vonk_control.execution_plan.service import _bind_runtime_artifacts
 
 
 def _json_object(value: object) -> dict[str, object]:

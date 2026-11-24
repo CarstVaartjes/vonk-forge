@@ -20,7 +20,7 @@ from vonk_forge_contracts import document_sha256
 
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_control.catalog.entities import CatalogEntityService
-from vonk_control.execution_plan_service import (
+from vonk_control.execution_plan.service import (
     ControllerExecutionPlanService,
     compile_job_invocation,
 )

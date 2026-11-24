@@ -27,7 +27,7 @@ from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
-from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.execution_plan.service import ControllerExecutionPlanService
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.repository import (

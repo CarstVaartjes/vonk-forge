@@ -44,7 +44,7 @@ from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.types import content_objects, plan_objects
 from vonk_control.distribution_executor.identity import DistributionIdentity
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
-from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.execution_plan.service import ControllerExecutionPlanService
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
