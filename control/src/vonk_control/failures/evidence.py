@@ -42,6 +42,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_control import agent_operation_states
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.bounded_json import BoundedJSONError, require_integer, sequence
+from vonk_control.failures.summary_cut import summary_cut
 from vonk_control.fleet_profiles.operation_projection import _operation_item
 from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.lifecycle.job_ranks import ended_artifact_job
@@ -60,7 +61,6 @@ from vonk_control.operations.item_contract import (
 )
 from vonk_control.stored.rows import read_row_column
 from vonk_control.strict_json import StrictJSONModel, read_stored_model
-from vonk_control.summary_cut import summary_cut
 
 MAX_LOG_BYTES = LOG_TAIL_BYTES
 MAX_LOG_LINES = 32

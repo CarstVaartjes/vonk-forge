@@ -16,8 +16,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
-from vonk_control.failure_classification import disposition, is_security_failure
-from vonk_control.failure_evidence import safe_text
+from vonk_control.failures.classification import disposition, is_security_failure
+from vonk_control.failures.evidence import safe_text
 from vonk_control.jobs import states as job_states
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt

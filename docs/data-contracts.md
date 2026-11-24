@@ -192,7 +192,7 @@ module defines its own.
 | `control/src/vonk_control/distribution/assignment_contract.py` | declared | 1 | The Controller's record of one node's artifact distribution grant. |
 | `control/src/vonk_control/endpoint_contract.py` | controller-contract | 1 | Secret-free projection of one published recipe endpoint. |
 | `control/src/vonk_control/enrollment/contract.py` | controller-contract | 7 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |
-| `control/src/vonk_control/failure_evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
+| `control/src/vonk_control/failures/evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
 | `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
 | `control/src/vonk_control/fleet_profile_contract/endpoints.py` | controller-contract | 3 | Fleet profile contract: endpoints. |
 | `control/src/vonk_control/fleet_profile_contract/definitions.py` | controller-contract | 19 | Fleet profile contract: definitions. |
@@ -274,7 +274,7 @@ module defines its own.
 | `control/src/vonk_control/runtime/asset_contract.py` | controller-contract | 1 | Complete public-kit membership produced while assembling the Controller image. |
 | `control/src/vonk_control/operator_receipt_contract.py` | controller-contract | 4 | Canonical public operator acceptance references and existing-Job decisions. |
 | `control/src/vonk_control/model_cache/fleet_removal_contract.py` | controller-contract | 6 | Reviewed, content-addressed effects of a request to remove a fleet model. |
-| `control/src/vonk_control/coordinator_contract.py` | controller-contract | 2 | Failures of worker coordinators that have not claimed an operation. |
+| `control/src/vonk_control/failures/coordinator_contract.py` | controller-contract | 2 | Failures of worker coordinators that have not claimed an operation. |
 | `tools/client_compatibility_report.py` | declared | 8 | Report what a published vonkctl would refuse from this Controller. |
 | `tools/contract_scans.py` | declared | 3 | Static scans that keep every data class defined once, in its Pydantic contract. |
 | `tools/single_source_values.py` | declared | 3 | Owner-adjacent registrations for handwritten literal families, without debt allowances. |

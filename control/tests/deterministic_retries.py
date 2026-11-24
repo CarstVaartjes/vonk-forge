@@ -225,7 +225,7 @@ def scan_repeats(source: str) -> list[int]:
 #: The owners of the primitive itself.
 DISPOSITION_OWNERS = frozenset(
     {
-        "control/src/vonk_control/failure_classification.py",
+        "control/src/vonk_control/failures/classification.py",
         "control/src/vonk_control/lifecycle/core.py",
         "control/src/vonk_control/lifecycle/types.py",
         "control/src/vonk_control/recovery_policy.py",

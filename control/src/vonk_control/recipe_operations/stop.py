@@ -34,7 +34,7 @@ from vonk_control.admission_locking import (
     set_admission_timeout,
 )
 from vonk_control.bounded_json import require_mapping
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
 from vonk_control.jobs.documents import RecipeStopParent, controller_recipe_document
 from vonk_control.logging import redact_text

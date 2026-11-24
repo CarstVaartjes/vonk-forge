@@ -41,7 +41,7 @@ from vonk_control.agent_operation_facts import (
 )
 from vonk_control.agent_operation_facts import aware as _aware
 from vonk_control.agent_upgrades.status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
-from vonk_control.failure_classification import disposition, is_security_failure
+from vonk_control.failures.classification import disposition, is_security_failure
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
     retry_scheduled,

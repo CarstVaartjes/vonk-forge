@@ -18,7 +18,7 @@ from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
-from vonk_control.failure_classification import is_security_failure
+from vonk_control.failures.classification import is_security_failure
 from vonk_control.inventory.items import inventory_items
 from vonk_control.lifecycle.job import JobAdapter
 from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint

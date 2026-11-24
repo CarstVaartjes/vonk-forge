@@ -23,7 +23,7 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.failure_classification import (
+from vonk_control.failures.classification import (
     error_code,
     is_definite,
     is_security_failure,

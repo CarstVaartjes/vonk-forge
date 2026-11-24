@@ -31,8 +31,8 @@ from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.capabilities import RecoveringService
 from vonk_control.catalog.api import install_catalog_routes
 from vonk_control.cli_update_contract import install_cli_update_contract_routes
-from vonk_control.failure_evidence import FailureEvidenceService
-from vonk_control.failure_evidence_api import install_failure_evidence_routes
+from vonk_control.failures.evidence import FailureEvidenceService
+from vonk_control.failures.evidence_api import install_failure_evidence_routes
 from vonk_control.fleet_profiles.api import install_fleet_profile_routes
 from vonk_control.fleet_profiles.application_cancel_api import (
     install_profile_application_cancel_route,

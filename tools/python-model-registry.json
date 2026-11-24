@@ -277,7 +277,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/failure_evidence.py",
+      "module": "control/src/vonk_control/failures/evidence.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -587,7 +587,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/coordinator_contract.py",
+      "module": "control/src/vonk_control/failures/coordinator_contract.py",
       "reason": "Canonical current worker coordinator failure and wait observation contracts.",
       "kind": "controller-contract"
     },

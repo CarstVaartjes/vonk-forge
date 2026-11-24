@@ -25,7 +25,7 @@ from vonk_control.api_availability import AVAILABILITY_ERRORS
 from vonk_control.auth import Actor, CursorCodec, CursorError
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
-from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.failures.evidence import FailureEvidenceService
 from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.jobs.operator_receipts import read_job_operator_receipt
 from vonk_control.operation_api.contracts import (

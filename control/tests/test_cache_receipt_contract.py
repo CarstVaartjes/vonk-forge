@@ -14,7 +14,7 @@ from vonk_control.compiled_execution_plan import (
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.sources import verified_model_receipts
 from vonk_control.execution_plan_service import _runtime_image_receipt
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.models.cache import (
     ModelCacheOperation,
     ModelCacheSet,

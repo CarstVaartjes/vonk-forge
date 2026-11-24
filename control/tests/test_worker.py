@@ -19,9 +19,9 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.coordinator_contract import CoordinatorFailureEvidence
-from vonk_control.coordinator_failures import CoordinatorFailures
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
+from vonk_control.failures.coordinator import CoordinatorFailures
+from vonk_control.failures.coordinator_contract import CoordinatorFailureEvidence
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import JobService

@@ -28,7 +28,7 @@ from vonk_agent_protocol.state_machines import (
 )
 from vonk_control.admission_locking import AdmissionRowLock, lock_admission_rows
 from vonk_control.categorized_errors import MissingRecord
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,

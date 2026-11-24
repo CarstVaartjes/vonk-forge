@@ -14,6 +14,7 @@ from vonk_control import agent_operation_states
 from vonk_control.auth import CursorCodec, CursorError
 from vonk_control.bounded_json import BoundedJSONError, require_sequence
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.failures.summary_cut import summary_cut
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationView,
 )
@@ -52,7 +53,6 @@ from vonk_control.strict_json import (
     serialize_json_value,
     warn_unreadable_once,
 )
-from vonk_control.summary_cut import summary_cut
 from vonk_control.waits.persisted import read_wait
 
 

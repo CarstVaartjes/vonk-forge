@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from vonk_control.coordinator_contract import CoordinatorFailureEvidence
+from vonk_control.failures.coordinator_contract import CoordinatorFailureEvidence
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_primitives import Base
 from vonk_control.models.waits import wait_due_column, wait_evidence_column

@@ -39,8 +39,8 @@ from vonk_control.catalog.sync import (
     AutomaticCatalogSync,
     ManagedRecipeCatalogSyncService,
 )
-from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.failures.coordinator import CoordinatorFailures
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base
@@ -88,7 +88,7 @@ def test_quiet_worker_reconstruction_redrives_the_same_fenced_job(
     script = """
 import os, signal
 from datetime import datetime
-from vonk_control.coordinator_failures import CoordinatorFailures
+from vonk_control.failures.coordinator import CoordinatorFailures
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.jobs.queue import JobService

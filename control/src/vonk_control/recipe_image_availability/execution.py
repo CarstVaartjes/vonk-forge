@@ -13,7 +13,7 @@ from vonk_forge_contracts import RecipeDefinition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-from vonk_control.failure_classification import is_security_failure
+from vonk_control.failures.classification import is_security_failure
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.documents import (
     AvailabilityJobPayload,

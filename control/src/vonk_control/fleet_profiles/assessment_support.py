@@ -16,7 +16,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.bounded_json import sequence
-from vonk_control.failure_classification import is_security_failure
+from vonk_control.failures.classification import is_security_failure
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )

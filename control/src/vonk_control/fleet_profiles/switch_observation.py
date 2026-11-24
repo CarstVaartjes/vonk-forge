@@ -21,7 +21,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.categorized_errors import MissingRecord
-from vonk_control.failure_classification import is_definite
+from vonk_control.failures.classification import is_definite
 from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
 from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
 from vonk_control.fleet_profile_contract.switch_state import (

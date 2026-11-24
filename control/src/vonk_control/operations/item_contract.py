@@ -38,6 +38,7 @@ from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control import agent_operation_states
+from vonk_control.failures.summary_cut import summary_cut
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationView,
 )
@@ -50,7 +51,6 @@ from vonk_control.operations.contract import (
     sanitize_failure_evidence,
 )
 from vonk_control.strict_json import StrictModel, read_stored_model
-from vonk_control.summary_cut import summary_cut
 from vonk_control.waits.contract import QueueWait
 
 #: The wire word for an agent operation kind.

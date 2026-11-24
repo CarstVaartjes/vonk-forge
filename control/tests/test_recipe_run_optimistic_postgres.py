@@ -32,7 +32,7 @@ from vonk_control.agent_jobs import reconcile as sweep
 from vonk_control.agent_jobs import results as ingress
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.db.startup import verify_schema_is_current
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt

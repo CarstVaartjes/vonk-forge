@@ -17,8 +17,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_operation_facts import aware
-from vonk_control.coordinator_contract import CoordinatorFailureEvidence
-from vonk_control.failure_classification import disposition, error_code, error_detail
+from vonk_control.failures.classification import disposition, error_code, error_detail
+from vonk_control.failures.coordinator_contract import CoordinatorFailureEvidence
 from vonk_control.logging import redact_text
 from vonk_control.models.coordinator import CoordinatorFailure
 from vonk_control.operations.blockers import BlockingOperation, make_blocker

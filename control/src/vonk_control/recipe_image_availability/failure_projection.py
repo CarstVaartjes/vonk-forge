@@ -19,7 +19,7 @@ from vonk_agent_protocol.wire_model import (
     OperationProgress,
     canonical_message,
 )
-from vonk_control.failure_classification import is_definite, is_redownload
+from vonk_control.failures.classification import is_definite, is_redownload
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.documents import AvailabilityJobResult, AvailabilityUnknownEnd
 from vonk_control.lifecycle.evidence import (

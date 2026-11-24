@@ -31,7 +31,7 @@ from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_reasons,
 )
 from vonk_control.categorized_errors import InvalidValue
-from vonk_control.failure_classification import error_code
+from vonk_control.failures.classification import error_code
 from vonk_control.jobs import states as job_states
 from vonk_control.logging import log_event
 from vonk_control.model_cache import states as model_cache_states

@@ -20,7 +20,7 @@ from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.agent_jobs.retirement import release_owned_reservations_in_session
 from vonk_control.bounded_json import require_integer
 from vonk_control.distribution_executor.receipts import _ChildView
-from vonk_control.failure_classification import error_code, is_security_failure
+from vonk_control.failures.classification import error_code, is_security_failure
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.run_switch import end_unclaimed_children
 from vonk_control.models.execution import RecipeRun

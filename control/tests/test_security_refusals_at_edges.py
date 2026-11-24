@@ -27,7 +27,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import InvalidRequestError, SecurityRefusalError
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.failure_classification import (
+from vonk_control.failures.classification import (
     error_code,
     is_definite,
     is_security_failure,

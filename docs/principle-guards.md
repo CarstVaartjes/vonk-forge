@@ -112,7 +112,7 @@ build a grant's objects with `distribution.types.plan_objects`.
 
 Three rules are whole-tree rather than added-line. The first: a failure's retry follows its
 one disposition (`vonk_agent_protocol.agent_words.Disposition`, read through
-`failure_classification.disposition`). A `WAIT` never spends a retry and never
+`failures.classification.disposition`). A `WAIT` never spends a retry and never
 ends work, a `FAIL` ends on its first occurrence with its cause as evidence,
 and only an `OBSERVE` (an effect nobody could confirm) spends the retry count.
 A spent count stops the spending, never the work: an irreversible effect still

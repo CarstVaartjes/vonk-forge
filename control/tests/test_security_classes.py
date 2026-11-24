@@ -13,7 +13,7 @@ import ast
 from pathlib import Path
 
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
-from vonk_control.failure_classification import is_security_failure
+from vonk_control.failures.classification import is_security_failure
 from vonk_control.security_edges import SECURITY_REFUSAL_EDGES, SecurityEdge
 
 from .added_line_guards.check import check_source

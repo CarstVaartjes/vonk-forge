@@ -24,7 +24,7 @@ from vonk_agent_protocol.recipe_jobs import (
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
-from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.failures.evidence import FailureEvidenceService
 
 from .artifact_jobs_support import (
     MutableClock,

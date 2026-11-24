@@ -24,7 +24,7 @@ from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.admission_locking import ConstraintReplay, admitting
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.bounded_json import require_integer, require_mapping
-from vonk_control.failure_classification import error_code, is_security_failure
+from vonk_control.failures.classification import error_code, is_security_failure
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.documents import (
     RunSwitchCleanupIntent,

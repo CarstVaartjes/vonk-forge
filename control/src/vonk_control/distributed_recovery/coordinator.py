@@ -50,7 +50,7 @@ from vonk_control.distributed_recovery.run_reaper import (
     end_orphaned_runs_in_session,
 )
 from vonk_control.distributed_recovery.singleton import _singleton_recovery_authority
-from vonk_control.failure_classification import is_definite
+from vonk_control.failures.classification import is_definite
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.documents import DistributedRecoveryMarker
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue

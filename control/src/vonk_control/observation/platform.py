@@ -16,7 +16,7 @@ from vonk_agent_protocol.identifiers import Digest
 from vonk_control.build_identity import RuntimeBuildIdentity, packaged_runtime_identity
 from vonk_control.capabilities import CapabilityRegistry
 from vonk_control.capability_contract import CapabilityStatus
-from vonk_control.coordinator_contract import CoordinatorFailureView
+from vonk_control.failures.coordinator_contract import CoordinatorFailureView
 from vonk_control.models.coordinator import CoordinatorFailure
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import ControlProcessHeartbeat

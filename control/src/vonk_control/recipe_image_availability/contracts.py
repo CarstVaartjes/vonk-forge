@@ -48,7 +48,7 @@ from vonk_control.admission_locking import is_admission_contention
 from vonk_control.cache_removal_review import CacheRemovalAsset, CacheRemovalFinding
 from vonk_control.categorized_errors import InvalidValue
 from vonk_control.categorized_faults import security_reason
-from vonk_control.failure_classification import (
+from vonk_control.failures.classification import (
     disposition,
     error_code,
     is_security_failure,

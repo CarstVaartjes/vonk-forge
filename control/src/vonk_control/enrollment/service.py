@@ -25,7 +25,6 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 from vonk_control.agent_contacts import retire_contact
-from vonk_control.coordinator_failures import _RETRY_CAP_SECONDS
 from vonk_control.enrollment.contract import (
     EnrollmentObservationOutcome,
     EnrollmentRevocationStatus,
@@ -46,6 +45,7 @@ from vonk_control.enrollment.validation import (
     _validate_actor,
     _validate_node_id,
 )
+from vonk_control.failures.coordinator import _RETRY_CAP_SECONDS
 from vonk_control.logging import log_event, redact_text
 from vonk_control.models.fleet import (
     AgentCertificate,

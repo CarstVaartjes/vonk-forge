@@ -38,7 +38,7 @@ from vonk_control.availability_production.scheduler import (
 )
 from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog.service import CatalogService
-from vonk_control.failure_evidence import FailureEvidenceService
+from vonk_control.failures.evidence import FailureEvidenceService
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild

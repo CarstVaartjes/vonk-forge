@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_control.failure_classification import disposition, wait_reason
+from vonk_control.failures.classification import disposition, wait_reason
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode
 from vonk_control.recipe_operations.intent import (

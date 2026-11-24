@@ -22,7 +22,7 @@ from vonk_control.admission_locking import admission_attempts
 from vonk_control.bounded_json import require_integer
 from vonk_control.content_identity import same_image
 from vonk_control.distribution_executor.receipts import _ChildView
-from vonk_control.failure_classification import disposition, is_definite
+from vonk_control.failures.classification import disposition, is_definite
 from vonk_control.fleet_profiles.capacity import accepted_profile_runtime_image
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.evidence import BookkeepingReason

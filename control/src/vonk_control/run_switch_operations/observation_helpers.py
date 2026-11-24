@@ -15,7 +15,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import RouteState, RunState
-from vonk_control.failure_classification import error_code, is_security_failure
+from vonk_control.failures.classification import error_code, is_security_failure
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.documents import RunSwitchIntent
 from vonk_control.models.execution import ACTIVE_RUN_STATES

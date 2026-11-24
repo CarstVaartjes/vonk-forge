@@ -18,7 +18,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
 from vonk_control.agent_operation_facts import aware
-from vonk_control.failure_classification import is_security_failure
+from vonk_control.failures.classification import is_security_failure
 from vonk_control.jobs.documents import DistributionJobPayload
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt

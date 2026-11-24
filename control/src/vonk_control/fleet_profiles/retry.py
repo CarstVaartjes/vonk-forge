@@ -24,7 +24,7 @@ from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_control.admission_locking import ConstraintReplan, patient_admission
 from vonk_control.categorized_errors import MissingRecord
 from vonk_control.evidence_repeats import load_subject, note_repeat, note_success
-from vonk_control.failure_classification import disposition, error_detail
+from vonk_control.failures.classification import disposition, error_detail
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )

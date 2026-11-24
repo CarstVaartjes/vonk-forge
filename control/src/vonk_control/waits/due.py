@@ -37,7 +37,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
 from vonk_control import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from vonk_control.failure_classification import disposition, error_detail, wait_reason
+from vonk_control.failures.classification import disposition, error_detail, wait_reason
 from vonk_control.logging import log_event, redact_text
 from vonk_control.model_primitives import Base
 from vonk_control.models.waits import ScheduledWaitOwner

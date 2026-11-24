@@ -460,7 +460,7 @@ carries them into `wire.json` and the Rust declarations, and
 `scripts/generate-control-clients` into the OpenAPI document, the generated
 TypeScript types and the runtime constants in
 `control/web/src/api/vocabulary.generated.ts`. `vonk_control/lifecycle/types.py`,
-the adapters, `failure_classification` and the syntax guards import them;
+the adapters, `failures.classification` and the syntax guards import them;
 none keeps a second list. Add a word to the contract and regenerate; never spell
 one by hand (the added-line vocabulary guard in
 [testing and CI](testing-and-ci.md) fails the change).

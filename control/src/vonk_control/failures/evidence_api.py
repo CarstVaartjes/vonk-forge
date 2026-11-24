@@ -6,7 +6,7 @@ from fastapi import HTTPException, Query, Response
 
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_control.api_availability import AVAILABILITY_ERRORS
-from vonk_control.failure_evidence import FailureEvidenceBundle, FailureEvidenceService
+from vonk_control.failures.evidence import FailureEvidenceBundle, FailureEvidenceService
 from vonk_control.operation_api.contracts import bounded_error_responses
 
 

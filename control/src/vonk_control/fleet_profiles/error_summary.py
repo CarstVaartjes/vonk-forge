@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from vonk_control.failure_classification import error_code
+from vonk_control.failures.classification import error_code
 from vonk_control.logging import redact_text
 
 

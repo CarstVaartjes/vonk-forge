@@ -29,7 +29,7 @@ from vonk_control.admission_locking import (
 from vonk_control.agent_operation_facts import job_start_deadline
 from vonk_control.bounded_json import require_integer
 from vonk_control.content_identity import same_image
-from vonk_control.failure_classification import (
+from vonk_control.failures.classification import (
     error_code,
     error_detail,
     is_definite,

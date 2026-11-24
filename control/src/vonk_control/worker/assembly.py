@@ -24,13 +24,13 @@ from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.capabilities import CapabilityRegistry
 from vonk_control.catalog.revision_collection import CatalogRevisionCollector
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.wiring import build_distribution_service_from_components
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
+from vonk_control.failures.coordinator import CoordinatorFailures
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.gateway.route_grants import require_existing_recipe_routes
 from vonk_control.install_admission.service import InstallAdmissionService

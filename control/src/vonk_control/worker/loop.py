@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleEventKind, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.bounded_retry import bounded_attempts
-from vonk_control.coordinator_failures import CoordinatorFailures
-from vonk_control.failure_classification import disposition
+from vonk_control.failures.classification import disposition
+from vonk_control.failures.coordinator import CoordinatorFailures
 from vonk_control.jobs.queue import JobService
 from vonk_control.logging import log_event, redact_text
 from vonk_control.operator_receipt_contract import ReceiptOwner
