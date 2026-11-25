@@ -6,7 +6,7 @@ Run from the recipe repository's image workflow after
 
     uv run --project <vonk-forge>/control --frozen \
         --with-editable <recipes>/contracts \
-        <vonk-forge>/scripts/recipes/recipe-image-plan \
+        <vonk-forge>/scripts/recipe-image-plan \
         --library-root <recipes> --output-dir <dir>
 
 It writes one build context per distinct executable build key under

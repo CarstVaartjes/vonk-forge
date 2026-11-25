@@ -79,7 +79,7 @@ protocol wheel and SPDX 2.3 files are build outputs. Generate release evidence
 into a separate directory:
 
 ```bash
-scripts/release/build-control-wheel
+scripts/build-control-wheel
 scripts/release/verify-supply-chain --output-dir /tmp/vonk-supply-chain --json
 ```
 

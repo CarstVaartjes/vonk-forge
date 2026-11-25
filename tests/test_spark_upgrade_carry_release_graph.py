@@ -46,7 +46,7 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     renderer = (
         ROOT / f"tests/fixtures/accepted-release-renderers/{source}.py"
         if historical
-        else ROOT / "scripts/release/render-accepted-compose-overlay"
+        else ROOT / "scripts/render-accepted-compose-overlay"
     )
     signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     key = tmp_path / "install/installer-release-public.pem"
@@ -61,7 +61,7 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     )
     if ephemeral:
         for name in (
-            "scripts/release/render-accepted-compose-overlay",
+            "scripts/render-accepted-compose-overlay",
             "deploy/compose/Caddyfile",
             "install/installer-release-public.pem",
         ):
@@ -135,7 +135,7 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
             content = signature
         elif (
             url
-            == f"https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/{source}/scripts/release/render-accepted-compose-overlay"
+            == f"https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/{source}/scripts/render-accepted-compose-overlay"
         ):
             content = renderer.read_bytes()
         elif url.endswith(f"/{source}/deploy/compose/Caddyfile"):

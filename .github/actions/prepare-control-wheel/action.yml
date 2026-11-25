@@ -11,4 +11,4 @@ runs:
     - name: Build the protocol wheel
       shell: bash
       working-directory: ${{ inputs.repository-root }}
-      run: scripts/release/build-control-wheel
+      run: scripts/build-control-wheel

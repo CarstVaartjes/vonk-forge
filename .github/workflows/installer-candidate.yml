@@ -182,7 +182,7 @@ jobs:
           test "${#compose_paths[@]}" = 1
           compose=${compose_paths[0]}
           payload=$RUNNER_TEMP/payload.json
-          scripts/release/build-control-wheel
+          scripts/build-control-wheel
           uv run --project control --frozen python scripts/release/build-nas-compose-bundle \
             --compose "$compose" \
             --channel "$CHANNEL" \

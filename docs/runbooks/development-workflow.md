@@ -172,10 +172,15 @@ image lock, and reviewed upstream artifact pins. See the
 Prepare the locked environment explicitly and install the repository hook:
 
 ```bash
-scripts/release/build-control-wheel
+scripts/build-control-wheel
 uv sync --project control --frozen
 scripts/dev/install-git-hooks
 ```
+
+After the scripts/ regrouping merges, rerun `scripts/dev/install-git-hooks` in
+every clone. A clone whose `core.hooksPath` is an absolute path (for example
+`/opt/vonk-forge`) must switch to the relative `.githooks`, or worktrees on
+older or newer branches run the wrong hook.
 
 The hook runs pinned Ruff lint, formatting checks, and Python types on changed
 Python files selected from the index. Changes to Python dependency/type configuration

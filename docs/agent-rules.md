@@ -241,7 +241,7 @@ night; a red run is the drift alarm.
 One uv workspace owns every Python package: the root `vonk-cluster-profiles`
 (vonkctl) plus `agent_protocol`, `control` and `nas_setup`, with the single
 root `uv.lock` and one environment, the root `.venv`. The protocol is an editable
-member, so a fresh clone needs no wheel before tests; `scripts/release/build-control-wheel`
+member, so a fresh clone needs no wheel before tests; `scripts/build-control-wheel`
 only builds the protocol wheel the Controller image and the release carry, and
 every job that builds `control/Dockerfile` runs it first (a workflow test checks
 that). Never exact-sync a subset into the shared environment: `uv sync --package X`

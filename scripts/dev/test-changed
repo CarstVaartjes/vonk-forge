@@ -49,7 +49,7 @@ fi
 run_agent_protocol() {
     local consumer=${VONK_PROTOCOL_CONSUMER_VENV:-${TMPDIR:-/tmp}/vonk-protocol-consumer}
     scripts/dev/generate-agent-wire
-    scripts/release/build-control-wheel
+    scripts/build-control-wheel
     [[ -x "$consumer/bin/python" ]] || uv venv --python 3.12 "$consumer"
     uv pip install --python "$consumer/bin/python" --reinstall-package vonk-agent-protocol \
         "inventory/wheels/$(scripts/release/protocol-wheel-name)" 'pytest==9.1.1'

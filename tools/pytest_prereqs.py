@@ -144,7 +144,7 @@ def _recipe_library() -> str | None:
         return None
     return (
         "VONK_RECIPE_LIBRARY_ROOT naming a recipe checkout with a built "
-        "catalog-index.json (scripts/recipes/build-recipe-library)"
+        "catalog-index.json (scripts/build-recipe-library)"
     )
 
 

@@ -197,7 +197,7 @@ def test_other_checks_prepare_missing_inputs(tmp_path, monkeypatch, kind):
     else:
         environment.ensure_catalog(tmp_path, tmp_path)
         assert calls == [
-            [str(tmp_path / "scripts/recipes/build-recipe-library"), str(tmp_path)]
+            [str(tmp_path / "scripts/build-recipe-library"), str(tmp_path)]
         ]
 
 
@@ -231,9 +231,7 @@ def test_wire_lane_builds_catalog_before_checking_revision(tmp_path, monkeypatch
         library,
         "pinned",
     )
-    assert calls == [
-        [str(tmp_path / "scripts/recipes/build-recipe-library"), str(library)]
-    ]
+    assert calls == [[str(tmp_path / "scripts/build-recipe-library"), str(library)]]
 
 
 def test_protocol_environment_adds_only_the_protocol_member(tmp_path, monkeypatch):

@@ -278,7 +278,7 @@ def test_built_recipe_library_cache_is_saved_on_main_after_the_build_under_its_r
         and "recipe-library-built" in s["with"]["key"]
     ]
     key = restore["with"]["key"]
-    assert "hashFiles('scripts/recipes/build-recipe-library', '.tool-versions')" in key
+    assert "hashFiles('scripts/build-recipe-library', '.tool-versions')" in key
     assert "revision" in key
     assert save["with"]["key"] == key
     assert "refs/heads/main" in save["if"]
@@ -326,7 +326,7 @@ def test_main_warms_the_built_recipe_library() -> None:
     paths = warm[True]["push"]["paths"]
     for path in (
         "tests/acceptance/recipe-library-revision.txt",
-        "scripts/recipes/build-recipe-library",
+        "scripts/build-recipe-library",
         ".github/actions/recipe-library/action.yml",
     ):
         assert path in paths

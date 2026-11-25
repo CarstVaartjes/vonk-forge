@@ -6,7 +6,7 @@ set -euo pipefail
 
 root=${1:-${VONK_RECIPE_LIBRARY_ROOT:-}}
 if [[ -z "$root" ]]; then
-    echo "usage: scripts/recipes/build-recipe-library [RECIPE_CHECKOUT [SOURCE_COMMIT [SOURCE_DATE_EPOCH]]] (or set VONK_RECIPE_LIBRARY_ROOT)" >&2
+    echo "usage: scripts/build-recipe-library [RECIPE_CHECKOUT [SOURCE_COMMIT [SOURCE_DATE_EPOCH]]] (or set VONK_RECIPE_LIBRARY_ROOT)" >&2
     exit 2
 fi
 root=$(cd "$root" && pwd -P)

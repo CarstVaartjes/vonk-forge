@@ -4,7 +4,7 @@ description: >-
   member with its dev group) once. Every Python suite, lint and type check then
   runs in it with `uv run --project control --frozen`, which fetches nothing.
   Jobs that build the Controller image or release the protocol wheel build it
-  themselves with scripts/release/build-control-wheel.
+  themselves with scripts/build-control-wheel.
 inputs:
   contracts:
     description: >-

@@ -145,7 +145,7 @@ WORKDIR /build
 # own source.
 COPY control/pyproject.toml ./
 COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
-# The repository image build runs scripts/release/build-control-wheel before invoking
+# The repository image build runs scripts/build-control-wheel before invoking
 # Docker so this local dependency exists; release and image carry the same bytes.
 COPY inventory/wheels/vonk_agent_protocol-*.whl /wheels/
 # The reviewed public-contracts wheel is installed by its locked digest, never

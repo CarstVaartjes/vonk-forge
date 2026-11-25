@@ -1176,7 +1176,7 @@ def test_supply_chain_evidence_gate_runs_on_every_full_run() -> None:
 
     gate = job("supply-chain", CI_WORKFLOW)
     assert "release-metadata" not in gate
-    assert "scripts/release/build-control-wheel" in gate
+    assert "scripts/build-control-wheel" in gate
     assert (
         'scripts/release/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json'
         in gate

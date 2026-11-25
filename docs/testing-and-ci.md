@@ -298,7 +298,7 @@ the control area and the CI gate requires it.
 
 The protocol is an editable workspace member, so no test or
 `uv sync --project control` / `uv run --project control` command needs a wheel.
-`scripts/release/build-control-wheel` only builds the ignored protocol wheel under
+`scripts/build-control-wheel` only builds the ignored protocol wheel under
 `inventory/wheels` that the Controller image and the release carry; every CI job
 that builds `control/Dockerfile` runs it first, and the adapter-Python job
 installs that wheel into a Python 3.12 venv, which is what proves the protocol's
@@ -394,7 +394,7 @@ cache paths with the task name. Run from the active task worktree:
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 export UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache
-scripts/release/build-control-wheel
+scripts/build-control-wheel
 scripts/dev/sync-cli-dependencies
 
 # Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
@@ -460,9 +460,9 @@ a secret. Catalog, canonical-consumer, and acceptance-recipe tests read the real
 library through it and fail at collection when it is unset, so export it before
 running the root or control suites. The recipe repository does not commit its
 catalog index or packages: generate them once per checkout revision with
-`scripts/recipes/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"`. In CI the
+`scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"`. In CI the
 `recipe-library` action does it with `build: "true"` and caches the built tree
-under the reviewed revision plus the hash of `scripts/recipes/build-recipe-library`
+under the reviewed revision plus the hash of `scripts/build-recipe-library`
 (the build's identity); `ci-cache-warm.yml` builds and saves it on main when the revision, the build script or the action changes, and a job that finds it
 skips the build without waiting on any other job. The Spark acceptance jobs
 (clean Spark in `release-acceptance-core.yml`, the refresh and carry lanes in
@@ -532,7 +532,7 @@ uv run --project control --frozen ruff format --check .
 
 # Python types. Pyright is locked in the control dev group and resolves imports
 # from that same environment.
-scripts/release/build-control-wheel
+scripts/build-control-wheel
 uv sync --project control --frozen
 scripts/dev/check-python-types
 

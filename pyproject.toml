@@ -72,8 +72,8 @@ extend-exclude = [
     "scripts/**/*.sh",
     # Shell scripts.
     "scripts/images/accept-development-image-archive",
-    "scripts/release/build-control-wheel",
-    "scripts/recipes/build-recipe-library",
+    "scripts/build-control-wheel",
+    "scripts/build-recipe-library",
     "scripts/dev/check-added-lines",
     "scripts/dev/check-fresh-contract-build",
     "scripts/ci/ci-apt-install",

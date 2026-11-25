@@ -241,7 +241,7 @@ jobs:
           cache-dependency-glob: agent_protocol/pyproject.toml
           save-cache: ${{ github.ref == 'refs/heads/main' }}
       - name: Build the protocol wheel
-        run: scripts/release/build-control-wheel
+        run: scripts/build-control-wheel
       - name: Include protocol wheel with generated release evidence
         run: |
           mkdir -p "$RUNNER_TEMP/supply-chain"
@@ -357,7 +357,7 @@ jobs:
       - name: Generate the Rust wire peers for the installed protocol tests
         run: scripts/dev/generate-agent-wire
       - name: Build the protocol wheel the adapter consumes
-        run: scripts/release/build-control-wheel
+        run: scripts/build-control-wheel
       - name: Exercise the installed protocol wheel on adapter Python
         run: |
           set -euo pipefail
@@ -591,7 +591,7 @@ jobs:
           test "${#wheels[@]}" -eq 1
           printf 'VONK_ACCEPTANCE_LOCAL_SETUP_WHEEL=%s\n' "${wheels[0]}" >> "$GITHUB_ENV"
       - name: Build the protocol wheel the Controller image carries
-        run: scripts/release/build-control-wheel
+        run: scripts/build-control-wheel
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true
@@ -1133,7 +1133,7 @@ jobs:
         with:
           build: "true"
       - name: Build the protocol wheel the Controller image carries
-        run: scripts/release/build-control-wheel
+        run: scripts/build-control-wheel
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true

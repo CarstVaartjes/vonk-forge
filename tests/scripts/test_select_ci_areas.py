@@ -189,7 +189,7 @@ def test_agent_and_packaging_select_the_native_package_lifecycle(path: str) -> N
         "tests/acceptance/recipe-library-revision.txt",
         ".github/workflows/spark-upgrade-acceptance.yml",
         ".github/actions/prepare-control-wheel/action.yml",
-        "scripts/release/render-accepted-compose-overlay",
+        "scripts/render-accepted-compose-overlay",
     ],
 )
 def test_lane_code_needs_a_proof_run_on_the_pull_request(path: str) -> None:

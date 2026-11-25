@@ -68,7 +68,7 @@ jobs:
           cache-dependency-glob: agent_protocol/pyproject.toml
           save-cache: ${{ github.ref == 'refs/heads/main' }}
       - name: Build protocol wheel and verify Controller lock hash
-        run: scripts/release/build-control-wheel
+        run: scripts/build-control-wheel
 
       - name: Scan public image source inputs
         run: scripts/images/verify-public-image-inputs

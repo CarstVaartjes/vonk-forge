@@ -17,7 +17,7 @@ pytest suites. On macOS it sends Linux-marked tests to the `vonk-ci` OrbStack
 VM when available. The Python packages are one uv workspace with one root
 `uv.lock` and one root `.venv`; the protocol is an editable member, so a fresh
 clone runs Controller commands and tests with `uv run --project control --frozen`
-and no wheel step (`scripts/release/build-control-wheel` is only for image builds and
+and no wheel step (`scripts/build-control-wheel` is only for image builds and
 releases). See
 [Testing and CI](docs/testing-and-ci.md) for focused commands and the other
 acceptance lanes.

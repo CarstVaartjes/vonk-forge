@@ -179,7 +179,7 @@ def ensure_catalog(root: Path, library: Path) -> None:
         library / ".state/check-catalog.lock",
         "recipe catalog",
         (library / "catalog-index.json").is_file,
-        [[str(root / "scripts/recipes/build-recipe-library"), str(library)]],
+        [[str(root / "scripts/build-recipe-library"), str(library)]],
     )
 
 

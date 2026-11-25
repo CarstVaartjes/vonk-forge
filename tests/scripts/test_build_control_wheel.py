@@ -9,7 +9,7 @@ import yaml
 from scripts.release.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/release/build-control-wheel"
+SCRIPT = ROOT / "scripts/build-control-wheel"
 WHEEL_NAME = protocol_wheel_name(ROOT)
 _PREPARING_ACTIONS = {
     "./.github/actions/prepare-control-wheel",
@@ -68,7 +68,7 @@ def test_every_job_that_builds_the_controller_image_builds_the_wheel_first() -> 
                 continue
             checked.add(f"{path.name}:{name}")
             assert any(
-                "scripts/release/build-control-wheel" in str(step.get("run", ""))
+                "scripts/build-control-wheel" in str(step.get("run", ""))
                 or step.get("uses") in _PREPARING_ACTIONS
                 for step in steps[: builds[0]]
             ), f"{path.name}:{name} builds the Controller image without the wheel"

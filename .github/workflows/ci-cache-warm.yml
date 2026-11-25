@@ -23,7 +23,7 @@ on:
       - .github/actions/python-env/action.yml
       - .cargo/config.toml
       - tests/acceptance/recipe-library-revision.txt
-      - scripts/recipes/build-recipe-library
+      - scripts/build-recipe-library
       - .github/actions/recipe-library/action.yml
       - .github/workflows/ci.yml
       - .github/workflows/ci-cache-warm.yml

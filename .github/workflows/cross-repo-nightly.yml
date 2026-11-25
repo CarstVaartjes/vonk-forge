@@ -42,7 +42,7 @@ jobs:
           contracts: none
           cli-dependencies: "false"
       - name: Build recipe library index and packages
-        run: scripts/recipes/build-recipe-library "$GITHUB_WORKSPACE/.recipe-library"
+        run: scripts/build-recipe-library "$GITHUB_WORKSPACE/.recipe-library"
       # The command validate-recipe-library.yml runs for recipes pull requests.
       - name: Validate recipe library with the platform validator
         run: |

@@ -1308,7 +1308,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
                         (
                             "import runpy,sys; from pathlib import Path; "
                             "root=Path(sys.argv[1]); "
-                            "sys.path.insert(0,str(root/'scripts')); "
+                            "sys.path.insert(0,str(root/'scripts/release')); "
                             "publisher=runpy.run_path(str(root/'scripts/release/install-release-publication')); "
                             "rendered=publisher['_render_channel_endpoint']"
                             "('cli','stable',sys.argv[2],Path(sys.argv[3]).read_bytes()); "

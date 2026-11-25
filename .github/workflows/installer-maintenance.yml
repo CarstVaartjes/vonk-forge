@@ -132,7 +132,7 @@ jobs:
             "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT"
           openssl pkey -pubin -in "$public_key" -text -noout \
             | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
-          scripts/release/build-control-wheel
+          scripts/build-control-wheel
           uv run --project control --frozen python scripts/release/install-release-publication refresh \
             --channel "$CHANNEL" \
             --expires-at "$(($(date +%s) + 604800))" \

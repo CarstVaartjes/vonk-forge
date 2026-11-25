@@ -47,7 +47,7 @@ build_test_images() {
 }
 
 if [[ "$include_image_build" == true ]]; then
-    scripts/release/build-control-wheel
+    scripts/build-control-wheel
     build_test_images
 fi
 recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}

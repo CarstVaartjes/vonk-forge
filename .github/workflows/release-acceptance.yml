@@ -162,7 +162,7 @@ jobs:
           phase: start
       - uses: ./.github/actions/python-env
       - name: Build the protocol wheel the Controller image carries
-        run: scripts/release/build-control-wheel
+        run: scripts/build-control-wheel
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true

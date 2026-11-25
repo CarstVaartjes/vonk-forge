@@ -228,7 +228,10 @@ text of this section:
   verify and apt), `release/` (installer publication, Compose rendering, supply
   chain, wheels), `fleet/` (fabric validation, lifecycle canary, NAS and Spark
   measurement) and `recipes/` (recipe-library build and validation). Scripts
-  that import a sibling module stay in the same group; a script's repository
+  that import a sibling module stay in the same group; scripts addressed by
+  path from other commits or repos stay at the scripts root
+  (`render-accepted-compose-overlay`, `build-recipe-library`,
+  `recipe-image-plan`, `build-control-wheel`); a script's repository
   root is `parents[2]`.
 - Every test names a wrong implementation it catches; prefer behavioural
   boundaries and real producer/store/consumer seams. A bug fix ships with a

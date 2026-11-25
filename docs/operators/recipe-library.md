@@ -191,7 +191,7 @@ From the exact platform task worktree and an owned recipe-library checkout:
 export VONK_PLATFORM_ROOT="$PWD"
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 
-scripts/recipes/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
 "$VONK_PLATFORM_ROOT/.venv/bin/python" \
   "$VONK_PLATFORM_ROOT/scripts/recipes/validate-recipe-library" \
   --library-root "$VONK_RECIPE_LIBRARY_ROOT" \
@@ -199,7 +199,7 @@ scripts/recipes/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
   --json
 ```
 
-`scripts/recipes/build-recipe-library` runs the recipe checkout's own
+`scripts/build-recipe-library` runs the recipe checkout's own
 `tools/build-catalog-index` with `--source-commit` and `--source-date-epoch`
 taken from the checkout's `HEAD` (pass both after the path for a tree without
 history), which writes the ignored `catalog-index.json`,

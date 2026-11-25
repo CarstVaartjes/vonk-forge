@@ -173,7 +173,7 @@ PRODUCERS = {
             "uv.lock",
             "schemas/install-release-manifest.schema.json",
             "scripts/images/accept-development-image-archive",
-            "scripts/release/build-control-wheel",
+            "scripts/build-control-wheel",
             *PROTOCOL_WHEEL_INPUTS,
             "scripts/dev/check_environment.py",
             "scripts/dev/ensure-project-venv",

@@ -327,7 +327,7 @@ jobs:
               "$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/$object" \
               --output "$RUNNER_TEMP/candidate-$object"
           done
-          scripts/release/render-accepted-compose-overlay \
+          scripts/render-accepted-compose-overlay \
             --release "$candidate_release" --signature "$candidate_signature" \
             --public-key "${VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY:-install/installer-release-public.pem}" \
             --channel "$VONK_ACCEPTANCE_CHANNEL" \
@@ -434,7 +434,7 @@ jobs:
               "$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/$object" \
               --output "$RUNNER_TEMP/candidate-$object"
           done
-          scripts/release/render-accepted-compose-overlay \
+          scripts/render-accepted-compose-overlay \
             --release "$candidate_release" --signature "$candidate_signature" \
             --public-key "${VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY:-install/installer-release-public.pem}" \
             --channel "$VONK_ACCEPTANCE_CHANNEL" \
@@ -770,7 +770,7 @@ jobs:
           test "$VONK_ACCEPTANCE_PLATFORM" = linux-arm64
           mkdir -p "$RUNNER_TEMP/spark-acceptance"
           release_root="$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION"
-          scripts/release/render-accepted-compose-overlay \
+          scripts/render-accepted-compose-overlay \
             --release "$release_root/release.json" \
             --signature "$release_root/release.sig" \
             --public-key "${VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY:-install/installer-release-public.pem}" \
@@ -1005,7 +1005,7 @@ jobs:
           else
             test "${#reports[@]}" = 2
           fi
-          scripts/release/build-control-wheel
+          scripts/build-control-wheel
           command=(
             uv run --project control --frozen python scripts/release/install-release-publication accept
             --channel "$CHANNEL"
