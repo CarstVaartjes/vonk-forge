@@ -124,7 +124,7 @@ class HttpMixin:
             # absent/empty projection means anonymous public downloads; only
             # an actual provider denial requires account access and a token.
             authenticated = token is not None
-        for redirect_count in range(_MAX_HTTP_REDIRECTS + 1):
+        for _ in range(_MAX_HTTP_REDIRECTS + 1):  # item-count-limit: RFC 9110
             request_headers = dict(headers)
             if authenticated and _is_hf_canonical_url(current_url):
                 # The token is intentionally constructed only for the
