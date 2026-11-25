@@ -154,7 +154,7 @@ so newer local installations remain usable. The single-source guard rejects
 independent pins and floors that differ from the CI release. Container bootstrap
 installs use hash-locked PyPI wheels, including uv with its owner-derived version.
 
-The Node major CI installs is owned by `.node-version`; every `setup-node` step
+The exact Node release CI installs is owned by `.node-version` (the base image keeps its major); every `setup-node` step
 reads that file. Playwright rejects a committed `test.only` in CI and does not
 retry: a flaky test is fixed, not rerun.
 
