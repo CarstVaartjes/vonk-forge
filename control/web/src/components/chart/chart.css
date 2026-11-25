@@ -195,7 +195,7 @@
 .arc-gauge-text strong {
   /* The reading sits above the arc centre, where the inner chord is about 54% of the dial; shrink
      it by character count so it keeps a gap to the arc instead of touching it. */
-  font-size: min(1.5rem, calc(75cqw / var(--chars, 1)));
+  font-size: min(13.6cqw, calc(75cqw / var(--chars, 1)));
   letter-spacing: -0.02em;
   font-weight: 600;
 }
