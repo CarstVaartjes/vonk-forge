@@ -333,7 +333,8 @@ next clean window or sample.
   `rnr_nak_retry_err`, `implied_nak_seq_err`, `req_transport_retries_exceeded`
   and `rx_icrc_encapsulated` with the netdev's `statistics/rx_errors` and
   `tx_errors`, as a delta over the same window as the traffic. `errors` is
-  unreported when any file is unreadable or a counter went backwards.
+  unreported when any file is unreadable or the device's error total went
+  backwards (a counter reset).
 
 Today's baseline is zero on both Sparks (every counter above read 0 on
 2026-11-25), so the floor of 1 is a change from clean; calibrate it on hardware.

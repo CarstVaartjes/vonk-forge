@@ -14,6 +14,7 @@ from vonk_agent_protocol.host_helper import SignedHostHelperGrant
 from vonk_agent_protocol.host_tuning import (
     FabricDevice,
     HostTuning,
+    Mbps,
     MemoryFragmentation,
 )
 from vonk_agent_protocol.optional_evidence import (
@@ -92,7 +93,7 @@ class NetworkInterface(WireModel):
     name: InterfaceName
     kind: NetworkInterfaceKind
     # Negotiated speed; None while there is no link or the driver reports none.
-    link_speed_mbps: int | None = Field(default=None, ge=1, le=1_000_000)
+    link_speed_mbps: Mbps | None = None
     carrier: bool
     # Only observed for the wireless NAS route. Missing/unsupported readings
     # remain unknown. Bitrates are PHY rates, never measured NAS throughput.
@@ -203,7 +204,7 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     artifact_store_read_only: bool
     capabilities: list[Capability] = Field(max_length=64)
     fabric_address: str | None = Field(default=None, max_length=45)
-    fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=1_000_000)
+    fabric_bandwidth_mbps: Mbps | None = None
     # None: the agent predates this evidence (unknown); []: it reported none.
     network_interfaces: list[NetworkInterface] | None = Field(
         default=None, max_length=16

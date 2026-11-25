@@ -21,6 +21,8 @@ from vonk_agent_protocol.wire_model import (
 
 # Memory in bytes, at most telemetry's capacity bound (16 TiB).
 MemoryBytes = Annotated[int, Field(strict=True, ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)]
+# A link rate in Mb/s, at most 1 Tb/s.
+Mbps = Annotated[int, Field(ge=1, le=1_000_000)]
 
 
 class HostUnit(WireEnum):
@@ -125,7 +127,8 @@ class FabricDevice(WireModel):
     the siblings. ``bytes`` is received plus transmitted bytes in the window.
     ``rate_mbps`` is the port's negotiated rate and ``errors`` the link and
     transport errors counted in the window; each is ``None`` when unreadable
-    (or the counter went backwards). They are facts, and nothing here is a
+    (for ``errors``, also when the device's error total went backwards, a
+    counter reset). They are facts, and nothing here is a
     verdict: the Controller compares siblings and the declared bandwidth.
     """
 
@@ -133,5 +136,5 @@ class FabricDevice(WireModel):
     active: bool
     bytes: MemoryBytes
     window_seconds: Annotated[int, Field(strict=True, ge=1, le=86_400)]
-    rate_mbps: Annotated[int, Field(strict=True, ge=1, le=1_000_000)] | None = None
+    rate_mbps: Mbps | None = None
     errors: Annotated[int, Field(strict=True, ge=0, le=COUNTER_MAX)] | None = None

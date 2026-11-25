@@ -1380,7 +1380,7 @@ def _rail_vector() -> dict[str, list[dict[str, object]]]:
 
 
 @pytest.mark.parametrize("case", _rail_vector()["cases"], ids=lambda case: case["name"])
-def test_one_flat_rail_beside_a_busy_sibling_reaches_the_node_as_attention(
+def test_fabric_rails_and_fabric_health_reach_the_node_as_attention(
     case: dict[str, object],
 ) -> None:
     host: dict[str, object] = {
