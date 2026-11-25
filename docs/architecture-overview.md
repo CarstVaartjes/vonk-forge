@@ -519,6 +519,16 @@ while withdrawing peers; it cannot introduce routes or read the API's gateway
 master key. That key is staged in the API-only gateway directory, outside the
 normalized secret volume shared with the worker.
 
+The LiteLLM router boundary is pinned by `tests/acceptance/litellm_router_proof.py`,
+which runs in batch CI against the built image with two controlled upstreams
+serving one alias and a client key. It asserts that simple-shuffle reaches both
+members, a stream stays on one member, `num_retries: 0` leaves a failed
+member's error with the client (no request reaches two members), a missing
+health sample counts as eligible, an all-unhealthy group is still attempted
+(fails open), and a member that answers again is served without manual action.
+The status code of cooldown exhaustion is printed by the proof
+(`cooldown exhaustion status`) and is the value to record here once observed.
+
 The Compose project keeps PostgreSQL, agent ingress, revision authority,
 and inference networks separate. Only Caddy
 publishes a host port. LiteLLM alone joins GPU node-facing cluster egress; the
