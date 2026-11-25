@@ -48,6 +48,9 @@ def export_schema() -> dict[str, object]:
                 and issubclass(value, BaseModel)
                 and value.__module__ == module.__name__
                 and not value.__name__.startswith("_")
+                # A parametrized generic (a RootModel base) is not a wire model;
+                # pydantic 2.14 binds it into the declaring module.
+                and value.__pydantic_generic_metadata__["origin"] is None
             ):
                 models.add(value)
     # A fieldless model is a wire message (an empty success) unless it is a

@@ -79,6 +79,7 @@ class RecoveredAvailabilityPayload(AvailabilityJobPayload):
     def observation_or_none(cls, value: object, info: ValidationInfo) -> object:
         assert info.field_name is not None
         field = AvailabilityJobPayload.model_fields[info.field_name]
+        assert field.annotation is not None
         adapter = TypeAdapter(field.annotation)
         try:
             return read_stored_document(
