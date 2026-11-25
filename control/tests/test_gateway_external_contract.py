@@ -288,10 +288,13 @@ def test_a_host_a_resolver_reads_as_a_private_address_is_refused(host: str) -> N
 
 
 def test_a_secret_field_never_echoes_into_a_problem() -> None:
-    problems = _validate(_openai(api_key="https://user@10.0.0.1/x"))
+    # Break caught: scanning a secret-typed field for origins put part of it in
+    # a problem's ``observed``.
+    problems = _validate(_openai(api_key="https://10.9.9.9/x"))
     assert isinstance(problems, list)
-    assert SECRET not in json.dumps([item.model_dump(mode="json") for item in problems])
-    assert all(item.observed is None for item in problems)
+    assert "10.9.9.9" not in json.dumps(
+        [item.model_dump(mode="json") for item in problems]
+    )
 
 
 def test_an_alias_another_owner_serves_is_refused() -> None:

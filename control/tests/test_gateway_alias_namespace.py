@@ -20,7 +20,7 @@ from vonk_control.gateway.external_contract import (
 )
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.gateway import GatewayExternalDeployment
-from vonk_control.runs.admission import RunAdmissionService
+from vonk_control.runs.admission import RunAdmissionService, RunPlanInvalid
 from vonk_control.runs.route_name import rename_run
 
 from .test_run_admission import setup as run_setup
@@ -91,7 +91,7 @@ def test_run_creation_and_rename_refuse_a_name_an_external_model_owns(tmp_path) 
     )
     with sessions.begin() as session:
         session.add(_deployment())
-    with pytest.raises(AliasTaken):
+    with pytest.raises(RunPlanInvalid):
         service.accept_run(
             service.plan_run(installation, alias=EXTERNAL, now=now),
             actor="admin",

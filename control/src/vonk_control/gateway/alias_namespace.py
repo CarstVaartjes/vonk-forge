@@ -58,7 +58,7 @@ class AliasTaken(InvalidRequestError):
 def alias_owner(session: Session, alias: str) -> AliasOwner | None:
     """Who serves ``alias`` now: an external row, an active run or the selected profile."""
 
-    if alias in _external_aliases(session, (alias,)):
+    if alias in external_aliases(session, (alias,)):
         return AliasOwner.EXTERNAL
     if alias in _local_aliases(session, (alias,)):
         return AliasOwner.LOCAL
@@ -68,7 +68,7 @@ def alias_owner(session: Session, alias: str) -> AliasOwner | None:
 def require_alias_not_external(session: Session, aliases: Collection[str]) -> None:
     """Refuse a local producer whose name an external model owns."""
 
-    for alias in sorted(_external_aliases(session, aliases)):
+    for alias in sorted(external_aliases(session, aliases)):
         raise AliasTaken(alias, AliasOwner.EXTERNAL)
 
 
@@ -80,7 +80,7 @@ def claim_external_alias(session: Session, alias: str) -> None:
         raise AliasTaken(alias, owner)
 
 
-def _external_aliases(session: Session, aliases: Collection[str]) -> set[str]:
+def external_aliases(session: Session, aliases: Collection[str]) -> set[str]:
     return set(
         session.scalars(
             select(GatewayExternalDeployment.alias).where(
