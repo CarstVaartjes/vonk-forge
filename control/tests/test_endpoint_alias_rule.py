@@ -26,8 +26,9 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileAssignmentView,
 )
+from vonk_control.gateway.external_contract import ExternalRouteEntry
 from vonk_control.gateway.keys import GatewayKeyCreateRequest
-from vonk_control.gateway.litellm import LiteLlmModelEntry
+from vonk_control.gateway.litellm import LocalRouteEntry
 from vonk_control.gateway.route_bundle_contract import (
     RouteBundleDocument,
     RouteIdentityDocument,
@@ -44,7 +45,8 @@ REFUSED = (
 )
 # Alias slots whose field name does not say alias: (model, field, part).
 CARRIERS: tuple[tuple[type[BaseModel], str, str], ...] = (
-    (LiteLlmModelEntry, "model_name", "value"),
+    (LocalRouteEntry, "model_name", "value"),
+    (ExternalRouteEntry, "model_name", "value"),
     (RouteBundleDocument, "routes", "key"),
     (RouteIdentityDocument, "aliases", "key"),
     (GatewayKeyCreateRequest, "models", "item"),
