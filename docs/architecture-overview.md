@@ -524,10 +524,10 @@ which runs in batch CI against the built image with two controlled upstreams
 serving one alias and a client key. It asserts that simple-shuffle reaches both
 members, a stream stays on one member, `num_retries: 0` leaves a failed
 member's error with the client (no request reaches two members), a missing
-health sample counts as eligible, an all-unhealthy group is still attempted
-(fails open), and a member that answers again is served without manual action.
-The status code of cooldown exhaustion is printed by the proof
-(`cooldown exhaustion status`) and is the value to record here once observed.
+health sample counts as eligible, and a member that answers again is served
+without manual action. What an all-unhealthy group does is recorded by the
+proof (`ALL_UNHEALTHY_OUTCOME`), as is the status code of cooldown exhaustion
+(`cooldown exhaustion status`); both are pinned here after the first run.
 
 The Compose project keeps PostgreSQL, agent ingress, revision authority,
 and inference networks separate. Only Caddy
