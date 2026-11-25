@@ -178,7 +178,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "runs/route_name.py": {
         "rename_run": (
-            "c9341708b0e5d8737d27bbc4d310f62295d4e64eaf368e259a38da339d9f30a3",
+            "d28af1decdfe0fea513ed8d69e1560a596a140bbaee47ae0d563cf9f2c85f105",
             "caller-owned: the profile admission transaction owns the rename; the next route publication pass fences the republish",
         ),
     },

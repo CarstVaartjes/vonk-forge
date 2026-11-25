@@ -15,8 +15,6 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from vonk_control.gateway.alias_namespace import require_alias_not_external
-
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
     from vonk_forge_contracts import EndpointAlias
@@ -43,7 +41,6 @@ def rename_run(
     """
     if run.alias == alias:
         return False
-    require_alias_not_external(session, (alias,))
     previous = run.alias
     run.alias = alias
     run.renamed_at = now

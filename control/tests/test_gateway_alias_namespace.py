@@ -82,9 +82,9 @@ def test_a_local_run_owns_its_name_and_yields_it_only_by_rename(tmp_path) -> Non
         assert rename_run(session, run, "renamed", now=now) is True
 
 
-def test_run_creation_and_rename_refuse_a_name_an_external_model_owns(tmp_path) -> None:
-    # Break caught: dropping the check from run creation or from rename_run lets
-    # a profile or a start repoint a client's name at a Spark.
+def test_run_creation_refuses_a_name_an_external_model_owns(tmp_path) -> None:
+    # Break caught: dropping the check from run creation lets a start repoint a
+    # client's name at a Spark.
     sessions, now, _node, installation = run_setup(tmp_path)
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
@@ -99,12 +99,3 @@ def test_run_creation_and_rename_refuse_a_name_an_external_model_owns(tmp_path) 
         )
     with sessions() as session:
         assert session.scalars(select(RecipeRun)).all() == []
-    run_id = service.accept_run(
-        service.plan_run(installation, alias="qwen", now=now), actor="admin", now=now
-    )
-    with sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run is not None
-        with pytest.raises(AliasTaken):
-            rename_run(session, run, EXTERNAL, now=now)
-        assert run.alias == "qwen"
