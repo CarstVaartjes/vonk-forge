@@ -114,7 +114,10 @@ async fn expired_claim_with_nothing_live_is_probed_once_then_leaves_observation(
     );
 
     for later in 1..=3 {
-        assert!(store.observation_claims().unwrap().is_empty());
+        assert!(
+            store.observation_claims().unwrap().is_empty(),
+            "unexpected content"
+        );
         pass(
             &mut store,
             &probe,
@@ -158,7 +161,10 @@ async fn live_unit_past_its_lease_stays_observed_until_its_exit_is_reported() {
         pending(&store, accepted.fence),
         Some(AgentResultResult::OutcomeDone(_))
     ));
-    assert!(store.observation_claims().unwrap().is_empty());
+    assert!(
+        store.observation_claims().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[tokio::test]
@@ -183,7 +189,10 @@ async fn recorded_unknown_stays_observed_while_its_unit_is_live() {
     pass(&mut store, &probe, expired).await;
     assert_eq!(store.observation_claims().unwrap().len(), 1);
     pass(&mut store, &probe, expired).await;
-    assert!(store.observation_claims().unwrap().is_empty());
+    assert!(
+        store.observation_claims().unwrap().is_empty(),
+        "unexpected content"
+    );
     pass(&mut store, &probe, expired).await;
     assert_eq!(probe.probes(), 2);
     assert!(matches!(
@@ -234,7 +243,10 @@ async fn a_failed_probe_at_the_deadline_is_not_an_observed_absence() {
         pending(&store, accepted.fence),
         Some(AgentResultResult::OutcomeDone(_))
     ));
-    assert!(store.observation_claims().unwrap().is_empty());
+    assert!(
+        store.observation_claims().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[tokio::test]
@@ -261,7 +273,10 @@ async fn a_probe_unavailable_for_the_whole_observation_budget_ends_with_uncertai
     );
     pass(&mut store, &probe, deadline + budget).await;
     assert_eq!(probe.probes(), 3);
-    assert!(store.observation_claims().unwrap().is_empty());
+    assert!(
+        store.observation_claims().unwrap().is_empty(),
+        "unexpected content"
+    );
     pass(
         &mut store,
         &probe,

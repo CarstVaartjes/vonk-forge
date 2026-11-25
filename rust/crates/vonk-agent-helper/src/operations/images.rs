@@ -212,8 +212,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let fields = std::str::from_utf8(&output.stdout)
             .ok()
             .map(str::trim)
-            .map(|value| value.split('\t').map(str::to_owned).collect::<Vec<_>>())
-            .unwrap_or_default();
+            .map_or_default(|value| value.split('\t').map(str::to_owned).collect::<Vec<_>>());
         if output.exit_code != Some(0) || fields.len() != 5 || !valid_oci_digest(&fields[0]) {
             return Err(OperationError::RuntimeImageInspectFailed);
         }

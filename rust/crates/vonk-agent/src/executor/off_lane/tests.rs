@@ -207,7 +207,10 @@ async fn a_probe_is_claimed_and_delivered_while_a_build_compiles_beside_the_lane
     assert_eq!(built.state, AgentResultState::Succeeded);
     assert!(matches!(built.result, AgentResultResult::OutcomeDone(_)));
     assert!(!Executing::contains(&state, build.fence));
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[test]

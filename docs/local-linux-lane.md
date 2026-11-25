@@ -57,7 +57,7 @@ Useful flags:
   repository suite, so a CI change that forgets the lane fails in CI.
 - **The CI toolchain.** Base `ubuntu:24.04` pinned by index digest
   (`ubuntu:24.04@sha256:68ee2200…`) with Python 3.14, uv from `.tool-versions` and Rust
-  `1.98.1` (`--profile minimal --component rustfmt`), mirroring the CI
+  from `rust-toolchain.toml` (`--profile minimal --component rustfmt`), mirroring the CI
   `rustup toolchain install` step. `UV_PYTHON_DOWNLOADS=never` keeps uv from
   silently substituting a downloaded interpreter.
 - **The pinned recipe library.** `VONK_RECIPE_LIBRARY_ROOT` is bind-mounted

@@ -238,7 +238,7 @@ fn every_mount_nested_in_the_outputs_is_a_named_runtime_mountpoint() {
         .filter_map(|mount| mount.target.strip_prefix("/outputs/"))
         .collect();
 
-    assert!(!nested.is_empty());
+    assert!(!nested.is_empty(), "{nested:?}");
     assert_eq!(nested, runtime_output_mountpoints().collect::<Vec<_>>());
 }
 

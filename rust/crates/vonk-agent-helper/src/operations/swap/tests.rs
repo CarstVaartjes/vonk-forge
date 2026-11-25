@@ -213,7 +213,7 @@ fn a_size_the_os_swap_already_meets_removes_the_managed_file() {
         .reconcile_swap_at(Some(&intent(2, 16)), false, 1010)
         .unwrap();
     assert_eq!(kernel.total(), 16 * GIB - header_bytes());
-    assert!(managed_files(temp.path()).is_empty());
+    assert!(managed_files(temp.path()).is_empty(), "unexpected content");
     assert_eq!(checkpoint(temp.path()).state, SwapApplyState::Applied);
 }
 
@@ -261,8 +261,8 @@ fn insufficient_disk_waits_with_its_typed_reason_and_creates_nothing() {
     kernel.state().disk_available = 400 * GIB + 47 * GIB;
     let helper = helper(temp.path(), &kernel);
     helper.reconcile_swap_at(None, false, 1000).unwrap();
-    assert!(kernel.commands().is_empty());
-    assert!(managed_files(temp.path()).is_empty());
+    assert!(kernel.commands().is_empty(), "unexpected content");
+    assert!(managed_files(temp.path()).is_empty(), "unexpected content");
     let record = checkpoint(temp.path());
     assert_eq!(record.state, SwapApplyState::Waiting);
     assert_eq!(record.reason, Some(SwapWaitReason::InsufficientDisk));
@@ -283,7 +283,7 @@ fn a_failed_swapon_leaves_no_file_and_retries_until_the_deadline_then_hourly() {
     kernel.state().fail = Some(SWAPON);
     let helper = helper(temp.path(), &kernel);
     helper.reconcile_swap_at(None, false, 1000).unwrap();
-    assert!(managed_files(temp.path()).is_empty());
+    assert!(managed_files(temp.path()).is_empty(), "unexpected content");
     assert_eq!(
         kernel.total(),
         16 * GIB - header_bytes(),
@@ -396,7 +396,7 @@ fn a_helper_restart_that_detaches_its_mount_keeps_the_live_file_managed() {
         .reconcile_swap_at(Some(&intent(2, 16)), false, 5010)
         .unwrap();
     assert_eq!(kernel.total(), 16 * GIB - header_bytes());
-    assert!(managed_files(temp.path()).is_empty());
+    assert!(managed_files(temp.path()).is_empty(), "unexpected content");
 }
 
 #[test]

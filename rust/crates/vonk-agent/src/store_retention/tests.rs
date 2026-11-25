@@ -1392,7 +1392,7 @@ fn deleted_installation_directories_are_absent_on_the_next_inventory() {
     );
     fs::remove_dir_all(installation).unwrap();
     let names = super::installation_names(root.path()).unwrap();
-    assert!(names.is_empty());
+    assert!(names.is_empty(), "{names:?}");
     assert_eq!(super::installation_sizes(root.path(), &names), Some(vec![]));
 }
 
@@ -1724,10 +1724,19 @@ fn podman_scopes_no_build_owns_are_stopped_only_while_no_build_is_live() {
     };
     assert_eq!(stops_of(root.path(), &manager(&[], false)), scopes);
     let build = format!("vonk-recipe-build-{ORPHAN}.service");
-    assert!(stops_of(root.path(), &manager(&[&build], false)).is_empty());
-    assert!(stops_of(root.path(), &manager(&[], true)).is_empty());
+    assert!(
+        stops_of(root.path(), &manager(&[&build], false)).is_empty(),
+        "unexpected content"
+    );
+    assert!(
+        stops_of(root.path(), &manager(&[], true)).is_empty(),
+        "unexpected content"
+    );
     let _beside = crate::executor::BuildBeside::hold(root.path(), ORPHAN.parse().unwrap());
-    assert!(stops_of(root.path(), &manager(&[], false)).is_empty());
+    assert!(
+        stops_of(root.path(), &manager(&[], false)).is_empty(),
+        "unexpected content"
+    );
 }
 
 #[test]
@@ -1746,9 +1755,18 @@ fn an_egress_unit_whose_build_is_gone_is_stopped_before_its_envelope() {
         vec![egress.clone()]
     );
     let build = format!("vonk-recipe-build-{ORPHAN}.service");
-    assert!(stops_of(root.path(), &manager(&[&build, &egress])).is_empty());
+    assert!(
+        stops_of(root.path(), &manager(&[&build, &egress])).is_empty(),
+        "unexpected content"
+    );
     let adapter = format!("vonk-runtime-adapter-{ORPHAN}.service");
-    assert!(stops_of(root.path(), &manager(&[&adapter, &egress])).is_empty());
+    assert!(
+        stops_of(root.path(), &manager(&[&adapter, &egress])).is_empty(),
+        "unexpected content"
+    );
     let _beside = crate::executor::BuildBeside::hold(root.path(), ORPHAN.parse().unwrap());
-    assert!(stops_of(root.path(), &manager(&[&egress])).is_empty());
+    assert!(
+        stops_of(root.path(), &manager(&[&egress])).is_empty(),
+        "unexpected content"
+    );
 }

@@ -325,7 +325,7 @@ fn package_observation_requires_exact_transaction_and_running_identity() {
         else {
             panic!("mismatched/unconfirmed activation cannot complete");
         };
-        assert!(!wait.reason.is_empty());
+        assert!(!wait.reason.is_empty(), "{:?}", wait.reason);
         assert!(wait.next_check > Utc::now());
         assert_eq!(wait.deadline, accepted.deadline);
     }
@@ -406,7 +406,10 @@ async fn rollback_and_expired_unknown_preserve_evidence_and_recover_on_idle_tick
     // Past the claim's lease, within its activation deadline: the helper's
     // watcher still owns the transaction, so no unknown is recorded and the
     // claim stays observed.
-    assert!(store.pending_results().unwrap().is_empty());
+    assert!(
+        store.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     assert_eq!(store.observation_claims().unwrap().len(), 1);
     drop(store);
     publish(root.path(), &receipt(&accepted, Phase::Acknowledged));

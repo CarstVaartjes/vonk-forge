@@ -497,9 +497,8 @@ impl<R> RecipeExecutor<'_, R> {
                 // missing, conflicting or gone): a newer observation supersedes
                 // them, so they must not block it.
                 Err(ClientError::Controller(error)) if error.refusal().settles() => {
-                    let digest = canonical_generated_json(&report)
-                        .map(|body| hex_sha256(&body))
-                        .unwrap_or_default();
+                    let digest =
+                        canonical_generated_json(&report).map_or_default(|body| hex_sha256(&body));
                     eprintln!(
                         "vonk-agent: discarding refused pending recipe observation sha256={digest} HTTP {} ({}); fresh evidence is collected instead",
                         error.status,

@@ -34,7 +34,11 @@ fn job_projection_keeps_input_output_and_lifecycle_boundaries() {
             .any(|mount| mount.target == "/inputs" && mount.read_only)
     );
     assert_eq!(invocation.lifecycle.stop_timeout_seconds, 30);
-    assert!(invocation.publishes.is_empty());
+    assert!(
+        invocation.publishes.is_empty(),
+        "{:?}",
+        invocation.publishes
+    );
     assert!(
         invocation
             .podman_arguments()
@@ -80,7 +84,11 @@ fn native_ranks_keep_host_addresses_without_docker_port_translation() {
         ));
         let invocation = project(&plan, &paths()).unwrap();
         let argv = invocation.podman_arguments();
-        assert!(invocation.publishes.is_empty());
+        assert!(
+            invocation.publishes.is_empty(),
+            "{:?}",
+            invocation.publishes
+        );
         assert!(!argv.iter().any(|arg| arg == "--publish" || arg == "--ipc"));
         assert!(
             argv.windows(2)

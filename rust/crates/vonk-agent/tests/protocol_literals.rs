@@ -441,7 +441,8 @@ fn the_guard_finds_what_it_forbids() {
     let vocabulary = vocabulary();
     assert!(
         production_code("#![cfg(test)]\nfn fixture() { let _ = serde_json::json!({}); }")
-            .is_empty()
+            .is_empty(),
+        "unexpected content"
     );
     let seeded = r#"
 #[cfg(test)]

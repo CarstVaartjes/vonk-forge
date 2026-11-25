@@ -4,14 +4,14 @@
 # image carries the same three tools the ``controller-spark-wire`` CI job
 # installs on ubuntu-24.04: uv-managed Python, uv, and the pinned Rust toolchain.
 # ``scripts/dev_agent_wire_linux.py`` builds it with the versions asserted
-# against .github/workflows/ci.yml; the defaults here are a fallback only.
+# against .github/workflows/ci.yml; the Rust and uv versions have no defaults here.
 # The base is pinned by tag plus index digest, never a moving tag alone; the
 # digest is asserted against scripts/dev_agent_wire_linux.py. Refresh with
 # `docker buildx imagetools inspect ubuntu:24.04` and a reviewed edit here, in
 # the module, and in docs/local-linux-lane.md.
 FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
 
-ARG RUST_TOOLCHAIN=1.98.1
+ARG RUST_TOOLCHAIN
 ARG UV_VERSION
 ARG PYTHON_VERSION=3.14
 

@@ -1002,10 +1002,10 @@ fn classify_retained(
     if exit.is_some_and(|exit| exit.host_memory.is_some()) {
         return ExitCause::HostMemoryExhausted;
     }
-    let output = logs
-        .map(|logs| format!("{}\n{}", logs.stdout.text, logs.stderr.text).to_lowercase())
-        .unwrap_or_default();
-    let runtime_error = exit.map(|e| e.error.to_lowercase()).unwrap_or_default();
+    let output = logs.map_or_default(|logs| {
+        format!("{}\n{}", logs.stdout.text, logs.stderr.text).to_lowercase()
+    });
+    let runtime_error = exit.map_or_default(|e| e.error.to_lowercase());
     let code = exit.and_then(|e| e.exit_code);
     // Only the runtime's own OOM fact names this cause. A bare 137 is just a
     // SIGKILL (an engine killing its own process tree after an exception, the

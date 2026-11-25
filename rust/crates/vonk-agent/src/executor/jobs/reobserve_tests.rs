@@ -107,7 +107,7 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
                 &fs::read(requests.join(format!("{}.json", request.request_sha256))).unwrap(),
             )
             .unwrap();
-            assert!(runtime.arguments.is_empty());
+            assert!(runtime.arguments.is_empty(), "{:?}", runtime.arguments);
             let Some(vonk_agent_protocol::RunInspectTarget::JobIdentityTarget(target)) =
                 runtime.inspect_target
             else {
@@ -639,7 +639,10 @@ async fn a_job_running_at_its_lease_deadline_reports_its_later_exit() {
         "the job's exit is reported: {:?}",
         agent.result()
     );
-    assert!(agent.store.observation_claims().unwrap().is_empty());
+    assert!(
+        agent.store.observation_claims().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 /// The job's deadline plus its stop grace, as a lease age past which it ends.
@@ -672,7 +675,10 @@ async fn a_job_running_past_its_own_bound_ends_failed_without_a_stop() {
     // The helper's own job wait stops a job at its deadline; the observer
     // asks for no stop or grant.
     assert_eq!(agent.peers.log(), ["running"]);
-    assert!(agent.store.observation_claims().unwrap().is_empty());
+    assert!(
+        agent.store.observation_claims().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[tokio::test]
@@ -700,7 +706,10 @@ async fn an_unavailable_helper_at_the_lease_deadline_keeps_the_job_observed() {
         agent.result()
     );
     assert_eq!(agent.peers.log()[..2], ["running", "exited"]);
-    assert!(agent.store.observation_claims().unwrap().is_empty());
+    assert!(
+        agent.store.observation_claims().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[tokio::test]
@@ -713,7 +722,10 @@ async fn an_unavailable_helper_past_the_job_bound_ends_the_job_failed() {
         diagnostic.contains("its observation was unavailable"),
         "{diagnostic}"
     );
-    assert!(agent.store.observation_claims().unwrap().is_empty());
+    assert!(
+        agent.store.observation_claims().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[tokio::test]

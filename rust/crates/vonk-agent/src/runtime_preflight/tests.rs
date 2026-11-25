@@ -127,8 +127,14 @@ fn changed_host_reexecutes_cached_probe_and_refreshes_dynamic_facts() {
     // The second run reuses the cached build probe.
     assert_eq!(status(&second, "podman_build").status, Status::Passed);
     assert_eq!(runner.calls.borrow().len(), 2);
-    assert!(reusable_build_findings(&first, &"b".repeat(64), first.observed_at).is_empty());
-    assert!(reusable_build_findings(&first, &"a".repeat(64), first.observed_at + 301).is_empty());
+    assert!(
+        reusable_build_findings(&first, &"b".repeat(64), first.observed_at).is_empty(),
+        "unexpected content"
+    );
+    assert!(
+        reusable_build_findings(&first, &"a".repeat(64), first.observed_at + 301).is_empty(),
+        "unexpected content"
+    );
     preflight
         .run(&req, "b".repeat(64), None, &|| false)
         .unwrap();
@@ -221,7 +227,10 @@ fn excessive_runroot_and_unverified_fabric_do_not_become_success() {
     }
     .run(&req, "a".repeat(64), None, &|| false)
     .unwrap();
-    assert!(reusable_build_findings(&result, &"a".repeat(64), result.observed_at).is_empty());
+    assert!(
+        reusable_build_findings(&result, &"a".repeat(64), result.observed_at).is_empty(),
+        "unexpected content"
+    );
     assert_eq!(status(&result, "fabric").status, Status::Unknown);
     assert!(runner.calls.borrow().is_empty());
     req.source_build = false;

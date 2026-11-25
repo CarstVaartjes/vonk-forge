@@ -35,8 +35,7 @@ impl ProcessRunner for Spark {
             Program::SystemdRun if has("ps") => self
                 .proxy_container
                 .clone()
-                .map(|name| format!("{name}\n"))
-                .unwrap_or_default(),
+                .map_or_default(|name| format!("{name}\n")),
             Program::Curl
             | Program::Getent
             | Program::Ip

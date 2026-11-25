@@ -48,7 +48,8 @@ fn the_shared_sample_reads_as_the_shared_deltas() {
     assert!(
         meter
             .observe_at(&first.path().join("class/infiniband"), start)
-            .is_empty()
+            .is_empty(),
+        "unexpected content"
     );
     let second = sysfs(&sample["devices"], "second");
     let window = Duration::from_secs(sample["window_seconds"].as_u64().unwrap());

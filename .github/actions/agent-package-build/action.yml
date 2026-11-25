@@ -155,8 +155,7 @@ runs:
         set -euo pipefail
         test "$(uname -m)" = aarch64
         rustup set profile minimal
-        rustup toolchain install 1.98.1 --component clippy,rustfmt
-        rustup default 1.98.1
+        rustup toolchain install
         rustup target add aarch64-unknown-linux-gnu
 
     - name: Restore Rust dependency cache

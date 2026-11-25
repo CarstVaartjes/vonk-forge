@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import uuid
 from pathlib import Path
 
@@ -56,7 +57,9 @@ BASE_IMAGE = (
     "ubuntu:24.04@sha256:"
     "68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac"
 )
-RUST_TOOLCHAIN = "1.98.1"
+RUST_TOOLCHAIN = tomllib.loads(
+    (REPO_ROOT / "rust-toolchain.toml").read_text(encoding="utf-8")
+)["toolchain"]["channel"]
 UV_VERSION = (REPO_ROOT / ".tool-versions").read_text().split()[1]
 PYTHON_VERSION = "3.14"
 RECIPE_REVISION_FILE = Path("tests/acceptance/recipe-library-revision.txt")

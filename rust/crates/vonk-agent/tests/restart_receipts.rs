@@ -72,7 +72,10 @@ fn completed_result_is_redelivered_until_acknowledged() {
         vec![(AgentOperation::RecipeStop, result.clone())]
     );
     restarted.acknowledge(&result).unwrap();
-    assert!(restarted.pending_results().unwrap().is_empty());
+    assert!(
+        restarted.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[test]
@@ -94,7 +97,10 @@ fn acknowledged_result_is_not_replayed_after_restart() {
     }
 
     let mut restarted = StateStore::open(&path, NODE_ID).unwrap();
-    assert!(restarted.pending_results().unwrap().is_empty());
+    assert!(
+        restarted.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     assert!(restarted.next_delivery_result().unwrap().is_none());
 }
 
@@ -211,7 +217,10 @@ fn mismatched_result_is_rejected_before_persistence() {
             )
             .is_err()
     );
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
 
     let result = state
         .finish(&claim, ExecutionResult::done(RecipeStopResult::default()))
@@ -256,7 +265,10 @@ fn mismatched_durable_result_is_rejected_before_submission_and_replay() {
     drop(connection);
 
     let state = StateStore::open(&path, NODE_ID).unwrap();
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     let mut state = state;
     let BeginDecision::Replay(result) = state.begin(&claim, Utc::now()).unwrap() else {
         panic!("damaged custody authorized a replayed effect");
@@ -306,7 +318,10 @@ fn older_operation_journal_is_replaced_without_touching_credentials() {
     // The Controller re-issues unfinished work, so another protocol's
     // receipts are dropped rather than blocking the agent from starting.
     let state = StateStore::open(&path, NODE_ID).unwrap();
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     assert_eq!(std::fs::read(sentinel).unwrap(), b"credential sentinel");
 }
 
@@ -456,7 +471,10 @@ fn damaged_repair_intent_never_reopens_a_wal_stripped_journal() {
             _ => std::os::unix::fs::symlink(directory.path().join("absent"), &marker).unwrap(),
         }
         let mut recovered = StateStore::open_recovered(&path, NODE_ID).unwrap();
-        assert!(recovered.pending_results().unwrap().is_empty());
+        assert!(
+            recovered.pending_results().unwrap().is_empty(),
+            "unexpected content"
+        );
         assert_eq!(
             recovered.begin(&claim(), Utc::now()).unwrap(),
             BeginDecision::Execute
@@ -642,7 +660,10 @@ fn a_later_exact_completion_replaces_unknown_without_repeated_unknown_redelivery
     let receipt = store.finish(&accepted, unknown()).unwrap();
     store.acknowledge(&receipt).unwrap();
     assert_eq!(store.finish(&accepted, unknown()).unwrap(), receipt);
-    assert!(store.pending_results().unwrap().is_empty());
+    assert!(
+        store.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     let complete = store
         .finish(
             &accepted,

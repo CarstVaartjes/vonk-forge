@@ -74,7 +74,7 @@ def _fetcher(tmp_path, monkeypatch, messages, executable_name="uv"):
             "warning: spurious network error (2 tries remaining)",
         ),
         (
-            ["rustup", "toolchain", "install", "1.98.1"],
+            ["rustup", "toolchain", "install"],
             "error: could not download file: operation timed out",
         ),
         (["playwright", "install", "chromium"], "Error: socket hang up"),

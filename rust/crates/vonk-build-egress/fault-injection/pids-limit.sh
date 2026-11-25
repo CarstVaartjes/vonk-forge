@@ -54,7 +54,7 @@ status=0
 for pids in ${PIDS:-90 94 98 100 104}; do
   docker rm -f egress-fi >/dev/null 2>&1 || true
   docker run -d --name egress-fi --pids-limit="$pids" --memory=128m \
-    -v "$work:/b:ro" rust:1.98.1-slim /b/proxy --allow-host pypi.org >/dev/null
+    -v "$work:/b:ro" rust:1.100.0-slim /b/proxy --allow-host pypi.org >/dev/null
   sleep 1
   ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' egress-fi)
   echo "== pids-limit=$pids"

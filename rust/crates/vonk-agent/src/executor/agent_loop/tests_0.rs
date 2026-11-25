@@ -80,7 +80,10 @@ async fn long_execution_renews_and_persists_its_lease_before_result() {
     let results = client.results.lock().unwrap();
     assert_eq!(results.len(), 1);
     assert!(observed_deadline.lock().unwrap().unwrap() > original.deadline);
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -258,7 +261,10 @@ async fn a_refused_result_is_kept_instead_of_discarded() {
     assert_eq!(client.submitted.lock().unwrap().len(), 1);
     // The execution is not retried and the acknowledged outcome is never
     // offered again.
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     run_once_with_heartbeat_interval(
         &client,
         &mut state,
@@ -328,7 +334,10 @@ async fn an_ingress_rejected_result_is_recorded_and_the_loop_stays_alive() {
     // The same bytes were offered once and then not hot-looped, the receipt
     // is still unacknowledged, and the refusal names its boundary.
     assert_eq!(client.submitted.lock().unwrap().len(), 1);
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     let rejection = state
         .result_rejection(&result, Utc::now())
         .unwrap()
@@ -391,7 +400,10 @@ async fn a_corrected_ingress_reconciles_the_retained_result() {
     .settled();
 
     assert_eq!(client.submitted.lock().unwrap().len(), 1);
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     assert!(
         state
             .result_rejection(&result, Utc::now())
@@ -438,7 +450,10 @@ async fn transient_heartbeat_failure_does_not_terminate_healthy_execution() {
 
     assert!(client.heartbeats.lock().unwrap().len() >= 2);
     assert_eq!(client.results.lock().unwrap().len(), 1);
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[tokio::test]
@@ -641,7 +656,10 @@ async fn terminal_heartbeat_failure_cancels_a_blocking_executor() {
         .await
         .unwrap()
         .settled();
-        assert!(state.pending_results().unwrap().is_empty());
+        assert!(
+            state.pending_results().unwrap().is_empty(),
+            "unexpected content"
+        );
     }
 }
 
@@ -729,7 +747,10 @@ async fn a_retryable_renewal_failure_after_the_lease_lapses_still_renews() {
             assert!(heartbeats.lock().unwrap().len() > accepted_at.len());
         }
         assert_eq!(client.inner.results.lock().unwrap().len(), 1);
-        assert!(state.pending_results().unwrap().is_empty());
+        assert!(
+            state.pending_results().unwrap().is_empty(),
+            "unexpected content"
+        );
         let mut fresh = claim();
         fresh.fence = Uuid::new_v4();
         let fresh_fence = fresh.fence;
@@ -954,7 +975,10 @@ async fn stale_renewal_reobserves_then_completes_and_admits_fresh_execution() {
         .map(|result| result.fence)
         .collect();
     assert_eq!(fences.len(), 2);
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[derive(Clone)]
@@ -1023,7 +1047,10 @@ async fn failed_old_delivery_admits_fresh_work_then_reconciles_after_fault_clear
         .await
         .unwrap()
         .settled();
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     let fences: std::collections::HashSet<_> = client
         .inner
         .results
@@ -1101,7 +1128,10 @@ async fn damaged_local_deadline_does_not_cancel_verified_renewal_or_fresh_claims
     .await
     .unwrap()
     .settled();
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     drop(state);
     let mut state = StateStore::open_recovered(&path, NODE_ID).unwrap();
     let persisted: String = rusqlite::Connection::open(&path)
@@ -1119,7 +1149,10 @@ async fn damaged_local_deadline_does_not_cancel_verified_renewal_or_fresh_claims
         .await
         .unwrap()
         .settled();
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[tokio::test]
@@ -1245,7 +1278,10 @@ async fn unavailable_custody_observes_without_effects_and_restores_fresh_executi
         .unwrap()
         .settled();
     assert!(executor.observed_deadline.lock().unwrap().is_some());
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[derive(Clone)]
@@ -1331,7 +1367,10 @@ async fn silent_non_start_renewal_ends_at_immutable_budget_and_fresh_work_succee
         .unwrap()
         .settled();
     assert!(fresh_executor.observed_deadline.lock().unwrap().is_some());
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[tokio::test]
@@ -1369,7 +1408,10 @@ async fn projections_removed_after_startup_are_rebuilt_before_fresh_success() {
             && matches!(result.result, AgentResultResult::OutcomeDone(_))));
     }
     // The old effect is delivered from its exact receipt, never dispatched.
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     drop(state);
     let mut state = StateStore::open_recovered(&path, NODE_ID).unwrap();
     let mut newer = claim();
@@ -1379,7 +1421,10 @@ async fn projections_removed_after_startup_are_rebuilt_before_fresh_success() {
         .await
         .unwrap()
         .settled();
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
 }
 
 #[derive(Clone)]

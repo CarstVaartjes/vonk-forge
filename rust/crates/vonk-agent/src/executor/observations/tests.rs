@@ -108,7 +108,7 @@ async fn partial_zero_page_does_not_send_an_empty_wire_snapshot() {
             .unwrap(),
         0
     );
-    assert!(server.finish().is_empty());
+    assert!(server.finish().is_empty(), "unexpected content");
 }
 
 #[tokio::test]
@@ -237,7 +237,7 @@ async fn exact_snapshot_failed_inspection_is_not_proof_of_an_empty_node() {
     )
     .await;
     assert!(result.is_err());
-    assert!(server.finish().is_empty());
+    assert!(server.finish().is_empty(), "unexpected content");
 }
 
 #[tokio::test]
