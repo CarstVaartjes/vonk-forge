@@ -23,7 +23,7 @@ are nullable because a platform may not expose a value at a given sample:
 | LAN receive/transmit | bytes (counters) | The default-route interface's netdev counters. |
 | Fabric receive/transmit, active ports | bytes (counters), count | RDMA port counters of all ports (RoCE bypasses the netdev counters), and how many ports are ACTIVE. |
 | Disk read/written | bytes (counters) | The disk that holds the model store. |
-| OOM kills | count (counter) | `/proc/vmstat` `oom_kill` since boot. |
+| OOM kills | count (counter) | `/proc/vmstat` `oom_kill` since boot. A rise within an hour also raises `host.oom-kill`. |
 | Board, NVMe, NIC temperature | °C | Hottest unlabelled `acpitz` zone (never called "CPU"), NVMe Composite, hottest ConnectX ASIC. |
 | Fan | RPM | Fastest board fan. |
 

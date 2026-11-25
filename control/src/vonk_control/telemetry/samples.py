@@ -157,6 +157,9 @@ def _advance_latest(
     )
 
 
+#: How far back a kernel OOM kill still raises ``host.oom-kill``.
+HOST_OOM_KILL_WINDOW = timedelta(hours=1)
+
 #: How far back an engine reading still stands for its run. Several samples fit
 #: in it, so one slow scrape does not gap the exported series.
 ENGINE_LIVE_WINDOW = timedelta(seconds=30)
@@ -415,6 +418,40 @@ class TelemetryRepository:
             if view is not None:
                 recent.setdefault(row.node_id, []).append(view)
         return recent
+
+    def oom_kills_in_session(
+        self,
+        session: Session,
+        node_ids: Sequence[str],
+        since: datetime,
+    ) -> dict[str, int]:
+        """Kernel OOM kills per node among samples observed at or after ``since``.
+
+        Each boot's counter only rises, so the kills are the sum of every boot's
+        rise; a reboot starts a new boot and adds nothing. Nodes with none are omitted.
+        """
+
+        identities = tuple(dict.fromkeys(node_ids))
+        if not identities:
+            return {}
+        rises = session.execute(
+            select(
+                NodeTelemetrySample.node_id,
+                func.max(NodeTelemetrySample.oom_kills)
+                - func.min(NodeTelemetrySample.oom_kills),
+            )
+            .where(
+                NodeTelemetrySample.node_id.in_(identities),
+                NodeTelemetrySample.observed_at >= since,
+                NodeTelemetrySample.oom_kills.is_not(None),
+            )
+            .group_by(NodeTelemetrySample.node_id, NodeTelemetrySample.boot_id)
+        ).all()
+        kills: dict[str, int] = {}
+        for node_id, rise in rises:
+            if rise:
+                kills[node_id] = kills.get(node_id, 0) + int(rise)
+        return kills
 
     def live_engine_readings(self, now: datetime) -> list[LiveEngineReading]:
         """The newest reading of each (node, run) received within ``ENGINE_LIVE_WINDOW``.

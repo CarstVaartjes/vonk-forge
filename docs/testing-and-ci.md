@@ -151,10 +151,11 @@ what is missing; a failure is a warning, and the tests that read those files fai
 The exact uv release is owned by `.tool-versions`; Actions and container builds
 read that file. Each project declares an equal `tool.uv.required-version` floor,
 so newer local installations remain usable. The single-source guard rejects
-independent pins and floors that differ from the CI release. Container bootstrap
+independent pins and floors that differ from the CI release. A uv bump also refreshes the
+`deploy/compose/uv-bootstrap.lock` wheel hashes. Container bootstrap
 installs use hash-locked PyPI wheels, including uv with its owner-derived version.
 
-The Node major CI installs is owned by `.node-version`; every `setup-node` step
+The exact Node release CI installs is owned by `.node-version` (the base image keeps its major); every `setup-node` step
 reads that file. Playwright rejects a committed `test.only` in CI and does not
 retry: a flaky test is fixed, not rerun.
 

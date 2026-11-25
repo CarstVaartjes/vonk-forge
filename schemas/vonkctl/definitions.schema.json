@@ -13461,6 +13461,7 @@
         "host.display-memory",
         "host.gpu-clock-uncapped",
         "host.memory-fragmented",
+        "host.oom-kill",
         "host.swap-short",
         "model.store_layout",
         "install.partial",

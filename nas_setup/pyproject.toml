@@ -25,4 +25,4 @@ packages = ["src/vonk_nas_setup"]
 path = "hatch_build.py"
 
 [tool.uv]
-required-version = ">=0.13.5"
+required-version = ">=0.13.10"
