@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib
 import pkgutil
 import types
-from typing import Annotated, Any, Union, get_args, get_origin
+from typing import Annotated, Any, Union, cast, get_args, get_origin
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
@@ -82,7 +82,7 @@ def _slot(model: type[BaseModel], name: str, part: str) -> TypeAdapter[Any]:
         annotation = field.annotation
         if field.metadata:
             annotation = Annotated[(annotation, *field.metadata)]
-        return TypeAdapter(annotation)
+        return TypeAdapter(cast(Any, annotation))
     container = _without_none(field.annotation)
     return TypeAdapter(get_args(container)[0])
 
