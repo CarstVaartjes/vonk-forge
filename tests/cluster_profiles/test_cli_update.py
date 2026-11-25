@@ -607,7 +607,7 @@ def test_offline_version_and_json_command_do_not_schedule_notices(
 def _install_cli_wheel(uv: str, venv: Path, wheel: Path) -> Path:
     """Install a built CLI wheel with --no-deps and link its locked dependencies.
 
-    scripts/sync-cli-dependencies prepares the CLI's own dependency
+    scripts/dev/sync-cli-dependencies prepares the CLI's own dependency
     environment; the test never resolves or downloads a dependency.
     """
 
@@ -1309,7 +1309,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
                             "import runpy,sys; from pathlib import Path; "
                             "root=Path(sys.argv[1]); "
                             "sys.path.insert(0,str(root/'scripts')); "
-                            "publisher=runpy.run_path(str(root/'scripts/install-release-publication')); "
+                            "publisher=runpy.run_path(str(root/'scripts/release/install-release-publication')); "
                             "rendered=publisher['_render_channel_endpoint']"
                             "('cli','stable',sys.argv[2],Path(sys.argv[3]).read_bytes()); "
                             "Path(sys.argv[4]).write_bytes(rendered)"

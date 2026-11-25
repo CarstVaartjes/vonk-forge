@@ -23,7 +23,7 @@ GUARD_FILES = (
     "control/tests/added_line_guards/scans.py",
     "control/tests/principle_guards.py",
     "tests/repository_guards.py",
-    "scripts/select-ci-areas",
+    "scripts/ci/select-ci-areas",
     "control/tests/document_read_boundaries.py",
     "control/tests/untyped_mapping_boundaries.py",
     "control/tests/whole_collection_readers.py",

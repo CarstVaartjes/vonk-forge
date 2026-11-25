@@ -24,7 +24,9 @@ ENVIRONMENT = (
 
 
 def _script(name: str):
-    loader = importlib.machinery.SourceFileLoader(name, str(ROOT / "scripts" / name))
+    loader = importlib.machinery.SourceFileLoader(
+        name, str(ROOT / "scripts/release" / name)
+    )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

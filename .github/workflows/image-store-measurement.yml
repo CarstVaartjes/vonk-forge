@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           skopeo --version
           read -r -a references <<<"$REFERENCES"
-          scripts/measure-image-store --store "$RUNNER_TEMP/image-store" "${references[@]}" \
+          scripts/images/measure-image-store --store "$RUNNER_TEMP/image-store" "${references[@]}" \
             | tee "$RUNNER_TEMP/image-store-measurement.jsonl"
           {
             echo '| Image | Layers already stored | Bytes added | Seconds |'

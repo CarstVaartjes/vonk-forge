@@ -251,7 +251,7 @@ def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> No
     ):
         steps = workflow["jobs"][job]["steps"]
         [listing] = [
-            step for step in steps if "scripts/changed-tests" in step.get("run", "")
+            step for step in steps if "scripts/dev/changed-tests" in step.get("run", "")
         ]
         assert "pull_request" in listing["if"]
         assert "merge_group" in listing["if"]
@@ -278,7 +278,7 @@ def test_built_recipe_library_cache_is_saved_on_main_after_the_build_under_its_r
         and "recipe-library-built" in s["with"]["key"]
     ]
     key = restore["with"]["key"]
-    assert "hashFiles('scripts/build-recipe-library', '.tool-versions')" in key
+    assert "hashFiles('scripts/recipes/build-recipe-library', '.tool-versions')" in key
     assert "revision" in key
     assert save["with"]["key"] == key
     assert "refs/heads/main" in save["if"]
@@ -326,7 +326,7 @@ def test_main_warms_the_built_recipe_library() -> None:
     paths = warm[True]["push"]["paths"]
     for path in (
         "tests/acceptance/recipe-library-revision.txt",
-        "scripts/build-recipe-library",
+        "scripts/recipes/build-recipe-library",
         ".github/actions/recipe-library/action.yml",
     ):
         assert path in paths
@@ -376,7 +376,7 @@ def test_pre_commit_added_line_paths_match_ci() -> None:
     match = re.search(r"--unified=0 \"\$BASE_SHA\" -- \\\n\s+([^|\n]+?)\s*\|", ci)
     assert match
     loader = importlib.machinery.SourceFileLoader(
-        "check_staged_code", str(ROOT / "scripts/check-staged-code")
+        "check_staged_code", str(ROOT / "scripts/dev/check-staged-code")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec

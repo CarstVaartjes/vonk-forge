@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Generate a recipe checkout's catalog-index.json, qualification index and
+# package archives in place. They are build outputs of the recipe sources, not
+# committed files; signed GitHub releases publish the same bytes.
+set -euo pipefail
+
+root=${1:-${VONK_RECIPE_LIBRARY_ROOT:-}}
+if [[ -z "$root" ]]; then
+    echo "usage: scripts/recipes/build-recipe-library [RECIPE_CHECKOUT [SOURCE_COMMIT [SOURCE_DATE_EPOCH]]] (or set VONK_RECIPE_LIBRARY_ROOT)" >&2
+    exit 2
+fi
+root=$(cd "$root" && pwd -P)
+test -f "$root/tools/build-catalog-index" || {
+    echo "not a recipe checkout: $root" >&2
+    exit 2
+}
+# This script is the edge that names the source commit and its commit time; the
+# recipe tool takes both as arguments and never runs git. A source tree without
+# git history (an unpacked archive) passes both explicitly.
+commit=${2:-}
+epoch=${3:-}
+if [[ -z "$commit" ]]; then
+    commit=$(git -C "$root" rev-parse HEAD)
+fi
+if [[ -z "$epoch" ]]; then
+    epoch=$(git -C "$root" show -s --format=%ct "$commit")
+fi
+exec uv run --python 3.14 --no-project --with-editable "$root/contracts" \
+    python "$root/tools/build-catalog-index" \
+    --source-commit "$commit" --source-date-epoch "$epoch"

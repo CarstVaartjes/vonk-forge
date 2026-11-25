@@ -52,12 +52,12 @@ from cluster_profiles.serving_execution import (
     ServingExecutionError,
     evaluate_http_response,
 )
-from scripts.development_slice_client import SliceError, require_object
-from scripts.retry_dependency_fetch import (
+from scripts.ci.retry_dependency_fetch import (
     FETCH_DEADLINE_SECONDS,
     MAX_ATTEMPTS,
     backoff,
 )
+from scripts.fleet.development_slice_client import SliceError, require_object
 from tests.acceptance.controller_contract import ControllerContract
 from tests.acceptance.ephemeral import (
     release_public_key,
@@ -331,12 +331,14 @@ def resolve_release(
     renderer = directory / "render-accepted-compose-overlay"
     if test_mode():
         renderer.write_bytes(
-            (REPOSITORY_ROOT / "scripts/render-accepted-compose-overlay").read_bytes()
+            (
+                REPOSITORY_ROOT / "scripts/release/render-accepted-compose-overlay"
+            ).read_bytes()
         )
     else:
         _fetch(
             "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
-            f"{source_sha}/scripts/render-accepted-compose-overlay",
+            f"{source_sha}/scripts/release/render-accepted-compose-overlay",
             renderer,
         )
     # Each signed publication consumes its own required image graph. Current
@@ -505,7 +507,7 @@ def _download_library(revision: str, destination: Path) -> None:
     _retry_transient(f"recipe library {revision} ({url})", attempt)
 
 
-LIBRARY_BUILD_SCRIPT = "scripts/build-recipe-library"
+LIBRARY_BUILD_SCRIPT = "scripts/recipes/build-recipe-library"
 
 
 def _revision_through_api(source_sha: str) -> str:

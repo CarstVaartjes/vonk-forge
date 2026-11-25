@@ -45,7 +45,7 @@ before making a later deliberate version-tag release.
 Run the offline gate before building or deploying:
 
 ```bash
-scripts/verify-supply-chain --json
+scripts/release/verify-supply-chain --json
 ```
 
 The verifier checks the Python, Rust, and web dependency lockfiles, the reviewed
@@ -55,19 +55,19 @@ key. Both LiteLLM `FROM` lines must carry exactly the locked
 `build_bases.litellm` digest. The verifier has no network access, so it cannot
 check signatures; every CI job that builds the LiteLLM image
 (`ci.yml`, `dev-images.yml` and the `litellm` leg of `release-acceptance.yml`)
-first runs `scripts/verify-litellm-base-signature`. It rechecks that both
+first runs `scripts/images/verify-litellm-base-signature`. It rechecks that both
 Dockerfile `FROM` lines equal the lock, then runs
 `cosign verify --key deploy/compose/trust/litellm-cosign.pub` on the locked
-base through `scripts/retry-dependency-fetch`, failing closed. A workflow test
+base through `scripts/ci/retry-dependency-fetch`, failing closed. A workflow test
 requires that step, installed cosign and ordering before every LiteLLM build.
 To move the public-contracts pin, run
-`scripts/refresh-public-contracts <recipes-commit>`. It builds the wheel from that
+`scripts/dev/refresh-public-contracts <recipes-commit>`. It builds the wheel from that
 commit and writes exactly: the revision in `control/pyproject.toml`;
 the workspace `uv.lock` (`uv lock`); `control/packaging/public-contracts.lock`;
 `tests/acceptance/recipe-library-revision.txt` (the library the suites and the
 profile-effect proof check out, which must equal the lock revision); the wheel in
 `inventory/wheels`; and the wheel name in `control/Dockerfile` and
-`scripts/resolve-publication-producer`, failing if either does not name the old wheel.
+`scripts/ci/resolve-publication-producer`, failing if either does not name the old wheel.
 The wheels directory is git-ignored: stage the new wheel with `git add -f`.
 The lock owns the version; the verifier derives the wheel path and checks the
 Dockerfile names it, so no script or test carries a version literal. A recipes
@@ -79,8 +79,8 @@ protocol wheel and SPDX 2.3 files are build outputs. Generate release evidence
 into a separate directory:
 
 ```bash
-scripts/build-control-wheel
-scripts/verify-supply-chain --output-dir /tmp/vonk-supply-chain --json
+scripts/release/build-control-wheel
+scripts/release/verify-supply-chain --output-dir /tmp/vonk-supply-chain --json
 ```
 
 The helper builds the protocol wheel from source for Docker image builds and

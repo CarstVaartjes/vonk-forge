@@ -8,7 +8,7 @@ JSON to the probe's stdin, and parses the probe's stdout — for example
 `control/tests/test_recipe_job_wire_bridge.py:156`. The probe binaries are
 Linux-only (the agent crates use `rustix::fs::openat2`, gated on
 `linux_raw_dep`), so a macOS Rust build cannot run them and the whole tier has
-to run inside Linux. `scripts/dev-agent-wire-linux` does that in OrbStack with
+to run inside Linux. `scripts/dev/dev-agent-wire-linux` does that in OrbStack with
 the same command CI runs.
 
 ## When to reach for it
@@ -30,7 +30,7 @@ Linux/arm64 on Apple silicon.
 
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
-scripts/dev-agent-wire-linux
+scripts/dev/dev-agent-wire-linux
 ```
 
 Useful flags:
@@ -65,7 +65,7 @@ Useful flags:
   checkout is at the revision in `tests/acceptance/recipe-library-revision.txt`
   (override with `--any-recipe-revision`). A dirty recipe checkout is reported.
   Build its ignored catalog index and packages first with
-  `scripts/build-recipe-library`; the lane refuses a checkout without them.
+  `scripts/recipes/build-recipe-library`; the lane refuses a checkout without them.
 - **No root-owned files in the repository.** The container runs as
   `--user $(id -u):$(id -g)`, the project virtualenv is redirected to the cache
   (`UV_PROJECT_ENVIRONMENT`), and the cargo target directory, registry, uv
@@ -75,7 +75,7 @@ Useful flags:
   success when the output has no passing-test summary or says `no tests ran`.
   The runner itself already refuses to proceed when a probe is missing.
 - **Acquisition retries before execution.** The lane prepares the locked
-  Controller environment through `scripts/retry-dependency-fetch` before its
+  Controller environment through `scripts/ci/retry-dependency-fetch` before its
   wire command, matching CI's dependency preflight. The runner builds every
   selected Rust probe in one Cargo invocation so shared dependencies use one
   feature graph. Four pytest workers distribute whole files. The selected
@@ -126,7 +126,7 @@ the BuildKit layer cache is intact takes seconds, so `--rebuild` alone is cheap.
   but this lane is not part of `deploy/compose/images.lock.json`: it carries no
   release artifact. Refresh the pin with
   `docker buildx imagetools inspect ubuntu:24.04` and a reviewed edit to the
-  Dockerfile, `scripts/dev_agent_wire_linux.py` and this doc together — the
+  Dockerfile, `scripts/dev/dev_agent_wire_linux.py` and this doc together — the
   lane's parity check refuses a base that is not the recorded pin. If the
   image-pin runbook (owned by the release-pinning work) should also inventory
   this base, that belongs in `docs/image-pin-refresh.md`, not here.

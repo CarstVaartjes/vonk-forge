@@ -7,7 +7,7 @@
 Package direction is one way: the Controller (`vonk_control`) and `nas_setup`
 may import `vonk_agent_protocol`; nothing else imports a sibling package, and
 the server never imports vonkctl (`cluster_profiles`). Facts reach the CLI only
-through the generated client (`scripts/generate-control-clients`);
+through the generated client (`scripts/dev/generate-control-clients`);
 `tests/test_package_import_direction.py` enforces it, function-level imports
 included, and also fails any import cycle within or across the four packages:
 imports sit at module level, and a shared name moves to a lower module instead
@@ -22,8 +22,8 @@ module that defines it.
 Every model an `/agent/` route takes or returns (grant requests and replies, the
 bounded error envelope, the capability-unavailable reply, the enrollment
 observation reply) lives in `vonk_agent_protocol`, never in `vonk_control`. The
-wire exporter (`scripts/export-agent-wire-schema`) walks only the protocol and
-runs with only the protocol member installed (`scripts/check_environment.py`
+wire exporter (`scripts/dev/export-agent-wire-schema`) walks only the protocol and
+runs with only the protocol member installed (`scripts/dev/check_environment.py`
 `run_in_protocol`, into the workspace's one `.venv`, or `UV_PROJECT_ENVIRONMENT`
 when set), so Cargo's `build.rs` and the Rust jobs need no Controller environment. A route model defined outside the protocol fails
 `require_wire_exports` in `control/tests/test_api_contract_completeness.py`.
@@ -39,7 +39,7 @@ security.
 
 Package lifecycle logic lives in `vonk-agent-helper::package_hooks`; the Debian
 maintainer scripts (`packaging/debian/{postinst,prerm,postrm}`) are shims that
-exec it, and `scripts/verify-agent-deb` requires them to equal the packaged
+exec it, and `scripts/agent/verify-agent-deb` requires them to equal the packaged
 shim sources. A new dpkg action is a new `Hook` variant (the `match` is
 exhaustive), never new shell. `packaging/systemd` units run binaries, not
 `/bin/sh -c`. The `maintainershim` added-line guard enforces both. The rollback
@@ -230,10 +230,10 @@ word only when the change adds it to a file more often than it removes it there
 (a reflow is not new). On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
-The pre-commit hook (`scripts/check-staged-code`) also runs the CI added-line
+The pre-commit hook (`scripts/dev/check-staged-code`) also runs the CI added-line
 guards on the staged diff, so a violation fails before push; it skips with a
 message only when a staged file also has unstaged edits.
-A plain path literal in a guard module, `scripts/select-ci-areas` or a `tools/*.json` allowlist must name a path or the prefix of one (`tests/test_guard_paths_exist.py`); write guard scopes as plain full-path literals (composed or regex scopes are invisible to it), and move or delete the literal with the code.
+A plain path literal in a guard module, `scripts/ci/select-ci-areas` or a `tools/*.json` allowlist must name a path or the prefix of one (`tests/test_guard_paths_exist.py`); write guard scopes as plain full-path literals (composed or regex scopes are invisible to it), and move or delete the literal with the code.
 `cross-repo-nightly.yml` validates the recipes `main` library with the platform `main` validator every
 night; a red run is the drift alarm.
 `fuzz.yml` (daily, dispatch only otherwise) fuzzes the parsers in `rust/fuzz` (outside the Cargo workspace); a red run is a crash, and the fix adds one case to the parser's existing test (docs/testing-and-ci.md, Fuzzing).
@@ -241,19 +241,19 @@ night; a red run is the drift alarm.
 One uv workspace owns every Python package: the root `vonk-cluster-profiles`
 (vonkctl) plus `agent_protocol`, `control` and `nas_setup`, with the single
 root `uv.lock` and one environment, the root `.venv`. The protocol is an editable
-member, so a fresh clone needs no wheel before tests; `scripts/build-control-wheel`
+member, so a fresh clone needs no wheel before tests; `scripts/release/build-control-wheel`
 only builds the protocol wheel the Controller image and the release carry, and
 every job that builds `control/Dockerfile` runs it first (a workflow test checks
 that). Never exact-sync a subset into the shared environment: `uv sync --package X`
 or `--project X` for a member other than `control` uninstalls the other members.
 Run a subset with `uv sync --inexact --package X` (what `check_environment`
 `ensure_protocol` does) or `uv run --package X`, or give it its own
-`UV_PROJECT_ENVIRONMENT` through `scripts/ensure-project-venv`. After changing any
+`UV_PROJECT_ENVIRONMENT` through `scripts/dev/ensure-project-venv`. After changing any
 member's dependencies or version run `uv lock`; CI runs `uv lock --check` in the
 lint job, the only place the lock is compared with the pyprojects.
 
 Every change lands through an integration PR (same-repository `integration/*`
-head, or the `release-acceptance` label); `full` in `scripts/select-ci-areas`
+head, or the `release-acceptance` label); `full` in `scripts/ci/select-ci-areas`
 owns that rule. A member PR runs only the quick tier (`Ruff` with the added-line guards, web
 typecheck/Biome, and Rust fmt/clippy when Rust changed; no full suite) and a
 gate that reports `CI gate (member PR)`, never the required `CI gate`, so it cannot merge
@@ -283,7 +283,7 @@ for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.
 
 For the local repository and Controller pytest suites, use
-`scripts/test-local`; it splits Linux-marked tests into the `vonk-ci` OrbStack
+`scripts/dev/test-local`; it splits Linux-marked tests into the `vonk-ci` OrbStack
 VM on macOS and reports unavailable local prerequisites explicitly. CI must
 run the required Linux lane and must fail when its prerequisites are absent.
 

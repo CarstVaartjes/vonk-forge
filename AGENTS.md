@@ -200,15 +200,15 @@ the added-line principle guards; use them from the active task worktree. Full
 text of this section:
 [Verification and completion](docs/agent-rules.md#verification-and-completion).
 
-- The pre-commit hook (`scripts/check-staged-code`) runs the CI added-line
+- The pre-commit hook (`scripts/dev/check-staged-code`) runs the CI added-line
   guards on the staged diff. A plain path literal in a guard module,
-  `scripts/select-ci-areas` or a `tools/*.json` allowlist must name a path or a
+  `scripts/ci/select-ci-areas` or a `tools/*.json` allowlist must name a path or a
   path prefix (`tests/test_guard_paths_exist.py`); write guard scopes as plain
   full-path literals and move or delete the literal with the code.
 - One uv workspace owns every Python package, with the single root `uv.lock`
   and one environment. Never exact-sync a subset (`uv sync --package X`); use
   `uv sync --inexact --package X`, `uv run --package X` or
-  `scripts/ensure-project-venv`. After changing any member's dependencies run
+  `scripts/dev/ensure-project-venv`. After changing any member's dependencies run
   `uv lock`.
 - Every change lands through an integration PR. A member PR runs only the quick
   tier and a gate that cannot merge itself; check member work locally with
@@ -219,8 +219,17 @@ text of this section:
 - Before pushing, run `scripts/test changed`: the fast guards plus only the
   tests your diff edits or that import a touched module (`-n 2`). It is THE
   local check; full suites run in batch CI, not on the laptop.
-- Use `scripts/test-local` for the Controller pytest suites. CI runs the
+- Use `scripts/dev/test-local` for the Controller pytest suites. CI runs the
   required Linux lane and fails when its prerequisites are absent.
+- `scripts/` holds one entry point, `scripts/test`, and groups by purpose:
+  `dev/` (environment, local checks, contract generation, local test lanes),
+  `ci/` (CI selection, reuse, retry and gates), `images/` (image build,
+  acceptance, promotion and verification), `agent/` (agent package build, seal,
+  verify and apt), `release/` (installer publication, Compose rendering, supply
+  chain, wheels), `fleet/` (fabric validation, lifecycle canary, NAS and Spark
+  measurement) and `recipes/` (recipe-library build and validation). Scripts
+  that import a sibling module stay in the same group; a script's repository
+  root is `parents[2]`.
 - Every test names a wrong implementation it catches; prefer behavioural
   boundaries and real producer/store/consumer seams. A bug fix ships with a
   regression shown to fail before the fix. See

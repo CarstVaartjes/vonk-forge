@@ -38,7 +38,7 @@ def clone(tmp_path: Path) -> Path:
 
 def hook():
     loader = importlib.machinery.SourceFileLoader(
-        "hook_probe", str(ROOT / "scripts/check-staged-python")
+        "hook_probe", str(ROOT / "scripts/dev/check-staged-python")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
@@ -197,13 +197,13 @@ def test_other_checks_prepare_missing_inputs(tmp_path, monkeypatch, kind):
     else:
         environment.ensure_catalog(tmp_path, tmp_path)
         assert calls == [
-            [str(tmp_path / "scripts/build-recipe-library"), str(tmp_path)]
+            [str(tmp_path / "scripts/recipes/build-recipe-library"), str(tmp_path)]
         ]
 
 
 def test_wire_lane_builds_catalog_before_checking_revision(tmp_path, monkeypatch):
     loader = importlib.machinery.SourceFileLoader(
-        "lane_probe", str(ROOT / "scripts/dev_agent_wire_linux.py")
+        "lane_probe", str(ROOT / "scripts/dev/dev_agent_wire_linux.py")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
@@ -231,7 +231,9 @@ def test_wire_lane_builds_catalog_before_checking_revision(tmp_path, monkeypatch
         library,
         "pinned",
     )
-    assert calls == [[str(tmp_path / "scripts/build-recipe-library"), str(library)]]
+    assert calls == [
+        [str(tmp_path / "scripts/recipes/build-recipe-library"), str(library)]
+    ]
 
 
 def test_protocol_environment_adds_only_the_protocol_member(tmp_path, monkeypatch):
@@ -254,7 +256,7 @@ def test_protocol_environment_adds_only_the_protocol_member(tmp_path, monkeypatc
     environment.ensure_protocol(root, venv)
     # Inexact: a bare `uv sync --package` would uninstall the other members.
     assert calls == [
-        [str(root / "scripts/ensure-project-venv"), str(venv.resolve())],
+        [str(root / "scripts/dev/ensure-project-venv"), str(venv.resolve())],
         [
             "env",
             f"UV_PROJECT_ENVIRONMENT={venv}",
@@ -282,10 +284,10 @@ def test_staged_files_outside_the_pyright_scope_are_not_type_checked() -> None:
             "control/tests/test_api.py",
             "src/cluster_profiles/generated_control/client.py",
             "src/cluster_profiles/cli.py",
-            "scripts/check-python-types",
+            "scripts/dev/check-python-types",
         ]
     ) == [
         "control/tests/test_api.py",
         "src/cluster_profiles/cli.py",
-        "scripts/check-python-types",
+        "scripts/dev/check-python-types",
     ]

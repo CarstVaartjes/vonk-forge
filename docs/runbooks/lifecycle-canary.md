@@ -1,6 +1,6 @@
 # Lifecycle hardware canary
 
-`scripts/lifecycle-canary` proves, on a real Controller and real Sparks, the
+`scripts/fleet/lifecycle-canary` proves, on a real Controller and real Sparks, the
 promises of the lifecycle audit. Run it by hand after every release that
 changes the lifecycle core, an adapter, the agent's results or the stored
 states. CI never runs it and nothing schedules it. Do not point it at a
@@ -15,7 +15,7 @@ Spark) and a Controller you chose.
 ```bash
 export VONK_CONTROL_URL=https://forge.example.test
 export VONK_CONTROL_TOKEN_FILE="$HOME/.config/vonk-forge/controller-token"
-scripts/lifecycle-canary --profile 3 --minutes 20 \
+scripts/fleet/lifecycle-canary --profile 3 --minutes 20 \
   --restart-command "ssh nas docker compose -f /srv/vonk/compose.yml restart control"
 ```
 

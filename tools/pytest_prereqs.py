@@ -56,7 +56,7 @@ MARKERS = {
     "needs_installer_release_probe": "requires VONK_INSTALLER_RELEASE_WIRE_PROBE",
     "needs_agent_binary": "requires VONK_AGENT_BINARY to name a built vonk-agent binary",
     "needs_backup_container": "requires the opt-in PostgreSQL backup container lane (VONK_RUN_BACKUP_CONTAINER_TEST=1)",
-    "needs_cli_dependencies": "requires the CLI dependency environment from scripts/sync-cli-dependencies",
+    "needs_cli_dependencies": "requires the CLI dependency environment from scripts/dev/sync-cli-dependencies",
     "postgres": "provisions a disposable PostgreSQL server through Docker (Linux lane)",
     "corpus_acceptance": "whole-corpus acceptance that runs alone in its own CI lane (scripts/test acceptance), never in the control shards",
     "built_image": "checks a prebuilt Controller or worker image named by VONK_TEST_CONTROLLER_IMAGE or VONK_TEST_WORKER_IMAGE",
@@ -144,7 +144,7 @@ def _recipe_library() -> str | None:
         return None
     return (
         "VONK_RECIPE_LIBRARY_ROOT naming a recipe checkout with a built "
-        "catalog-index.json (scripts/build-recipe-library)"
+        "catalog-index.json (scripts/recipes/build-recipe-library)"
     )
 
 
@@ -178,7 +178,7 @@ def _built_image() -> str | None:
         "VONK_TEST_WORKER_IMAGE"
     ):
         return None
-    return "VONK_TEST_CONTROLLER_IMAGE or VONK_TEST_WORKER_IMAGE (scripts/test-local --with-image-build)"
+    return "VONK_TEST_CONTROLLER_IMAGE or VONK_TEST_WORKER_IMAGE (scripts/dev/test-local --with-image-build)"
 
 
 _CHECKS: dict[str, Callable[[], str | None]] = {

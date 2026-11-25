@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+usage() {
+    cat <<'USAGE'
+Usage: scripts/dev/test-local [--with-image-build]
+
+Without arguments, run the complete repository and Controller suites (Linux
+lanes go to the vonk-ci OrbStack VM on macOS).
+
+--with-image-build  Build the Controller and worker images once from
+                    control/Dockerfile and also run the built_image checks
+                    against them (CI does this in its own job). Skipped by
+                    default.
+USAGE
+}
+
+include_image_build=false
+while (($#)); do
+    case "$1" in
+        --with-image-build)
+            include_image_build=true
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+# Builds each image once; the built_image tests only inspect and run them.
+build_test_images() {
+    export VONK_TEST_CONTROLLER_IMAGE=vonk-control:test-local
+    export VONK_TEST_WORKER_IMAGE=vonk-control-worker:test-local
+    docker build --file control/Dockerfile --target api \
+        --tag "$VONK_TEST_CONTROLLER_IMAGE" .
+    docker build --file control/Dockerfile --target worker \
+        --tag "$VONK_TEST_WORKER_IMAGE" .
+}
+
+if [[ "$include_image_build" == true ]]; then
+    scripts/release/build-control-wheel
+    build_test_images
+fi
+recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}
+linux_markers='linux_only or needs_systemd or postgres'
+portable_markers='not linux_only and not needs_systemd and not needs_rust_probe and not postgres'
+
+# Every suite runs in the one locked control environment, as in CI.
+uv_control() {
+    local environment=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"}
+    if [[ "$environment" != /* ]]; then
+        environment="$root/$environment"
+    fi
+    "$root/scripts/dev/ensure-project-venv" "$environment" || return
+    UV_CACHE_DIR=${UV_CACHE_DIR:-"/private/tmp/vonk-test-local-uv-cache"} \
+        UV_PROJECT_ENVIRONMENT=$environment \
+        uv run --project "$root/control" --frozen "$@"
+}
+
+# A recipes pull deletes the files its adapter-sources.json declares (the synthetic
+# canary package among them); the recipes tool places them again, from its cache when
+# present, else from the mirror. A failure is reported, and the tests that read those
+# files fail on their own.
+place_recipe_sources() {
+    uv run --quiet --python 3.14 --no-project --with-editable "$recipe_root/contracts" \
+        python "$recipe_root/tools/fetch-adapter-sources" ||
+        echo "[WARN] recipe adapter sources were not placed in $recipe_root" >&2
+}
+
+use_recipe_library() {
+    if [[ -d "$recipe_root/contracts" ]]; then
+        export VONK_RECIPE_LIBRARY_ROOT="$recipe_root"
+        place_recipe_sources
+    elif [[ ${CI:-false} == true ]]; then
+        echo "VONK_RECIPE_LIBRARY_ROOT is required in CI: $recipe_root/contracts" >&2
+        return 1
+    else
+        echo "[SKIP-PREREQUISITE] recipe library unavailable; recipe-library tests must skip locally" >&2
+        unset VONK_RECIPE_LIBRARY_ROOT || true
+    fi
+}
+
+run_python_suites() {
+    local marker_args=()
+    if [[ -n "$1" ]]; then
+        marker_args=(--markers "$1")
+    fi
+    use_recipe_library
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+        scripts/ci/pull-test-images postgres caddy tailscale python
+    fi
+    local status=0
+    for suite in repository control compose; do
+        scripts/test "$suite" "${marker_args[@]}" -- --durations=40 || status=1
+    done
+    if [[ "$include_image_build" == true ]]; then
+        scripts/test images || status=1
+    fi
+    return "$status"
+}
+
+run_ci_wire_boundary() {
+    use_recipe_library
+    uv_control pytest -q control/tests/test_api_response_witness.py \
+        control/tests/test_artifact_job_api.py \
+        control/tests/test_fleet_profile_api.py::test_profile_operator_routes_are_singular_and_unversioned \
+        control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \
+        control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status \
+        --api-response-witness="${TMPDIR:-/tmp}/vonk-test-local-api-response-witnesses.json"
+    uv_control python scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile
+}
+
+if [[ "$(uname -s)" != Darwin ]]; then
+    run_python_suites "${VONK_TEST_LOCAL_MARKERS:-}"
+    run_ci_wire_boundary
+    exit
+fi
+
+echo "Running portable repository and Controller suites on macOS"
+run_python_suites "$portable_markers"
+
+if ! command -v orb >/dev/null 2>&1; then
+    if [[ ${CI:-false} == true ]]; then
+        echo "OrbStack is required in CI for Linux-only test markers" >&2
+        exit 1
+    fi
+    echo "[SKIP-PREREQUISITE] OrbStack VM vonk-ci is unavailable; Linux-only tests were not run"
+    exit 0
+fi
+
+if ! orb -m vonk-ci bash -lc 'test -d /' >/dev/null 2>&1; then
+    if [[ ${CI:-false} == true ]]; then
+        echo "OrbStack VM vonk-ci is unavailable in CI; Linux-only tests were not run" >&2
+        exit 1
+    fi
+    echo "[SKIP-PREREQUISITE] OrbStack VM vonk-ci is not running; Linux-only tests were not run"
+    exit 0
+fi
+
+echo "Running Linux-marked repository and Controller tests in OrbStack VM vonk-ci"
+printf -v guest_root '%q' "$root"
+orb -m vonk-ci bash -lc \
+    "cd $guest_root && export CARGO_BUILD_RUSTC_WRAPPER= CARGO_TARGET_DIR=\"\$HOME/target-vonk-ci-infra\" UV_CACHE_DIR=\"\$HOME/.cache/vonk-ci-infra-uv\" UV_CONTROL_PROJECT_ENVIRONMENT=\"\$HOME/venv-vonk-ci-infra-control\" VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") VONK_TEST_LOCAL_MARKERS=$(printf %q "$linux_markers") && scripts/dev/test-local"

@@ -23,7 +23,7 @@ on:
       - .github/actions/python-env/action.yml
       - .cargo/config.toml
       - tests/acceptance/recipe-library-revision.txt
-      - scripts/build-recipe-library
+      - scripts/recipes/build-recipe-library
       - .github/actions/recipe-library/action.yml
       - .github/workflows/ci.yml
       - .github/workflows/ci-cache-warm.yml
@@ -74,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           rustup set profile minimal
-          scripts/retry-dependency-fetch rustup toolchain install
+          scripts/ci/retry-dependency-fetch rustup toolchain install
       - name: Restore Rust dependency cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -82,7 +82,7 @@ jobs:
           add-job-id-key: "false"
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch locked crates
-        run: scripts/retry-dependency-fetch cargo fetch --locked
+        run: scripts/ci/retry-dependency-fetch cargo fetch --locked
       - name: Lint Rust workspace
         run: cargo clippy --workspace --all-targets --frozen -- -D warnings
       - name: Build the Rust workspace tests
@@ -115,14 +115,14 @@ jobs:
           add-job-id-key: "false"
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Materialize pinned package tools
-        run: scripts/materialize-agent-tools --output-root target
+        run: scripts/agent/materialize-agent-tools --output-root target
       - name: Build the baseline and candidate packages
         run: |
           set -euo pipefail
           while IFS='=' read -r name value; do
             declare "$name=$value"
-          done < <(scripts/agent-package-metadata development branch main \
-            "$GITHUB_SHA" "$(scripts/dev-publication-sequence "$GITHUB_SHA")")
+          done < <(scripts/agent/agent-package-metadata development branch main \
+            "$GITHUB_SHA" "$(scripts/images/dev-publication-sequence "$GITHUB_SHA")")
           key="$RUNNER_TEMP/throwaway-agent-key.pem"
           openssl genpkey -algorithm ed25519 -out "$key"
           epoch=1700000000
@@ -133,11 +133,11 @@ jobs:
           }
           export VONK_SOURCE_REVISION="$GITHUB_SHA"
           export VONK_SOURCE_REPOSITORY="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
-          scripts/build-agent-deb --version "$version" --architecture linux-arm64 \
+          scripts/agent/build-agent-deb --version "$version" --architecture linux-arm64 \
             --build-digest "sha256:$(digest vonk-agent-build-v2 "$version")" \
             --release-private-key "$key" --source-date-epoch "$epoch" \
             --output-dir dist
-          scripts/build-agent-deb --acceptance-baseline \
+          scripts/agent/build-agent-deb --acceptance-baseline \
             --version "$baseline_version" --architecture linux-arm64 \
             --build-digest "sha256:$(digest vonk-agent-acceptance-baseline-v1 "$baseline_version")" \
             --release-private-key "$key" --source-date-epoch "$epoch" \

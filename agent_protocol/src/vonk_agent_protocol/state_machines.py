@@ -6,7 +6,7 @@ flight but the *condition of a thing*: an installation on a Spark, an artifact
 distribution assignment, a run and the route that publishes it, a certificate, an
 enrollment grant, a node's model file, a catalog sync, a resource reservation.
 Each has its own closed set of words.  This module is the one definition of them;
-``scripts/export-agent-wire-schema`` publishes them through
+``scripts/dev/export-agent-wire-schema`` publishes them through
 :class:`~vonk_agent_protocol.lifecycle_vocabulary.LifecycleVocabulary` into
 ``wire.json``, and the generators turn that into Rust, OpenAPI and TypeScript.
 The Controller's CHECK constraints, its models and its readers use the enums, and

@@ -3,7 +3,7 @@ description: >-
   Provide the recipe library at the reviewed revision in .recipe-library. With
   `build: "true"` its catalog index and packages are built too (needs uv, so
   run python-env first). The built tree is cached under the build's identity,
-  the reviewed revision plus scripts/build-recipe-library and .tool-versions (the
+  the reviewed revision plus scripts/recipes/build-recipe-library and .tool-versions (the
   uv release that runs it), so a job that finds
   it skips the build and waits on no other job. Main saves the caches.
 inputs:
@@ -32,7 +32,7 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: .recipe-library
-        key: recipe-library-built-v1-${{ steps.source.outputs.revision }}-${{ hashFiles('scripts/build-recipe-library', '.tool-versions') }}
+        key: recipe-library-built-v1-${{ steps.source.outputs.revision }}-${{ hashFiles('scripts/recipes/build-recipe-library', '.tool-versions') }}
     - name: Restore the recipe library for this revision
       id: cache
       if: steps.built.outputs.cache-hit != 'true'
@@ -68,10 +68,10 @@ runs:
     - name: Build the recipe library index and packages
       if: inputs.build == 'true' && steps.built.outputs.cache-hit != 'true'
       shell: bash
-      run: scripts/build-recipe-library .recipe-library
+      run: scripts/recipes/build-recipe-library .recipe-library
     - name: Save the built recipe library for later runs
       if: inputs.build == 'true' && steps.built.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: .recipe-library
-        key: recipe-library-built-v1-${{ steps.source.outputs.revision }}-${{ hashFiles('scripts/build-recipe-library', '.tool-versions') }}
+        key: recipe-library-built-v1-${{ steps.source.outputs.revision }}-${{ hashFiles('scripts/recipes/build-recipe-library', '.tool-versions') }}

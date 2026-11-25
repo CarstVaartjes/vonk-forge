@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/prune-pr-build-caches"
+SCRIPT = ROOT / "scripts/ci/prune-pr-build-caches"
 
 
 def _module():

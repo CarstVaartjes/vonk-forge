@@ -205,7 +205,7 @@ esac
     skopeo_log = tmp_path / "skopeo.log"
     result = subprocess.run(
         [
-            ROOT / "scripts/publish-immutable-image",
+            ROOT / "scripts/images/publish-immutable-image",
             "api",
             "ghcr.io/carstvaartjes/vonk-forge-api",
             digest,
@@ -256,7 +256,7 @@ fi
 
     result = subprocess.run(
         [
-            ROOT / "scripts/publish-immutable-image",
+            ROOT / "scripts/images/publish-immutable-image",
             "api",
             "ghcr.io/carstvaartjes/vonk-forge-api",
             expected,
@@ -389,7 +389,7 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
     text = DEV_WORKFLOW.read_text()
     workflow_data = development_workflow()
     publisher = text[text.index("  publish-development-images:") :]
-    scan = (ROOT / "scripts/accept-development-image-archive").read_text()
+    scan = (ROOT / "scripts/images/accept-development-image-archive").read_text()
 
     jobs_with_package_write = [
         name
@@ -397,7 +397,7 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
         if value.get("permissions", {}).get("packages") == "write"
     ]
     assert jobs_with_package_write == ["publish-development-images"]
-    assert "scripts/accept-development-image-archive" in publisher
+    assert "scripts/images/accept-development-image-archive" in publisher
     for role in ("api", "worker", "litellm"):
         assert f"vonk-forge-{role}.oci.tar" in publisher
         assert f"development-role-receipt-{role}-${{{{ github.sha }}}}" in publisher
@@ -421,7 +421,7 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
     assert "publication-capsule" not in text
     assert "dev-image-publication-capsule" not in scan
     assert "dev-image-acceptance-receipt validate-archive" in scan
-    receipt_tool = (ROOT / "scripts/dev-image-acceptance-receipt").read_text()
+    receipt_tool = (ROOT / "scripts/images/dev-image-acceptance-receipt").read_text()
     assert "tarfile.open" in receipt_tool
     assert "member.isfile()" in receipt_tool
     assert "unsafe OCI archive member" in receipt_tool
@@ -435,7 +435,7 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
     assert ".rootfs.diff_ids" in scan
     assert ".history[]" in scan
     assert "org.opencontainers.image.revision" in scan
-    assert "scripts/verify-multiarch-image-manifest" in scan
+    assert "scripts/images/verify-multiarch-image-manifest" in scan
     assert "https://spdx.dev/Document" in scan
     assert "https://slsa.dev/provenance/" in scan
     assert "docker://$image@$expected_digest" in scan
@@ -473,7 +473,7 @@ def _receipt_command(
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
-            ROOT / "scripts/dev-image-acceptance-receipt",
+            ROOT / "scripts/images/dev-image-acceptance-receipt",
             mode,
             receipt,
             "a" * 40,
@@ -496,7 +496,7 @@ def _create_v3_receipt(tmp_path: Path) -> tuple[Path, Path, str]:
     role_root = tmp_path / "roles"
     role_root.mkdir()
     environment = _receipt_environment(tmp_path)
-    tool = ROOT / "scripts/dev-image-acceptance-receipt"
+    tool = ROOT / "scripts/images/dev-image-acceptance-receipt"
     commit = "a" * 40
     run_id = "12345"
     run_attempt = "2"
@@ -599,7 +599,11 @@ def test_development_image_archive_validation_rejects_links(tmp_path: Path) -> N
         stream.addfile(link)
 
     result = subprocess.run(
-        [ROOT / "scripts/dev-image-acceptance-receipt", "validate-archive", archive],
+        [
+            ROOT / "scripts/images/dev-image-acceptance-receipt",
+            "validate-archive",
+            archive,
+        ],
         cwd=ROOT,
         capture_output=True,
         check=False,
@@ -661,7 +665,7 @@ def test_development_image_receipt_rejects_wrong_run_attempt(tmp_path: Path) -> 
     publication_root, receipt, _ = _create_v3_receipt(tmp_path)
     result = subprocess.run(
         [
-            ROOT / "scripts/dev-image-acceptance-receipt",
+            ROOT / "scripts/images/dev-image-acceptance-receipt",
             "verify",
             receipt,
             "a" * 40,
@@ -735,7 +739,7 @@ def verify_multiarch_fixture(tmp_path: Path, manifests: list[dict[str, object]])
         )
     )
     return subprocess.run(
-        [ROOT / "scripts/verify-multiarch-image-manifest", fixture],
+        [ROOT / "scripts/images/verify-multiarch-image-manifest", fixture],
         capture_output=True,
         check=False,
         text=True,
@@ -791,8 +795,10 @@ def rendered_step_run(job_name: str, step_name: str) -> str:
     script = step_run(job_name, step_name)
     for expression, value in release_expressions().items():
         script = script.replace(expression, value)
-    validator = ROOT / "scripts/validate-container-release-digests"
-    return script.replace("scripts/validate-container-release-digests", str(validator))
+    validator = ROOT / "scripts/images/validate-container-release-digests"
+    return script.replace(
+        "scripts/images/validate-container-release-digests", str(validator)
+    )
 
 
 def test_release_metadata_is_tag_only_and_read_only() -> None:
@@ -803,7 +809,7 @@ def test_release_metadata_is_tag_only_and_read_only() -> None:
     assert "vars.VONK_PLATFORM_RELEASES_ENABLED == 'true'" in call
     assert "vars.VONK_CONTAINER_RELEASES_ENABLED == 'true'" in call
     assert "needs: [ci-gate]" in call
-    assert "scripts/container-release-metadata" in workflow()
+    assert "scripts/images/container-release-metadata" in workflow()
     metadata = job("release-metadata")
     for output in (
         "image_version_tag",
@@ -864,7 +870,9 @@ def test_each_protected_production_mutation_revalidates_exact_tag_authority() ->
         for mutation in mutations:
             mutation_index = job_text.index(f"- name: {mutation}")
             prior = job_text[:mutation_index]
-            authority_index = prior.rfind("scripts/verify-release-tag-authority")
+            authority_index = prior.rfind(
+                "scripts/release/verify-release-tag-authority"
+            )
             assert authority_index >= 0, f"{job_name}: {mutation} lacks revalidation"
             authority_step_start = prior.rfind("- name:", 0, authority_index)
             authority_step = prior[authority_step_start:]
@@ -883,8 +891,10 @@ def test_alias_reconciliation_binds_selected_release_to_signed_tag_revision() ->
     assert "SOURCE_SHA" in alias
     assert "AUTHORITY_REF" in alias
     assert "TAG_OID" in alias
-    assert "scripts/promote-accepted-channel" in evidence
-    assert evidence.index("scripts/promote-accepted-channel") < evidence.index("| tee")
+    assert "scripts/images/promote-accepted-channel" in evidence
+    assert evidence.index("scripts/images/promote-accepted-channel") < evidence.index(
+        "| tee"
+    )
     assert '"$CHANNEL" "$AUTHORITY_REF" "$SOURCE_SHA" "$TAG_OID"' in evidence
     assert "installer-publication" in evidence
     assert "promotion-receipt.jsonl" in evidence
@@ -898,9 +908,9 @@ def test_production_release_retries_reconcile_immutable_outputs_before_completio
         "promote", "Promote accepted images and advance installer pointer last"
     )
 
-    assert "scripts/reconcile-github-release" in release
+    assert "scripts/release/reconcile-github-release" in release
     assert "SOURCE_SHA: ${{ github.sha }}" in release
-    assert "scripts/promote-accepted-channel" in aliases
+    assert "scripts/images/promote-accepted-channel" in aliases
     assert "advance installer pointer last" in aliases.lower()
 
 
@@ -953,7 +963,7 @@ def test_production_compose_binds_actual_digest_pinned_build_outputs() -> None:
     builder = job("publish-images")
     build = workflow_step("publish-images", "Render canonical production Compose")
 
-    assert "scripts/render-production-compose" in build
+    assert "scripts/release/render-production-compose" in build
     assert "steps.api.outputs.digest" in build
     assert "steps.worker.outputs.digest" in build
     assert "docker-compose.production.yml" in build
@@ -989,7 +999,7 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
 
     assert "needs: [release-metadata]" in package
     assert "uses: ./.github/actions/agent-package-build" in package
-    assert "scripts/agent-package-metadata" in metadata
+    assert "scripts/agent/agent-package-metadata" in metadata
     assert 'production "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME"' in metadata
     assert '"$GITHUB_SHA" 0' in metadata
     assert re.search(r"git show(?: -s)? --format=%ct", metadata) is None
@@ -1014,7 +1024,7 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     )
     assert "secrets:" not in package
     for forbidden in (
-        "scripts/build-agent-deb",
+        "scripts/agent/build-agent-deb",
         "dpkg -i",
         "cosign sign-blob",
     ):
@@ -1045,7 +1055,7 @@ def test_tag_release_attaches_agent_package_to_public_release() -> None:
         '"release-output/agent-package/vonk-forge-systemd-security.json"',
     ):
         assert asset in release
-    assert "scripts/reconcile-github-release" in release
+    assert "scripts/release/reconcile-github-release" in release
 
 
 def test_apt_publication_consumes_the_unified_release_artifact() -> None:
@@ -1076,7 +1086,7 @@ def test_apt_publication_consumes_the_unified_release_artifact() -> None:
     ):
         assert required in apt
     for forbidden in (
-        "scripts/verify-agent-deb",
+        "scripts/agent/verify-agent-deb",
         "aptly ",
         "rclone ",
     ):
@@ -1117,7 +1127,7 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
     ):
         assert re.search(_pinned(action), text), action
     assert "docker/build-push-action@" not in publisher
-    metadata = (ROOT / "scripts/container-release-metadata").read_text()
+    metadata = (ROOT / "scripts/images/container-release-metadata").read_text()
     for package in (
         "vonk-forge-api",
         "vonk-forge-worker",
@@ -1148,10 +1158,10 @@ def test_complete_summary_uses_all_three_build_digests() -> None:
 def test_public_input_scanner_runs_before_every_image_build() -> None:
     validator = job("validate-release-images")
     publisher = job("publish-images")
-    assert "scripts/verify-public-image-inputs" in validator
-    assert "scripts/verify-supply-chain --output-dir" in validator
-    assert "scripts/verify-public-image-inputs" not in publisher
-    assert "scripts/verify-supply-chain" not in publisher
+    assert "scripts/images/verify-public-image-inputs" in validator
+    assert "scripts/release/verify-supply-chain --output-dir" in validator
+    assert "scripts/images/verify-public-image-inputs" not in publisher
+    assert "scripts/release/verify-supply-chain" not in publisher
 
 
 def test_supply_chain_evidence_gate_runs_on_every_full_run() -> None:
@@ -1166,9 +1176,9 @@ def test_supply_chain_evidence_gate_runs_on_every_full_run() -> None:
 
     gate = job("supply-chain", CI_WORKFLOW)
     assert "release-metadata" not in gate
-    assert "scripts/build-control-wheel" in gate
+    assert "scripts/release/build-control-wheel" in gate
     assert (
-        'scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json'
+        'scripts/release/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json'
         in gate
     )
 
@@ -1204,9 +1214,9 @@ def test_api_worker_and_litellm_are_promoted_from_accepted_dev_manifests() -> No
 
 
 def test_latest_alias_advances_only_after_release_evidence() -> None:
-    promotion = (ROOT / "scripts/promote-accepted-channel").read_text()
+    promotion = (ROOT / "scripts/images/promote-accepted-channel").read_text()
     postconditions = (
-        ROOT / "scripts/verify-production-alias-postconditions"
+        ROOT / "scripts/images/verify-production-alias-postconditions"
     ).read_text()
     gate = installer_job("promote")
     assert "needs: [authority, candidate, release-acceptance, apt, producers]" in gate
@@ -1215,7 +1225,7 @@ def test_latest_alias_advances_only_after_release_evidence() -> None:
     assert "needs['release-acceptance'].result == 'success'" in gate
     assert '"${publication[@]}" --preflight-only' in promotion
     assert promotion.index('"${publication[@]}" --preflight-only') < promotion.index(
-        "scripts/promote-image-aliases"
+        "scripts/images/promote-image-aliases"
     )
     assert ".channel == $channel and .source_sha == $source" in promotion
     assert "alias=latest" in promotion
@@ -1227,8 +1237,8 @@ def test_latest_alias_advances_only_after_release_evidence() -> None:
         )
     ]
     assert commit.index("verify_authority") < commit.index('"${publication[@]}"')
-    assert "scripts/verify-production-alias-postconditions" in promotion
-    assert "scripts/verify-release-tag-authority" in postconditions
+    assert "scripts/images/verify-production-alias-postconditions" in promotion
+    assert "scripts/release/verify-release-tag-authority" in postconditions
     assert "(.immutable == true)" in postconditions
     assert 'test "${observed_tags[0]:-}" = "$target_tag"' in postconditions
 
@@ -1244,7 +1254,7 @@ def test_accepted_installer_promotion_binds_authority_and_pointer_last() -> None
     )
     assert "environment: installer-promotion-" in promotion
     assert "cancel-in-progress: false" in promotion
-    assert "scripts/promote-accepted-channel" in evidence
+    assert "scripts/images/promote-accepted-channel" in evidence
     assert '"$CHANNEL" "$AUTHORITY_REF" "$SOURCE_SHA" "$TAG_OID"' in evidence
     assert "r2:$R2_INSTALLER_PUBLIC_BUCKET" in evidence
     assert "promotion-receipt.jsonl" in evidence
@@ -1279,7 +1289,7 @@ def test_release_manifest_checks_out_scripts_before_using_them() -> None:
     assert "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in checkout
     assert "persist-credentials: false" in checkout
     assert manifest.index("Check out tagged commit") < manifest.index(
-        "scripts/validate-container-release-digests"
+        "scripts/images/validate-container-release-digests"
     )
 
 
@@ -1366,14 +1376,14 @@ def test_final_job_creates_checksum_protected_public_release_asset() -> None:
     assert "release-manifest:" in text
     assert "vonk-forge-images.env" in text
     assert "sha256sum" in text
-    assert "scripts/reconcile-github-release" in text
+    assert "scripts/release/reconcile-github-release" in text
     assert "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in text
 
 
 @pytest.fixture
 def reusable_image_repo(tmp_path):
 
-    policy = runpy.run_path(str(ROOT / "scripts/dev-image-inputs"))
+    policy = runpy.run_path(str(ROOT / "scripts/images/dev-image-inputs"))
     repo = tmp_path / "repo"
     repo.mkdir()
     for name in (
@@ -1409,7 +1419,7 @@ def _image_commit(repo: Path) -> str:
 
 def _image_inputs(repo: Path, *args: str):
     return subprocess.run(
-        [repo / "scripts/dev-image-inputs", *args],
+        [repo / "scripts/images/dev-image-inputs", *args],
         cwd=repo,
         check=False,
         capture_output=True,
@@ -1603,7 +1613,7 @@ else:
     receipt = tmp_path / "litellm.role-receipt.json"
     result = subprocess.run(
         [
-            repo / "scripts/reuse-development-image",
+            repo / "scripts/images/reuse-development-image",
             "litellm",
             accepted,
             str(cache),
@@ -1627,7 +1637,7 @@ else:
         # while still demanding exact current-source inputs on every architecture.
         checked = subprocess.run(
             [
-                repo / "scripts/verify-published-image",
+                repo / "scripts/images/verify-published-image",
                 "litellm",
                 "ghcr.io/carstvaartjes/vonk-forge-litellm",
                 digest,
@@ -1766,7 +1776,7 @@ def test_a_background_disk_cleanup_is_awaited_before_the_first_image_build() -> 
 
 
 LITELLM_DOCKERFILE = "deploy/compose/litellm/Dockerfile"
-LITELLM_VERIFY = "scripts/verify-litellm-base-signature"
+LITELLM_VERIFY = "scripts/images/verify-litellm-base-signature"
 
 
 def _builds_litellm(step: dict[str, Any], matrix: dict[str, Any]) -> bool:
@@ -1819,9 +1829,9 @@ def test_litellm_signature_script_refuses_an_unpinned_reference(tmp_path: Path) 
     (root / "scripts").mkdir(parents=True)
     (root / "deploy/compose/trust").mkdir(parents=True)
     for relative in (
-        "scripts/verify-litellm-base-signature",
-        "scripts/retry-dependency-fetch",
-        "scripts/retry_dependency_fetch.py",
+        "scripts/images/verify-litellm-base-signature",
+        "scripts/ci/retry-dependency-fetch",
+        "scripts/ci/retry_dependency_fetch.py",
         "deploy/compose/litellm/Dockerfile",
         "deploy/compose/trust/litellm-cosign.pub",
         "deploy/compose/images.lock.json",
@@ -1837,7 +1847,7 @@ def test_litellm_signature_script_refuses_an_unpinned_reference(tmp_path: Path) 
     bin_dir.mkdir()
     write_executable(bin_dir / "cosign", f'#!/bin/sh\necho "$@" >> {called}\n')
     env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "LANG": "C.UTF-8"}
-    script = root / "scripts/verify-litellm-base-signature"
+    script = root / "scripts/images/verify-litellm-base-signature"
 
     # A reference without a digest is refused and cosign never runs.
     lock["build_bases"]["litellm"] = "ghcr.io/berriai/litellm:v1.103.0"
