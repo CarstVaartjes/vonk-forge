@@ -327,10 +327,6 @@ def recipe_library(
         else None
     )
     texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
-    usage_by_model = {
-        row.content_digest: self._model_usage(texts[row.document_id])
-        for row, _ in model_rows
-    }
     alignment_by_model = self._alignment_by_model(recipe_rows, texts)
     model_entries = [
         self._model_projection(
@@ -372,9 +368,7 @@ def recipe_library(
         else:
             selected_keys &= cached_keys
     entries = [
-        self._recipe_projection(
-            row, recipe, usage_by_model, snapshot, texts[row.document_id]
-        )
+        self._recipe_projection(row, recipe, snapshot, texts[row.document_id])
         for row, recipe in recipe_rows
     ]
     wanted_search = search.casefold() if search else None
@@ -607,14 +601,8 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
     )
     model_by_key = {row.content_digest: model for row, model in model_rows}
     texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
-    usage_by_model = {
-        row.content_digest: self._model_usage(texts[row.document_id])
-        for row, _ in model_rows
-    }
     entries = [
-        self._recipe_projection(
-            row, recipe, usage_by_model, snapshot, texts[row.document_id]
-        )
+        self._recipe_projection(row, recipe, snapshot, texts[row.document_id])
         for row, recipe in recipe_rows
     ]
     entry = self._assessed([entries[0]], deadline=deadline)[0]

@@ -160,6 +160,10 @@ class RecipeRevisionProjection(_CatalogRevisionProjection):
     # The signed catalog's gateway API facts for this revision (a sibling of the
     # recipe, never part of its content identity); none when it publishes none.
     api: RecipeApi | None = None
+    # The capabilities this launch serves, as the signed catalog derived them
+    # (the contracts' ``served_capabilities``); every surface shows exactly
+    # these. None when the signed catalog publishes none.
+    served_capabilities: list[str] | None = None
 
 
 CatalogRevisionProjection = ModelRevisionProjection | RecipeRevisionProjection

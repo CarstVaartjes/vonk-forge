@@ -267,3 +267,59 @@ def test_sync_records_the_published_measured_memory_for_admission_only():
 
     reader.snapshot = replace(reader.snapshot, items=(item,))
     assert synced_peaks() == {}
+
+
+def test_the_library_shows_exactly_the_capabilities_the_index_says_it_serves():
+    """Catches the Library re-deriving capabilities instead of showing the key.
+
+    A text-only key shows text-only even though the Model could understand more,
+    a newer key replaces it, and a complete view without the key shows none.
+    """
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+    catalog = CatalogService(
+        sessions, clock=lambda: now, cursors=CursorCodec(b"c" * 32)
+    )
+    item = replace(_item(_recipe(_model())), dependencies=(_model(),))
+
+    class Reader:
+        snapshot = RecipeLibrarySnapshot("c" * 40, (item,))
+
+        def list(self):
+            return self.snapshot
+
+        def prepare(self, snapshot) -> None:
+            return None
+
+        def fetch(self, uri):
+            return self.snapshot.items[0]
+
+    reader = Reader()
+    sync = ManagedRecipeCatalogSyncService(
+        sessions, catalog=catalog, reader=reader, clock=lambda: now
+    )
+
+    def shown(served: tuple[str, ...] | None) -> list[str]:
+        reader.snapshot = replace(
+            reader.snapshot, items=(replace(item, served_capabilities=served),)
+        )
+        sync.sync(
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=CatalogSyncTrigger.AUTOMATIC,
+                actor="test",
+            )
+        )
+        projection = LibraryProjection(
+            sessions, cursors=TokenCodec(b"p" * 32).cursor_codec(), clock=lambda: now
+        )
+        (recipe,) = projection.recipe_library(limit=10).recipes
+        assert projection.recipe_detail(recipe.selector).usage == recipe.usage
+        return recipe.usage
+
+    assert shown(("chat",)) == ["chat"]
+    assert shown(("chat", "image-understanding")) == ["chat", "image-understanding"]
+    assert shown(None) == []

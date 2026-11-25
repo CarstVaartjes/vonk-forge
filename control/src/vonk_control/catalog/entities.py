@@ -77,6 +77,7 @@ class PublishedFacts(TypedDict, total=False):
     qualification: PublishedQualificationStatusView | None
     measured_memory: PublishedMeasuredMemory | None
     api: RecipeApi | None
+    served_capabilities: list[str] | None
 
 
 class CatalogError(RuntimeError):
@@ -310,6 +311,9 @@ class CatalogEntityService:
         measured_memories: Mapping[
             RevisionKey, PublishedMeasuredMemory | None
         ] = MappingProxyType({}),
+        served_capabilities: Mapping[RevisionKey, list[str] | None] = MappingProxyType(
+            {}
+        ),
     ) -> None:
         """Record what the signed catalog publishes beside each active revision.
 
@@ -335,6 +339,8 @@ class CatalogEntityService:
                 facts["api"] = apis[key]
             if key in measured_memories:
                 facts["measured_memory"] = measured_memories[key]
+            if key in served_capabilities:
+                facts["served_capabilities"] = served_capabilities[key]
             if not facts or _published_facts_current(revision, facts):
                 continue
             with self._write() as session:
