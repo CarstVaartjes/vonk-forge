@@ -111,7 +111,7 @@ jobs:
           set -euo pipefail
           rustup set profile minimal
           scripts/retry-dependency-fetch rustup toolchain install
-          rustup component add llvm-tools-preview
+          scripts/retry-dependency-fetch rustup component add llvm-tools-preview
           cargo install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
       - name: Fetch locked crates
         run: scripts/retry-dependency-fetch cargo fetch --locked
