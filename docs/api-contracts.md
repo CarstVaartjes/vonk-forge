@@ -541,6 +541,7 @@ machines in `agent_protocol/src/vonk_agent_protocol/state_machines.py`: the
 installation and its ranks (`InstallationState`, `InstallationNodeState`), the
 distribution assignment (`DistributionAssignmentState`), the run and its route
 (`RunState`, `RouteState`, `RoutePublicationState`, `GatewayRouteState`), the
+external model deployment (`ExternalPublicationState`), the
 fleet-profile endpoint and observed assignment (`EndpointState`,
 `ObservedAssignmentState`, `DesiredAssignmentState`), and the certificate,
 enrollment grant, model file, asset availability, catalog sync, reservation and

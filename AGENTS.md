@@ -98,6 +98,16 @@ schema reconciliation drops every table in the Controller's `public` schema that
 `Base.metadata` does not declare, so never keep another tool's table there. See
 [Fleet words, vonkctl tests and schema reconciliation](docs/agent-rules.md#fleet-words-vonkctl-tests-and-schema-reconciliation).
 
+Model names clients call are one namespace shared by local runs and external
+models (`gateway/alias_namespace.py`). A producer of a name takes
+`lock_alias_namespace` first of all row locks, asks `alias_owner` and writes in
+the same transaction; a local producer is refused only by an external owner. An
+external entry is admitted only by `validate_external_entry` against the pinned
+LiteLLM surface (`deploy/compose/litellm/surface.json`, regenerated with every
+LiteLLM bump, see [image pin refresh](docs/image-pin-refresh.md)); a credential is
+a binding name, never a value. See
+[External models](docs/architecture-overview.md#external-models-and-the-alias-namespace).
+
 Persist request identity before effects and reconcile a lost response before
 retrying. Reconnect to the original operation. A client timeout, disconnect, or
 Ctrl-C stops observation; remote cancellation is explicit and retains its own

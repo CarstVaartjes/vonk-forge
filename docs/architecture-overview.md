@@ -322,7 +322,9 @@ issued effects before ownership passes to the replacement.
    before acquisition; if new information requires an earlier lock, roll back
    and replan. Include implicit foreign-key, unique-index, and upsert locks in
    the audit; ordering explicit `FOR UPDATE` calls alone is insufficient.
-   The shared row order places Fleet profile applications and model-cache operation owners before Jobs (matching
+   The shared row order places the gateway alias namespace first (it is a
+   security edge: see [External models](#external-models-and-the-alias-namespace)),
+   then Fleet profile applications and model-cache operation owners before Jobs (matching
    acceptance ownership), and native Agent operation attempts after their Agent
    operations. A declared multi-Job set orders parent and child together by
    immutable primary key, rather than acquiring a parent first by convention.
@@ -854,6 +856,41 @@ capped at 300 seconds after its oldest admitted observation; observations must
 be at most 120 seconds old when admitted. This covers the permitted transition
 without requiring renewal during the acknowledgement wait. Expiry still denies
 serving, and an expired generation cannot restart its startup budget.
+
+### External models and the alias namespace
+
+An external model is one LiteLLM `model_list` entry that points at a provider
+outside the fleet. Local routes are unchanged: a bundle without external entries
+renders the same bytes as before, so shipping this contract restarts no gateway.
+The tables `gateway_external_deployments` (the operator's desired and the
+applied spec, the publication state and its wait), `gateway_credential_bindings`
+(a binding name and the destinations its secret may reach; never a secret) and
+`gateway_alias_namespace` (one row) are additive and are reconciled from the
+models at startup.
+
+- **One rule.** `external_validation.validate_external_entry` accepts one entry
+  or returns every problem with its field path and rule code. A field must be
+  declared in the pinned LiteLLM surface (`deploy/compose/litellm/surface.json`,
+  generated from the pinned image and compared in CI); hooks, file access,
+  proxy-wide settings, client-side credentials, retries and fallbacks are
+  refused; a credential is only a reference to an approved binding
+  (`os.environ/VONK_CREDENTIAL_<BINDING>`); every URL is `https` with a public
+  host unless a binding approves that exact private origin; and the binding must
+  approve every origin and the region of the entry. No submitted secret value is
+  ever repeated in a problem.
+- **One namespace.** A model name decides where a client's data goes, so the
+  names of local runs and external models share one namespace. Whoever takes a
+  name first locks the `gateway_alias_namespace` row (first in the lock order),
+  asks `alias_owner` who serves it (an external row, an active run, or the
+  selected profile's assignments) and writes in the same transaction. Local
+  owners replace each other as before (the newest accepted request owns a
+  name); an external owner is never replaced, and an external model is refused a
+  name another owner serves (`alias_taken`). The renderer also leaves out an
+  external entry whose alias a local route serves.
+- **Publication.** The external publication states are `ExternalPublicationState`;
+  the publisher and the credential custody follow in later changes. Every
+  gateway generation restarts LiteLLM, so adding, changing or removing an
+  external model cuts in-flight streams after at most 30 seconds.
 
 ## Scaling and networking
 

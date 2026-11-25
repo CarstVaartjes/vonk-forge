@@ -85,6 +85,10 @@ from vonk_control.fleet_profiles.projection_support import (
     _set_selected_profile,
     _validate_remaining_effects,
 )
+from vonk_control.gateway.alias_namespace import (
+    lock_alias_namespace,
+    require_alias_not_external,
+)
 from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
     Residue,
@@ -155,6 +159,9 @@ class FleetProfileService:
             # Only the maintenance callers may bypass current actor authority.
             platform_maintenance=platform_maintenance,
         ) as session:
+            # The name decides where a client's data goes: take the namespace
+            # first, before any other row lock of this admission.
+            lock_alias_namespace(session)
             profile = session.get(
                 FleetProfile, preview.profile_id, with_for_update={"nowait": True}
             )
@@ -283,6 +290,10 @@ class FleetProfileService:
             # Use the reviewed snapshot. Resolving through the cache here both
             # substituted newer choices and performed storage work under SQL locks.
             frozen_assignments = tuple(preview.resolved_assignments)
+            require_alias_not_external(
+                session,
+                {item.alias for item in frozen_assignments if item.alias is not None},
+            )
             if not selected_application:
                 self._validate_draft_review_identity(
                     session,
