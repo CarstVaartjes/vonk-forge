@@ -387,7 +387,9 @@ def test_pre_commit_added_line_paths_match_ci() -> None:
 
 def test_node_major_in_ci_matches_the_node_image_pin() -> None:
     """Catches `.node-version` and the Node base image drifting to different majors."""
-    major = (ROOT / ".node-version").read_text().strip()
+    text = (ROOT / ".node-version").read_text().strip()
+    assert re.fullmatch(r"\d+\.\d+\.\d+", text)
+    major = text.split(".")[0]
     images = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
     assert images["build_bases"]["node"].startswith(f"node:{major}-")
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
