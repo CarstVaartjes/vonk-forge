@@ -15110,6 +15110,17 @@
           "default": null,
           "title": "Alignment"
         },
+        "component_bindings": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Component Bindings",
+          "type": "array"
+        },
         "description": {
           "maxLength": 4000,
           "minLength": 1,
