@@ -649,6 +649,12 @@ jobs:
           tests/acceptance/litellm_model_info_proof.py
           --image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
           --work "$RUNNER_TEMP/model-info-proof"
+      - name: Prove the LiteLLM router with several members of one alias
+        run: >-
+          uv run --project control --frozen python
+          tests/acceptance/litellm_router_proof.py
+          --image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
+          --work "$RUNNER_TEMP/router-proof"
       - name: Render the installer payload and the local image overlay
         run: |
           set -euo pipefail
