@@ -26,8 +26,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from pydantic import ConfigDict
-
 from vonk_control.lifecycle.types import Effect, Observed
 from vonk_control.logging import redact_text
 
@@ -56,9 +54,6 @@ class Residue:
     It is a value, not an exception: the caller retires the damaged row or skips
     the element and carries on.
     """
-
-    # pydantic 2.14 would otherwise publish this dataclass as closed in the API.
-    __pydantic_config__ = ConfigDict(extra="ignore")
 
     kind: str
     subject: str
