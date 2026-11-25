@@ -364,7 +364,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
       modelBytes: bytes,
       cacheUsage: model.cache_usage,
       modelCached,
-      // The recipe's own capabilities: the Controller derives them from its API document.
+      // The recipe's own capabilities: the ones its launch serves, as the catalog publishes them.
       capabilities: recipe.capabilities,
     }));
   });

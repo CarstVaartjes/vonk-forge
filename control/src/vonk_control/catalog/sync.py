@@ -890,6 +890,15 @@ class ManagedRecipeCatalogSyncService:
                         for item in snapshot.items
                         if item.measured_memory is not None or withdrawals_observed
                     },
+                    {
+                        (item.publisher, item.slug, item.content_sha256): (
+                            None
+                            if item.served_capabilities is None
+                            else list(item.served_capabilities)
+                        )
+                        for item in snapshot.items
+                        if item.served_capabilities is not None or withdrawals_observed
+                    },
                 )
             except Exception as error:  # noqa: BLE001 - images are optional; recipes still apply
                 self._record_problem_values(

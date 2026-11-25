@@ -460,9 +460,12 @@ class CatalogService:
         measured_memories: Mapping[
             tuple[str, str, str], PublishedMeasuredMemory | None
         ] = MappingProxyType({}),
+        served_capabilities: Mapping[
+            tuple[str, str, str], list[str] | None
+        ] = MappingProxyType({}),
     ) -> None:
         CatalogEntityService(self._sessions, clock=self._clock).record_published_facts(
-            images, qualifications, apis, measured_memories
+            images, qualifications, apis, measured_memories, served_capabilities
         )
 
     def import_recipe_library(

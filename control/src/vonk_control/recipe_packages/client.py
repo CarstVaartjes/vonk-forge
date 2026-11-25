@@ -803,6 +803,11 @@ class RecipePackageClient:
                     qualification=entry.qualification,
                     measured_memory=entry.measured_memory,
                     api=entry.api,
+                    served_capabilities=(
+                        None
+                        if entry.served_capabilities is None
+                        else tuple(str(word) for word in entry.served_capabilities)
+                    ),
                 )
             )
         return RecipeLibrarySnapshot(

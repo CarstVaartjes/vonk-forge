@@ -15,13 +15,8 @@ from pydantic import BaseModel
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
-    RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
-)
-from vonk_forge_contracts.api_checks import (
-    INPUT_MODALITY_CAPABILITIES,
-    accepted_modalities,
 )
 
 from vonk_agent_protocol.error_response import RequestValidationProblem
@@ -391,34 +386,6 @@ def _model_identity(
         slug=document.identity.slug,
         content_sha256=revision.content_digest,
     )
-
-
-def _recipe_usage(model_usage: Sequence[str], api: RecipeApi | None) -> list[str]:
-    """The recipe's capabilities: its Models' display, with the input
-    understanding tags taken from what its API accepts.
-
-    The contracts package owns what each API mode accepts
-    (``accepted_modalities``) and which capability a modality means
-    (``INPUT_MODALITY_CAPABILITIES``). A launch that turns video off shows no
-    ``video-understanding`` even when the Model could; a modality any option
-    choice accepts counts. A recipe without an API document keeps its Models'
-    display.
-    """
-
-    if api is None:
-        return sorted(set(model_usage))
-    accepted = [
-        accepted_modalities(b) for b in [api.api, *(c.api for c in api.option_choices)]
-    ]
-    understanding = {
-        capability.value for capability in INPUT_MODALITY_CAPABILITIES.values()
-    }
-    served = {
-        capability.value
-        for field, capability in INPUT_MODALITY_CAPABILITIES.items()
-        if any(getattr(m, field) for m in accepted)
-    }
-    return sorted((set(model_usage) - understanding) | served)
 
 
 def _recipe_creator(

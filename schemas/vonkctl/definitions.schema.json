@@ -16984,6 +16984,21 @@
           "title": "Runtime Engine",
           "type": "string"
         },
+        "served_capabilities": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Served Capabilities"
+        },
         "source_bundle_sha256": {
           "anyOf": [
             {
