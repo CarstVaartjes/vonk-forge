@@ -3164,7 +3164,7 @@
       "type": "object"
     },
     "FabricDevice": {
-      "description": "One RDMA device's traffic over the window since the agent's last report.\n\nA DGX Spark reaches one cabled port through two RDMA devices; ``port`` is\ntheir shared PCI bus:slot.function (the PCI domain differs), which pairs\nthe siblings. ``bytes`` is received plus transmitted bytes in the window.\n``rate_mbps`` is the port's negotiated rate and ``errors`` the link and\ntransport errors counted in the window; each is ``None`` when unreadable\n(or the counter went backwards). They are facts, and nothing here is a\nverdict: the Controller compares siblings and the declared bandwidth.",
+      "description": "One RDMA device's traffic over the window since the agent's last report.\n\nA DGX Spark reaches one cabled port through two RDMA devices; ``port`` is\ntheir shared PCI bus:slot.function (the PCI domain differs), which pairs\nthe siblings. ``bytes`` is received plus transmitted bytes in the window.\n``rate_mbps`` is the port's negotiated rate and ``errors`` the link and\ntransport errors counted in the window; each is ``None`` when unreadable\n(for ``errors``, also when the device's error total went backwards, a\ncounter reset). They are facts, and nothing here is a\nverdict: the Controller compares siblings and the declared bandwidth.",
       "properties": {
         "active": {
           "title": "Active",
