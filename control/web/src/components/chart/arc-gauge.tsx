@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import "./chart.css";
 import { NoReading } from "../ui/no-reading";
 
@@ -85,7 +86,11 @@ export function ArcGauge({
           </svg>
         )}
         <div className="arc-gauge-text">
-          <strong>{reading ?? <NoReading />}</strong>
+          <strong
+            style={reading && scaled ? ({ "--chars": reading.length } as CSSProperties) : undefined}
+          >
+            {reading ?? <NoReading />}
+          </strong>
           <span>{title}</span>
         </div>
       </div>
