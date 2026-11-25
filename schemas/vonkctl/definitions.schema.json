@@ -3164,7 +3164,7 @@
       "type": "object"
     },
     "FabricDevice": {
-      "description": "One RDMA device's traffic over the window since the agent's last report.\n\nA DGX Spark reaches one cabled port through two RDMA devices; ``port`` is\ntheir shared PCI bus:slot.function (the PCI domain differs), which pairs\nthe siblings. ``bytes`` is received plus transmitted bytes in the window.\nThe Controller compares siblings; nothing here is a verdict.",
+      "description": "One RDMA device's traffic over the window since the agent's last report.\n\nA DGX Spark reaches one cabled port through two RDMA devices; ``port`` is\ntheir shared PCI bus:slot.function (the PCI domain differs), which pairs\nthe siblings. ``bytes`` is received plus transmitted bytes in the window.\n``rate_mbps`` is the port's negotiated rate and ``errors`` the link and\ntransport errors counted in the window; each is ``None`` when unreadable\n(or the counter went backwards). They are facts, and nothing here is a\nverdict: the Controller compares siblings and the declared bandwidth.",
       "properties": {
         "active": {
           "title": "Active",
@@ -3176,10 +3176,38 @@
           "title": "Bytes",
           "type": "integer"
         },
+        "errors": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Errors"
+        },
         "port": {
           "pattern": "^[0-9a-f]{2}:[0-9a-f]{2}\\.[0-7]$",
           "title": "Port",
           "type": "string"
+        },
+        "rate_mbps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rate Mbps"
         },
         "window_seconds": {
           "maximum": 86400,
@@ -13467,6 +13495,9 @@
         "inventory.missing",
         "inventory.stale",
         "network.rails-underused",
+        "network.fabric-down",
+        "network.fabric-rate-low",
+        "network.fabric-errors",
         "network.nas-route-wifi-no-wired-port",
         "network.nas-route-wifi-wired-port-down",
         "network.nas-route-wifi-wired-port-unused",

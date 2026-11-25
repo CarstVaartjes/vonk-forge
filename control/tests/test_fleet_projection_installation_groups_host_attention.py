@@ -1037,7 +1037,11 @@ def _host_codes(host_settings: dict[str, object] | None) -> list[str]:
     return [w.code for w in node.warnings if w.code.startswith("host.")]
 
 
-def _host_node(host_settings: dict[str, object] | None) -> FleetNode:
+def _host_node(
+    host_settings: dict[str, object] | None,
+    *,
+    fabric: dict[str, object] | None = None,
+) -> FleetNode:
     """Report one agent inventory through the store and project its node."""
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -1078,6 +1082,7 @@ def _host_node(host_settings: dict[str, object] | None) -> FleetNode:
                 "container_runtime_version": "29.2.1",
             }
             | ({} if host_settings is None else {"host_settings": host_settings})
+            | ({} if fabric is None else fabric)
         )
     )
     InventoryRepository(sessions, clock=lambda: NOW).record(
@@ -1097,6 +1102,8 @@ def _host_node(host_settings: dict[str, object] | None) -> FleetNode:
                     "capabilities": tuple(report.capabilities),
                     "memory_pool": report.memory_pool,
                     "host_settings": report.host_settings,
+                    "fabric_address": report.fabric_address,
+                    "fabric_bandwidth_mbps": report.fabric_bandwidth_mbps,
                     "schema_version": 1,
                     "nvidia_driver_version": "unknown",
                     "container_runtime_version": "unknown",
@@ -1381,6 +1388,52 @@ def test_one_flat_rail_beside_a_busy_sibling_reaches_the_node_as_attention(
         "graphical_default_target": False,
         "fabric_devices": case["fabric_devices"],
     }
-    node = _host_node(host)
+    fabric = {"fabric_address": "10.0.0.1", "fabric_bandwidth_mbps": 200_000}
+    if "fabric_bandwidth_mbps" in case:
+        fabric["fabric_bandwidth_mbps"] = case["fabric_bandwidth_mbps"]
+    node = _host_node(host, fabric=fabric)
     reasons = [w for w in node.warnings if w.code == "network.rails-underused"]
     assert bool(reasons) is case["underused"]
+    assert [
+        w.code for w in node.warnings if w.code.startswith("network.fabric-")
+    ] == case.get("codes", [])
+
+
+@pytest.mark.parametrize(
+    ("fabric_address", "codes"),
+    [("10.0.0.1", ["network.fabric-down"]), (None, [])],
+)
+def test_no_active_fabric_port_on_a_spark_with_a_fabric_is_attention(
+    fabric_address: str | None, codes: list[str]
+) -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    sample_id = "00000000-0000-4000-8000-000000000011"
+    inventory = _inventory(NODE_A, NOW - timedelta(seconds=1), free_bytes=700)
+    inventory.fabric_address = fabric_address
+    inventory.fabric_bandwidth_mbps = None if fabric_address is None else 200_000
+    sample = _telemetry(
+        NODE_A, sample_id, NOW - timedelta(seconds=1), sequence=1, cpu=5
+    )
+    sample.fabric_ports_active = 0
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=1)),
+            )
+        )
+        session.flush()
+        session.add_all(
+            [
+                inventory,
+                sample,
+                NodeTelemetryLatest(node_id=NODE_A, sample_id=sample_id),
+            ]
+        )
+    node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+    assert [
+        w.code for w in node.warnings if w.code.startswith("network.fabric-")
+    ] == codes

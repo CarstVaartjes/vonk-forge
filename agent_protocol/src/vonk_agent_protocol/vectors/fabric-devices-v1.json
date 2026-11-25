@@ -1,5 +1,5 @@
 {
-  "comment": "FabricDevice lists as the agent reports them in HostSettings (bytes received plus transmitted over window_seconds since its last report, from the sysfs port counters in 4-byte words) and whether the Controller raises network.rails-underused. Busy is at least 8 MiB/s, flat under 1% of the busy sibling, window at least 30 s. The Rust agent test reads every list through the generated contract and reads the sysfs sample as the agent_sample; the Controller test projects each case onto a node.",
+  "comment": "FabricDevice lists as the agent reports them in HostSettings (bytes received plus transmitted over window_seconds since its last report, from the sysfs port counters in 4-byte words) and whether the Controller raises network.rails-underused. Busy is at least 8 MiB/s, flat under 1% of the busy sibling, window at least 30 s. The Rust agent test reads every list through the generated contract and reads the sysfs sample as the agent_sample; the Controller test projects each case onto a node. Each case also gives the Spark's declared fabric_bandwidth_mbps (default 200000) and the network.fabric-* codes (default none) the Controller raises from the devices' rate_mbps and errors; network.fabric-down comes from telemetry and is tested there. In agent_sample, counters lists the six RDMA hw_counters then the netdev rx_errors and tx_errors, and rate is the port's rate file.",
   "cases": [
     {
       "name": "both rails of both ports carry traffic",
@@ -125,6 +125,128 @@
       "name": "no previous reading yet",
       "fabric_devices": [],
       "underused": false
+    },
+    {
+      "name": "healthy rate and no errors",
+      "fabric_devices": [
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3700000000,
+          "window_seconds": 120,
+          "rate_mbps": 200000,
+          "errors": 0
+        },
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3600000000,
+          "window_seconds": 120,
+          "rate_mbps": 200000,
+          "errors": 0
+        }
+      ],
+      "fabric_bandwidth_mbps": 200000,
+      "underused": false,
+      "codes": []
+    },
+    {
+      "name": "one active device renegotiated lower",
+      "fabric_devices": [
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3700000000,
+          "window_seconds": 120,
+          "rate_mbps": 200000,
+          "errors": 0
+        },
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3600000000,
+          "window_seconds": 120,
+          "rate_mbps": 100000,
+          "errors": 0
+        }
+      ],
+      "fabric_bandwidth_mbps": 200000,
+      "underused": false,
+      "codes": [
+        "network.fabric-rate-low"
+      ]
+    },
+    {
+      "name": "a down device at a low rate",
+      "fabric_devices": [
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3700000000,
+          "window_seconds": 120,
+          "rate_mbps": 200000,
+          "errors": 0
+        },
+        {
+          "port": "01:00.1",
+          "active": false,
+          "bytes": 0,
+          "window_seconds": 120,
+          "rate_mbps": 40000,
+          "errors": 0
+        }
+      ],
+      "fabric_bandwidth_mbps": 200000,
+      "underused": false,
+      "codes": []
+    },
+    {
+      "name": "errors counted in the window",
+      "fabric_devices": [
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3700000000,
+          "window_seconds": 120,
+          "rate_mbps": 200000,
+          "errors": 3
+        },
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3600000000,
+          "window_seconds": 120,
+          "rate_mbps": 200000,
+          "errors": 0
+        }
+      ],
+      "fabric_bandwidth_mbps": 200000,
+      "underused": false,
+      "codes": [
+        "network.fabric-errors"
+      ]
+    },
+    {
+      "name": "errors unreadable",
+      "fabric_devices": [
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3700000000,
+          "window_seconds": 120,
+          "rate_mbps": 200000
+        },
+        {
+          "port": "01:00.1",
+          "active": true,
+          "bytes": 3600000000,
+          "window_seconds": 120,
+          "rate_mbps": 200000
+        }
+      ],
+      "fabric_bandwidth_mbps": 200000,
+      "underused": false,
+      "codes": []
     }
   ],
   "agent_sample": {
@@ -141,7 +263,30 @@
         "second": [
           400001000,
           400002000
-        ]
+        ],
+        "rate": "200 Gb/sec (2X NDR)",
+        "counters": {
+          "first": [
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "second": [
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        }
       },
       {
         "name": "roceP2p1s0f1",
@@ -154,7 +299,30 @@
         "second": [
           503,
           500
-        ]
+        ],
+        "rate": "200 Gb/sec (2X NDR)",
+        "counters": {
+          "first": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "second": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            1,
+            0
+          ]
+        }
       },
       {
         "name": "rocep1s0f0",
@@ -167,7 +335,30 @@
         "second": [
           0,
           0
-        ]
+        ],
+        "rate": "2.5 Gb/sec (1X SDR)",
+        "counters": {
+          "first": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "second": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        }
       }
     ],
     "window_seconds": 120,
@@ -176,19 +367,25 @@
         "port": "01:00.1",
         "active": true,
         "bytes": 12,
-        "window_seconds": 120
+        "window_seconds": 120,
+        "rate_mbps": 200000,
+        "errors": 3
       },
       {
         "port": "01:00.0",
         "active": false,
         "bytes": 0,
-        "window_seconds": 120
+        "window_seconds": 120,
+        "rate_mbps": 2500,
+        "errors": 0
       },
       {
         "port": "01:00.1",
         "active": true,
         "bytes": 3200000000,
-        "window_seconds": 120
+        "window_seconds": 120,
+        "rate_mbps": 200000,
+        "errors": 0
       }
     ]
   }

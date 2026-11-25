@@ -314,3 +314,34 @@ flat while its sibling is busy over the same window:
 No traffic, no previous reading, or only one active device give no advice.
 Nothing is restarted. Shared vector: `fabric-devices-v1.json` (agent counter
 sample and Controller cases).
+
+## Fabric health (port down, rate low, errors)
+
+Three advice items, none a gate: nothing is restarted, and each clears with the
+next clean window or sample.
+
+- `network.fabric-down` (`fleet_projection/fabric_health.py`): the Spark
+  declares a fabric address, its telemetry is not stale, and the latest sample
+  reports `fabric_ports_active == 0`.
+- `network.fabric-rate-low`: an ACTIVE RDMA device negotiated less than the
+  Spark's declared `fabric_bandwidth_mbps`. The agent reads the rate from
+  `ports/1/rate` (`200 Gb/sec (2X NDR)` is 200000 Mb/s; `FabricDevice.rate_mbps`).
+  A DOWN device is not judged, and an unreadable rate gives no advice.
+- `network.fabric-errors`: a device counted at least `FABRIC_ERROR_FLOOR` (1)
+  link or transport errors in the window (`FabricDevice.errors`). The agent
+  sums the RDMA `ports/1/hw_counters` `packet_seq_err`, `local_ack_timeout_err`,
+  `rnr_nak_retry_err`, `implied_nak_seq_err`, `req_transport_retries_exceeded`
+  and `rx_icrc_encapsulated` with the netdev's `statistics/rx_errors` and
+  `tx_errors`, as a delta over the same window as the traffic. `errors` is
+  unreported when any file is unreadable or a counter went backwards.
+
+Today's baseline is zero on both Sparks (every counter above read 0 on
+2026-11-25), so the floor of 1 is a change from clean; calibrate it on hardware.
+`out_of_buffer` and `rx_dropped` are not read: they count receive pressure, not
+a failing link. The physical-layer counters (`ethtool -S` phy errors) are not
+read either. It is unverified whether the mlx5 netdev's `rx_errors` carries the
+phy CRC count.
+
+These readings come at the inventory cadence only (the counters may query
+firmware), never in the 2-second telemetry loop. Shared vector:
+`fabric-devices-v1.json` (`rate`, `counters` and `codes`).

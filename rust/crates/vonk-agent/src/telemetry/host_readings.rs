@@ -195,6 +195,53 @@ pub fn read_fabric_devices(root: &Path) -> Option<Vec<FabricDeviceReading>> {
     )
 }
 
+/// RDMA `hw_counters` that count link and transport errors. `out_of_buffer`
+/// and the netdev's `rx_dropped` are left out: they count receive pressure,
+/// not a failing link.
+const FABRIC_ERROR_COUNTERS: [&str; 6] = [
+    "packet_seq_err",
+    "local_ack_timeout_err",
+    "rnr_nak_retry_err",
+    "implied_nak_seq_err",
+    "req_transport_retries_exceeded",
+    "rx_icrc_encapsulated",
+];
+
+/// One RDMA device's negotiated rate in Mb/s (`ports/1/rate`, e.g.
+/// `200 Gb/sec (2X NDR)`) and its cumulative link and transport errors (the
+/// `hw_counters` above plus the netdev's `rx_errors` and `tx_errors`). Each is
+/// `None` when any file it needs is unreadable. Read at the inventory cadence
+/// only: `hw_counters` may query firmware.
+pub fn read_fabric_health(root: &Path, name: &str) -> (Option<u32>, Option<u64>) {
+    let device = root.join(name);
+    let rate = read_bounded_text(&device.join("ports/1/rate")).and_then(|text| {
+        // `200` or `2.5` Gb/sec; IB rates have at most one decimal.
+        let token = text.split_ascii_whitespace().next()?;
+        let (whole, tenths) = token.split_once('.').unwrap_or((token, "0"));
+        let mbps = whole
+            .parse::<u32>()
+            .ok()?
+            .checked_mul(1000)?
+            .checked_add(tenths.parse::<u32>().ok().filter(|t| *t < 10)? * 100)?;
+        (1..=1_000_000).contains(&mbps).then_some(mbps)
+    });
+    (rate, fabric_errors(&device))
+}
+
+fn fabric_errors(device: &Path) -> Option<u64> {
+    let count = |path: PathBuf| {
+        let value = read_bounded_text(&path)?.trim().parse::<u64>().ok()?;
+        (value <= COUNTER_MAX).then_some(value)
+    };
+    let mut netdevs = sorted_entries(&device.join("device/net"))?.into_iter();
+    let netdev = netdevs.next().filter(|_| netdevs.next().is_none())?;
+    let mut counters = FABRIC_ERROR_COUNTERS
+        .iter()
+        .map(|name| device.join("ports/1/hw_counters").join(name))
+        .chain(["rx_errors", "tx_errors"].map(|name| netdev.join("statistics").join(name)));
+    counters.try_fold(0u64, |sum, path| sum.checked_add(count(path)?))
+}
+
 /// `bus:slot.function` of the PCI device a `device` symlink names
 /// (`0002:01:00.1` gives `01:00.1`).
 fn pci_function(device: &Path) -> Option<String> {
