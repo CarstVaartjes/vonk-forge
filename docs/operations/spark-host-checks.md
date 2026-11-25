@@ -114,6 +114,16 @@ unmovable page can pin one 2 MiB block, so 512 pages put 1 GiB at risk: at a
 the reported cost. Fewer than two readings give no advice. The Controller
 deploys before the agents (strict readers).
 
+## Kernel OOM kill (`host.oom-kill`)
+
+The Spark warns `host.oom-kill` when the kernel OOM killer ended a process in
+the last hour. The source is the `oom_kills` telemetry counter (`/proc/vmstat`
+`oom_kill`). The Controller sums each boot's rise over the last hour, so a
+reboot adds nothing, and the warning clears by itself an hour after the last
+rise. It is advice only and gates nothing. A kill means the helper's memory
+guard did not act first: look at the stopped run's failure evidence, and treat
+repeated kills as a sign the guard thresholds need calibration.
+
 ## Related choices that are not host checks
 
 - The helper drops the page cache before a workload loads with

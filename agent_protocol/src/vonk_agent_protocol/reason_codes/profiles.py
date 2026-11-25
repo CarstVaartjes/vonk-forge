@@ -90,6 +90,8 @@ class ProjectionCode(WireEnum):
     #: Kernel page tables left by exited workloads fragment memory; only a
     #: reboot returns them. Advice, never an action.
     HOST_MEMORY_FRAGMENTED = "host.memory-fragmented"
+    #: The kernel OOM killer ended a process in the last hour; advice, never an action.
+    HOST_OOM_KILL = "host.oom-kill"
     #: Active swap is below the desired size: big loads lose their cushion.
     HOST_SWAP_SHORT = "host.swap-short"
     MODEL_STORE_LAYOUT = "model.store_layout"
