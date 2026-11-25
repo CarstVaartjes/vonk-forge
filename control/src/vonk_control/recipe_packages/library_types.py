@@ -83,6 +83,9 @@ class RecipeLibraryItem:
     # once at ingress; none when absent or unreadable (the route then publishes
     # no model_info).
     api: RecipeApi | None = None
+    # The capabilities this launch serves, as the signed index derived them
+    # (the contracts' ``served_capabilities``); none when it carries none.
+    served_capabilities: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

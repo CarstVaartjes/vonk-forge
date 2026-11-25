@@ -33,7 +33,6 @@ from vonk_control.library_projection.common import (
     _model_identity,
     _readable_document,
     _recipe_creator,
-    _recipe_usage,
 )
 from vonk_control.model_cache.contract import CacheManifest, ModelStorageSnapshot
 from vonk_control.models.cache import ModelCacheSet, RecipeLibrarySyncRun
@@ -131,7 +130,6 @@ def _recipe_projection(
     self: LibraryProjection,
     revision: CatalogDocumentRevision,
     document: RecipeDefinition | RecipeRevisionProjection,
-    usage_by_model: Mapping[str, Sequence[str]],
     snapshot: Mapping[str, LibraryLocalState] | None,
     text: DocumentText,
 ) -> LibraryRecipeProjection:
@@ -144,14 +142,6 @@ def _recipe_projection(
         self.selector(reference.publisher, reference.slug)
         for reference in projected.models
     ]
-    usage = _recipe_usage(
-        [
-            item
-            for reference in projected.models
-            for item in usage_by_model.get(reference.content_sha256, ())
-        ],
-        projected.api,
-    )
     resources = self._recipe_resources(document)
     local = self._local(
         revision.content_digest, kind=ReceiptOwner.RECIPE, snapshot=snapshot
@@ -184,7 +174,8 @@ def _recipe_projection(
         prebuilt_image=projected.prebuilt_image,
         qualification=projected.qualification,
         model_selectors=model_selectors,
-        usage=usage,
+        # What the signed catalog says this launch serves, nothing more.
+        usage=list(projected.served_capabilities or ()),
         resources=resources,
         local=local,
         actions=recipe_actions(local),
