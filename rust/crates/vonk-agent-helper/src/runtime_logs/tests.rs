@@ -958,6 +958,9 @@ fn exit(code: i32, oom: bool, error: &str) -> ContainerExit {
         exit_code: Some(code),
         oom_killed: Some(oom),
         error: error.to_owned(),
+        started_at: None,
+        finished_at: None,
+        gpu_xid: None,
         host_memory: None,
     }
 }
@@ -972,10 +975,14 @@ fn captured(stdout: &str, stderr: &str) -> CapturedOutput {
 
 #[test]
 fn the_exit_state_is_read_back_from_the_inspect_format() {
-    let state = parse_exit(b"137\ttrue\t\n").unwrap();
+    let state = parse_exit(b"137\ttrue\t0001-01-01T00:00:00Z\t0001-01-01T00:00:00Z\t\n").unwrap();
     assert_eq!(state, exit(137, true, ""));
-    let state = parse_exit(b"1\tfalse\tfailed: exec format error\n").unwrap();
-    assert_eq!(state.error, "failed: exec format error");
+    let state = parse_exit(
+        b"1\tfalse\t2026-10-01T00:00:00Z\t2026-10-01T00:10:00.5Z\tfailed: exec\tformat error\n",
+    )
+    .unwrap();
+    assert_eq!(state.error, "failed: execformat error");
+    assert!(state.started_at.is_some() && state.finished_at.is_some());
     assert!(parse_exit(b"not-a-number\ttrue\t").is_none());
     assert!(parse_exit(b"").is_none());
 }
@@ -1221,6 +1228,9 @@ fn an_exit_summary_is_never_empty_and_names_what_could_not_be_read() {
             exit_code: Some(1),
             oom_killed: Some(false),
             error: String::new(),
+            started_at: None,
+            finished_at: None,
+            gpu_xid: None,
             host_memory: None,
         }),
         Err("inspect failed"),

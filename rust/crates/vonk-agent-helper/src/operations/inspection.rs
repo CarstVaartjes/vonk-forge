@@ -612,6 +612,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .filter(|output| output.success)
                     .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
             };
+            if let Some(started) = exit.started_at {
+                exit.gpu_xid = self
+                    .xids
+                    .first_between(started, exit.finished_at.unwrap_or_else(chrono::Utc::now));
+            }
             exit.host_memory = id
                 .as_deref()
                 .and_then(|id| crate::host_memory_guard::load_evidence(&self.roots.data, id));

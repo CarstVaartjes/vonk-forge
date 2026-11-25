@@ -340,6 +340,7 @@ fn run() -> Result<(), String> {
     let agent_uid = user_uid(Path::new("/etc/passwd"), AGENT_GROUP)?;
     let node_id = node_id_from_config(&read_root_text(Path::new(AGENT_CONFIG), 64 * 1024)?)?;
     let verifier = Arc::new(GrantVerifier::new(&grant_key, group_gid).map_err(display)?);
+    let xids = vonk_agent_helper::host_memory_guard::XidLog::default();
     let executor = OperationExecutor::new(
         ManagedRoots::under(Path::new(DATA_ROOT))
             .with_agent_data(Path::new(AGENT_DATA_ROOT))
@@ -351,7 +352,8 @@ fn run() -> Result<(), String> {
     )
     .map_err(display)?
     .with_package_owner(agent_uid)
-    .with_runtime_request_owner(agent_uid);
+    .with_runtime_request_owner(agent_uid)
+    .with_xid_log(xids.clone());
     let executor = Arc::new(executor);
     spawn_custody_cleanup(Arc::clone(&executor));
     let mut next_custody_check = Instant::now() + Duration::from_secs(60);
@@ -367,7 +369,7 @@ fn run() -> Result<(), String> {
     let settings = Arc::clone(&executor);
     let mut host_settings = Some(thread::spawn(move || settings.keep_host_settings()));
     let mut next_host_settings = Instant::now() + HOST_SETTINGS_INTERVAL;
-    vonk_agent_helper::host_memory_guard::spawn(Path::new(DATA_ROOT).to_path_buf());
+    vonk_agent_helper::host_memory_guard::spawn(Path::new(DATA_ROOT).to_path_buf(), xids);
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
     let Some((name, descriptor)) = sockets.pop().filter(|_| sockets.is_empty()) else {
