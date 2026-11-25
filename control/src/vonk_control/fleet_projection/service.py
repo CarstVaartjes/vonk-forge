@@ -70,6 +70,7 @@ from vonk_control.stored.states import CatalogRevisionState
 from vonk_control.swap import selected_swaps
 from vonk_control.telemetry.samples import (
     CPU_LOW_CLOCK_MIN_SECONDS,
+    HOST_OOM_KILL_WINDOW,
     TelemetryRepository,
 )
 
@@ -180,6 +181,9 @@ class FleetProjection:
                     seconds=CPU_LOW_CLOCK_MIN_SECONDS + _LOW_CLOCK_LOOKBACK_SLACK
                 ),
             )
+            oom_kills = self._telemetry.oom_kills_in_session(
+                session, node_ids, current - HOST_OOM_KILL_WINDOW
+            )
             installation_rows = self._installation_rows(session, node_ids)
             run_rows = self._run_rows(session, node_ids)
             mapping_ids = {row[2].id for row in (*installation_rows, *run_rows)}
@@ -244,6 +248,7 @@ class FleetProjection:
                     swap_desired=swap_desired[node_id],
                     telemetry_unreadable=node_id in unreadable_telemetry,
                     recent_telemetry=recent_telemetry.get(node_id, ()),
+                    oom_kills=oom_kills.get(node_id, 0),
                     installed=installed.get(node_id, ()),
                     loaded=loaded.get(node_id, ()),
                     reservations=reservations.get(node_id, {}),

@@ -672,6 +672,57 @@ def _cpu_clock_codes(
     return [w.code for w in node.warnings], [w.detail for w in node.warnings]
 
 
+def _oom_codes(*readings: tuple[int, str, int]) -> list[str]:
+    """Feed one node (age in minutes, boot, oom_kills) samples; return its warning codes."""
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                inventory_snapshot=inventory_items_fixture(
+                    NODE_A,
+                    observed_at=NOW - timedelta(seconds=1),
+                    identity=AgentRuntimeIdentity.model_validate(
+                        {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
+                    ),
+                ),
+                contact=AgentNodeContact(last_seen_at=NOW - timedelta(seconds=1)),
+            )
+        )
+        session.flush()
+        session.add(_certificate(NODE_A, "oom-kill"))
+        session.add(_inventory(NODE_A, NOW - timedelta(seconds=1), free_bytes=700))
+        latest = None
+        for index, (age_minutes, boot, kills) in enumerate(readings, start=1):
+            sample = _telemetry(
+                NODE_A,
+                f"00000000-0000-4000-8000-{index:012d}",
+                NOW - timedelta(minutes=age_minutes),
+                sequence=index,
+                cpu=5.0,
+                boot_id=f"00000000-0000-4000-8000-0000000000{boot}",
+            )
+            sample.oom_kills = kills
+            session.add(sample)
+            latest = sample
+        session.flush()
+        assert latest is not None
+        session.add(NodeTelemetryLatest(node_id=NODE_A, sample_id=latest.id))
+    return [
+        w.code
+        for w in FleetProjection(sessions, clock=lambda: NOW).read().nodes[0].warnings
+    ]
+
+
+def test_oom_kill_is_advised_only_for_a_rise_within_the_hour() -> None:
+    assert "host.oom-kill" in _oom_codes((50, "a1", 0), (20, "a1", 1), (0, "a1", 1))
+    assert "host.oom-kill" not in _oom_codes((90, "a1", 0), (70, "a1", 1), (0, "a1", 1))
+    assert "host.oom-kill" not in _oom_codes((40, "a1", 5), (0, "b2", 0))
+
+
 def test_low_cpu_clock_is_raised_only_when_sustained_and_hot_or_loaded() -> None:
     codes, details = _cpu_clock_codes(span_seconds=80)
     assert codes == ["cpu.low-clock"]

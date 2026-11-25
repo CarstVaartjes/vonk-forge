@@ -83,6 +83,7 @@ def _node(
     telemetry_unreadable: bool = False,
     gpu_clock_desired: GpuClockRange | None = None,
     swap_desired: SwapIntent | None = None,
+    oom_kills: int = 0,
     agent_upgrade_available: bool | None = None,
 ) -> FleetNode:
     warnings: list[ProjectionReason] = list(layout_notices)
@@ -242,6 +243,19 @@ def _node(
                     severity="warning",
                 )
             )
+    if oom_kills > 0:
+        warnings.append(
+            ProjectionReason(
+                code=ProjectionCode.HOST_OOM_KILL,
+                detail=f"The kernel OOM killer ended {oom_kills} process(es) in the last hour.",
+                severity=ProfileReasonSeverity.WARNING.value,
+                recommendation=(
+                    "The memory guard should have acted first. Look at the stopped "
+                    "run's failure evidence; repeated kills mean the guard "
+                    "thresholds need calibration."
+                ),
+            )
+        )
     if telemetry is not None and telemetry.gpu_clock is not None:
         clock = telemetry.gpu_clock
         if gpu_clock_desired is not None and (
