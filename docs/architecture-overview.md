@@ -863,7 +863,7 @@ An external model is one LiteLLM `model_list` entry that points at a provider
 outside the fleet. Local routes are unchanged: a bundle without external entries
 renders the same bytes as before, so shipping this contract restarts no gateway.
 The tables `gateway_external_deployments` (the operator's desired and the
-applied spec, the publication state and its wait), `gateway_credential_bindings`
+applied spec and the publication state; its wait columns arrive with the publisher that redrives them), `gateway_credential_bindings`
 (a binding name and the destinations its secret may reach; never a secret) and
 `gateway_alias_namespace` (one row) are additive and are reconciled from the
 models at startup.

@@ -21,6 +21,7 @@ from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignme
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
 from vonk_control.fleet_profiles.projection_support import _effective_option_choices
+from vonk_control.gateway.alias_namespace import require_alias_not_external
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_cache.fleet_removal import _model_objects
 from vonk_control.model_cache.persistence import _operation_removal
@@ -50,6 +51,12 @@ class FleetProfileService:
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
+        # A name an external model serves is not for a profile to claim; apply
+        # decides under the namespace lock, this refuses the draft early.
+        require_alias_not_external(
+            session,
+            {item.assignment_name for item in values if item.assignment_name},
+        )
         self._prefetch_recipe_documents(session, values)
         assignments: list[FleetProfileAssignmentInput] = []
         notes: list[str] = []

@@ -85,6 +85,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "An external entry is accepted or refused with a field path and rule code, never echoing a secret, and renders beside local routes.",
     ),
     (
+        "control/tests/test_gateway_alias_namespace.py",
+        "An external row reads back and owns its name; run creation and rename_run are refused a name an external model owns; a local run owns its name against an external claim.",
+    ),
+    (
         "control/tests/test_gateway_alias_namespace_postgres.py",
         "Real PostgreSQL: an external claim and a local admission on one name leave one owner; the loser is busy, then refused.",
     ),

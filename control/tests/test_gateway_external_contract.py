@@ -10,9 +10,11 @@ import pytest
 from pydantic import JsonValue
 
 from vonk_control.gateway.external_contract import (
+    PROVIDER_ORIGIN_PREFIX,
     ApprovedDestination,
     CredentialBinding,
     ExternalDeploymentSpec,
+    ExternalDestination,
     ExternalEntryCode,
     ExternalEntryProblem,
     ExternalModelInput,
@@ -193,6 +195,31 @@ REFUSALS = {
         "litellm_params.api_base",
         ExternalEntryCode.PRIVATE_ADDRESS,
     ),
+    "malformed port": (
+        _openai(api_base="https://api.partner.example:abc/v1"),
+        "litellm_params.api_base",
+        ExternalEntryCode.TYPE_MISMATCH,
+    ),
+    "malformed ipv6 host": (
+        _openai(api_base="https://[::1/v1"),
+        "litellm_params.api_base",
+        ExternalEntryCode.TYPE_MISMATCH,
+    ),
+    "host the origin cannot carry": (
+        _openai(api_base="https://api_gw.partner.example/v1"),
+        "litellm_params.api_base",
+        ExternalEntryCode.TYPE_MISMATCH,
+    ),
+    "endpoint without a scheme": (
+        _openai(api_base="api.partner.example/v1"),
+        "litellm_params.api_base",
+        ExternalEntryCode.TYPE_MISMATCH,
+    ),
+    "endpoint with leading space": (
+        _openai(api_base=" https://api.partner.example/v1"),
+        "litellm_params.api_base",
+        ExternalEntryCode.TYPE_MISMATCH,
+    ),
     "unknown provider": (
         _openai(model="nowhere/x"),
         "litellm_params.model",
@@ -239,6 +266,13 @@ def test_an_alias_another_owner_serves_is_refused() -> None:
     assert [(item.path, item.code) for item in problems] == [
         ("model_name", ExternalEntryCode.ALIAS_TAKEN)
     ]
+
+
+def test_every_pinned_provider_has_a_nameable_destination() -> None:
+    # Break caught: a provider the origin contract cannot spell would make an
+    # accepted entry fail to build its destination.
+    for provider in _surface().providers:
+        ExternalDestination(origins=[PROVIDER_ORIGIN_PREFIX + provider])
 
 
 def test_the_surface_names_the_pinned_image() -> None:

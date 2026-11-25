@@ -32,6 +32,7 @@ from vonk_control.gateway.external_contract import (
     ExternalEntryProblem,
     ExternalModelInput,
     LiteLlmFields,
+    Origin,
 )
 from vonk_control.gateway.litellm import LiteLlmModelInfo
 from vonk_control.gateway.litellm_surface import LiteLlmSurface
@@ -43,6 +44,7 @@ _OIDC_REFERENCE: Final = "oidc/"
 _URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
 _BINDING_NAME = re.compile(BINDING_NAME_PATTERN)
 _ALIAS = TypeAdapter(EndpointAlias)
+_ORIGIN = TypeAdapter(Origin)
 
 #: LiteLLM's own reserved model names: a key's ``models`` list gives them meaning.
 RESERVED_ALIASES: Final = frozenset(
@@ -88,6 +90,16 @@ _SECRET_PARAMS: Final = frozenset(
         "anthropic_identity_token",
         "anthropic_issuer_signing_key_ref",
         "anthropic_keycloak_client_secret_ref",
+    }
+)
+#: Fields that hold an endpoint: each must be an absolute URL.
+_ENDPOINT_PARAMS: Final = frozenset(
+    {
+        "api_base",
+        "aws_sts_endpoint",
+        "aws_bedrock_runtime_endpoint",
+        "anthropic_issuer_url",
+        "anthropic_keycloak_token_url",
     }
 )
 _REGION_PARAMS: Final = (
@@ -319,24 +331,47 @@ def _strings(value: JsonValue, path: str) -> Iterator[tuple[str, str]]:
 def _origins(
     params: LiteLlmFields, problems: list[ExternalEntryProblem]
 ) -> dict[str, str]:
-    """The origin of every absolute ``https`` URL in the entry, with its first path."""
+    """The origin of every absolute ``https`` URL in the entry, with its first path.
+
+    An endpoint field must hold an absolute URL; a value that is no URL, or
+    whose origin the contract cannot name, is refused with the others.
+    """
 
     origins: dict[str, str] = {}
     for key in sorted(params):
         for path, text in _strings(params[key], f"{_PARAMS}.{key}"):
             if _URL.match(text) is None:
+                if key in _ENDPOINT_PARAMS:
+                    _problem(path, ExternalEntryCode.TYPE_MISMATCH, problems)
                 continue
-            parts = urlsplit(text)
-            host = parts.hostname
-            if parts.scheme != "https" or not host:
-                _problem(path, ExternalEntryCode.INSECURE_DESTINATION, problems)
-            elif parts.username is not None or parts.password is not None:
-                _problem(path, ExternalEntryCode.LITERAL_SECRET, problems)
+            origin = _origin(text)
+            if isinstance(origin, ExternalEntryCode):
+                _problem(path, origin, problems)
             else:
-                port = f":{parts.port}" if parts.port else ""
-                bracket = f"[{host}]" if ":" in host else host
-                origins.setdefault(f"https://{bracket}{port}", path)
+                origins.setdefault(origin, path)
     return origins
+
+
+def _origin(text: str) -> str | ExternalEntryCode:
+    """The ``https`` origin of one URL, or the rule that refuses it."""
+
+    try:
+        parts = urlsplit(text)
+        host = parts.hostname
+        port = parts.port
+    except ValueError:  # a malformed bracket or port: the URL names no origin
+        return ExternalEntryCode.TYPE_MISMATCH
+    if parts.scheme != "https" or not host:
+        return ExternalEntryCode.INSECURE_DESTINATION
+    if parts.username is not None or parts.password is not None:
+        return ExternalEntryCode.LITERAL_SECRET
+    origin = (
+        f"https://{f'[{host}]' if ':' in host else host}{f':{port}' if port else ''}"
+    )
+    try:
+        return _ORIGIN.validate_python(origin, strict=True)
+    except ValueError:  # a host the origin contract cannot carry (such as "_" or IDN)
+        return ExternalEntryCode.TYPE_MISMATCH
 
 
 def _private_origin(origin: str) -> bool:
