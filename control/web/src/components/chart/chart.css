@@ -153,6 +153,7 @@
   position: relative;
   width: 100%;
   max-width: 11rem;
+  container-type: inline-size;
 }
 .arc-gauge svg {
   display: block;
@@ -192,7 +193,9 @@
   padding-bottom: 1.4rem;
 }
 .arc-gauge-text strong {
-  font-size: 1.5rem;
+  /* The arc's inner width is about 70% of the dial; shrink the reading so its characters (about
+     0.6em each) keep a gap to the arc instead of touching it. */
+  font-size: min(1.5rem, calc(100cqw / var(--chars, 1)));
   letter-spacing: -0.02em;
   font-weight: 600;
 }
