@@ -227,7 +227,10 @@ fn announced_truncation_discards_the_partial_first_source_line() {
         "{}\n=hunter2",
         String::from_utf8_lossy(TRUNCATED_LOG_MARKER)
     );
-    assert!(log_tail(text.as_bytes()).text.is_empty());
+    assert!(
+        log_tail(text.as_bytes()).text.is_empty(),
+        "unexpected content"
+    );
 }
 
 #[test]

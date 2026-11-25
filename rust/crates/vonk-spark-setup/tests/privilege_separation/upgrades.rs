@@ -17,7 +17,11 @@ fn existing_upgrade_never_prompts_or_discovers_and_restarts_through_apply() {
     )
     .unwrap();
 
-    assert!(prepare_runner.commands.is_empty());
+    assert!(
+        prepare_runner.commands.is_empty(),
+        "{:?}",
+        prepare_runner.commands
+    );
     let mut handoff_runner = RecordingRunner::default();
     handoff_to_root_with_authority(&prepared, &mut handoff_runner, &repository_root_authority())
         .unwrap();
@@ -266,7 +270,7 @@ fn tty_prompt_construction_is_lazy_for_headless_upgrades() {
     );
 
     assert!(result.is_ok());
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 }
 
 #[test]

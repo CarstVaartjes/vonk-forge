@@ -310,8 +310,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let fields = std::str::from_utf8(&existing.stdout)
             .ok()
             .map(|text| text.strip_suffix('\n').unwrap_or(text))
-            .map(|text| text.split('\t').collect::<Vec<_>>())
-            .unwrap_or_default();
+            .map_or_default(|text| text.split('\t').collect::<Vec<_>>());
         let [
             container_id,
             running,
@@ -453,8 +452,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let fields = std::str::from_utf8(&existing.stdout)
             .ok()
             .map(|text| text.strip_suffix('\n').unwrap_or(text))
-            .map(|text| text.split('\t').collect::<Vec<_>>())
-            .unwrap_or_default();
+            .map_or_default(|text| text.split('\t').collect::<Vec<_>>());
         let [
             container_id,
             running,

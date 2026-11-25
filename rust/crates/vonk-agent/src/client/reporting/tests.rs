@@ -100,7 +100,10 @@ fn wholly_invalid_network_evidence_is_unknown_and_a_fresh_report_is_valid() {
     let mut fresh = valid_inventory();
     fresh.network_interfaces = Some(vec![interface("enP7s7", Some(1000))]);
     fresh.nas_route_interface = Some("enP7s7".to_owned());
-    assert!(clamp_inventory_request(&mut fresh).is_empty());
+    assert!(
+        clamp_inventory_request(&mut fresh).is_empty(),
+        "unexpected content"
+    );
     fresh.validate().unwrap();
 }
 
@@ -143,7 +146,10 @@ fn a_consistent_report_is_forwarded_whole_without_warnings() {
     request.fabric_address = Some("192.168.100.2".to_owned());
     request.fabric_bandwidth_mbps = Some(200_000);
     let before = request.clone();
-    assert!(clamp_inventory_request(&mut request).is_empty());
+    assert!(
+        clamp_inventory_request(&mut request).is_empty(),
+        "unexpected content"
+    );
     assert_eq!(request, before);
 }
 
@@ -476,6 +482,9 @@ fn inventory_model_evidence_over_http_envelope_is_unknown_until_next_report() {
     assert_eq!(request.disk_free_bytes, 50);
     request.validate().unwrap();
     request.model_objects = Some(vec![]);
-    assert!(clamp_inventory_request(&mut request).is_empty());
+    assert!(
+        clamp_inventory_request(&mut request).is_empty(),
+        "unexpected content"
+    );
     assert_eq!(request.model_objects, Some(vec![]));
 }

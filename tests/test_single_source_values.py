@@ -434,6 +434,23 @@ def test_uv_has_one_version_owner() -> None:
     assert uv_pin_violations(ROOT, files) == []
 
 
+def test_rust_toolchain_has_one_owner() -> None:
+    channel = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())["toolchain"][
+        "channel"
+    ]
+    manifest = tomllib.loads((ROOT / "Cargo.toml").read_text())
+    assert manifest["workspace"]["package"]["rust-version"] == channel
+    versioned_install = re.compile(r"rustup toolchain install[ \t]+(?![-\"$])\S")
+    copies = []
+    for file in tracked_files(ROOT):
+        if not file.startswith((".github/", "scripts/")):
+            continue
+        text = (ROOT / file).read_text(errors="ignore")
+        if channel in text or versioned_install.search(text):
+            copies.append(file)
+    assert copies == [], "name the toolchain only in rust-toolchain.toml"
+
+
 @pytest.mark.parametrize(
     "consumer",
     ["Dockerfile", "docs/example.md", "scripts/install", ".github/workflows/test.yml"],

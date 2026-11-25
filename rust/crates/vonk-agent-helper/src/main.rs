@@ -45,7 +45,7 @@ impl Drop for WorkerPermit {
 
 fn acquire_worker(counter: &Arc<AtomicUsize>) -> Option<WorkerPermit> {
     counter
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             (current < MAX_CONCURRENT_REQUESTS).then_some(current + 1)
         })
         .ok()

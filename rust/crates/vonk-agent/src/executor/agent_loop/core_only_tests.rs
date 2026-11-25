@@ -135,7 +135,10 @@ async fn a_result_refused_as_invalid_settles_with_its_core() {
     assert!(is_core(&submitted[1]));
     // Accepted: acknowledged and no refusal retained.  The one reconciling
     // resend settles the same way, and then nothing is offered again.
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     assert!(state.result_rejection(&full, Utc::now()).unwrap().is_none());
     deliver(&client, &mut state).await;
     let settled = client.submitted.lock().unwrap().len();
@@ -159,7 +162,10 @@ async fn a_refused_core_discards_delivery_with_evidence_across_restart() {
     deliver(&client, &mut state).await;
 
     assert_eq!(client.submitted.lock().unwrap().len(), 2);
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     let rejection = state
         .retained_rejection(&full)
         .unwrap()

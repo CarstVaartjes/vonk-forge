@@ -8,7 +8,7 @@ setup-uv (through the python-env action) keys on the lockfiles. A warm job that
 drifts from the job it warms would save entries nothing restores.
 """
 
-import tomllib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -27,9 +27,6 @@ def _steps(job: dict[str, Any], prefix: str) -> list[dict[str, Any]]:
 
 
 SETUP_RUST = "./.github/actions/setup-rust"
-PINNED_CHANNEL = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())["toolchain"][
-    "channel"
-]
 
 
 def _restored_keys(job: dict[str, Any]) -> list[str]:
@@ -38,8 +35,9 @@ def _restored_keys(job: dict[str, Any]) -> list[str]:
 
 
 def _warms_the_pinned_toolchain(job: dict[str, Any]) -> bool:
+    """A bare ``rustup toolchain install`` reads rust-toolchain.toml."""
     return any(
-        PINNED_CHANNEL in s.get("run", "")
+        re.search(r"rustup toolchain install\s*$", s.get("run", ""), re.MULTILINE)
         for s in job["steps"]
         if s.get("name") == "Install pinned Rust toolchain"
     )

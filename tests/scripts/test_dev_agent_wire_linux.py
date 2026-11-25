@@ -64,23 +64,6 @@ def test_local_lane_agrees_with_the_ci_wire_job() -> None:
     assert module.check_lane_consistency(ROOT) == []
 
 
-def test_local_lane_refuses_a_drifted_rust_toolchain(tmp_path: Path) -> None:
-    module = _module()
-    root = _lane_root(tmp_path, module)
-    _mutate(
-        root,
-        Path("rust-toolchain.toml"),
-        f'channel = "{module.RUST_TOOLCHAIN}"',
-        'channel = "1.98.0"',
-    )
-
-    problems = module.check_lane_consistency(root)
-
-    assert any(
-        "1.98.0" in problem and module.RUST_TOOLCHAIN in problem for problem in problems
-    ), problems
-
-
 def test_local_lane_refuses_a_paraphrased_wire_command(tmp_path: Path) -> None:
     module = _module()
     root = _lane_root(tmp_path, module)

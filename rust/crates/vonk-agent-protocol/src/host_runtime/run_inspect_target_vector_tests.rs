@@ -64,7 +64,7 @@ fn every_valid_shape_is_the_variant_its_name_says() {
 fn every_refused_shape_is_refused() {
     let vectors = vectors();
     let invalid = vectors["invalid"].as_array().unwrap();
-    assert!(!invalid.is_empty());
+    assert!(!invalid.is_empty(), "{invalid:?}");
     for vector in invalid {
         let name = vector["name"].as_str().unwrap();
         assert!(accepted(&vector["request"]).is_err(), "{name}");

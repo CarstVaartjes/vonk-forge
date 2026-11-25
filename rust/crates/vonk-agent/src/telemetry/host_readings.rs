@@ -182,8 +182,7 @@ pub fn read_fabric_devices(root: &Path) -> Option<Vec<FabricDeviceReading>> {
                 FabricDeviceReading {
                     name: device
                         .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
+                        .map_or_default(|name| name.to_string_lossy().into_owned()),
                     port: pci_function(&device),
                     active: read_bounded_text(&port.join("state"))
                         .is_some_and(|state| state.trim_start().starts_with("4:")),

@@ -95,7 +95,11 @@ fn expired_sudo_ticket_fails_before_the_frame_can_be_applied() {
     );
     assert_eq!(runner.commands.len(), 2);
     assert_eq!(runner.commands[1].args, ["-n", "-v"]);
-    assert!(runner.commands[1].stdin.is_empty());
+    assert!(
+        runner.commands[1].stdin.is_empty(),
+        "{:?}",
+        runner.commands[1].stdin
+    );
 }
 
 #[test]
@@ -264,7 +268,11 @@ fn pairing_recovery_prompts_once_before_sudo_and_uses_the_same_narrow_apply_path
     .unwrap();
 
     assert_eq!(prompt.secrets, 1);
-    assert!(prepare_runner.commands.is_empty());
+    assert!(
+        prepare_runner.commands.is_empty(),
+        "{:?}",
+        prepare_runner.commands
+    );
     let mut handoff_runner = RecordingRunner::default();
     handoff_to_root_with_authority(&prepared, &mut handoff_runner, &repository_root_authority())
         .unwrap();

@@ -379,7 +379,7 @@ impl ProcessRunner for Runner {
         {
             b"10.89.0.2\n".to_vec()
         } else if arguments.iter().any(|value| value == "inspect") {
-            inspect_fixture(arguments.last().map(String::as_str).unwrap_or_default())
+            inspect_fixture(arguments.last().map_or_default(String::as_str))
         } else {
             Vec::new()
         };

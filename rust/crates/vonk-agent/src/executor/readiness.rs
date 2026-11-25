@@ -4,16 +4,12 @@ use super::*;
 
 pub fn readiness_identity(spec: &CompiledExecutionPlan) -> (String, String) {
     let image_digest = spec.runtime_image.image_digest.clone();
-    let model_identity = spec
-        .artifacts
-        .first()
-        .map(|artifact| {
-            format!(
-                "{}/{}@{}",
-                artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256
-            )
-        })
-        .unwrap_or_default();
+    let model_identity = spec.artifacts.first().map_or_default(|artifact| {
+        format!(
+            "{}/{}@{}",
+            artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256
+        )
+    });
     (image_digest, model_identity)
 }
 

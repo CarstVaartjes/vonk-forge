@@ -1,6 +1,7 @@
 //! Installation.
 
-use super::{distribution::run_with_authority, *};
+use super::distribution::run_with_authority;
+use super::*;
 
 // Dropping an observer is not proof that a copy stopped. The owned worker
 // observes this signal at each bounded copy checkpoint and retains verified

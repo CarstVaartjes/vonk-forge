@@ -58,7 +58,7 @@ async fn skipped_malformed_run_does_not_hide_or_empty_valid_run_reports() {
         .unwrap(),
         0
     );
-    assert!(server.finish().is_empty());
+    assert!(server.finish().is_empty(), "unexpected content");
 }
 
 #[tokio::test]

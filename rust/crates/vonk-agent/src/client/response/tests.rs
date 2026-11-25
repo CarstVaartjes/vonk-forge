@@ -380,9 +380,7 @@ async fn body_limit_refusals_report_the_layer_without_guessing_from_empty_bodies
     ] {
         let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
         let address = listener.local_addr().unwrap();
-        let header = code
-            .map(|code| format!("X-Vonk-Error-Code: {code}\r\n"))
-            .unwrap_or_default();
+        let header = code.map_or_default(|code| format!("X-Vonk-Error-Code: {code}\r\n"));
         let peer = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             stream

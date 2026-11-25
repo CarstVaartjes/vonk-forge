@@ -26,7 +26,7 @@ fn privileged_frame_fails_closed_when_truncated_tampered_oversized_or_extended()
             CallerIdentity::sudo_root(1000),
         );
         assert!(result.is_err());
-        assert!(runner.commands.is_empty());
+        assert!(runner.commands.is_empty(), "{:?}", runner.commands);
         assert!(!install_paths.config.exists());
     }
 }
@@ -53,7 +53,7 @@ fn apply_frame_is_bound_to_the_authenticated_sudo_caller() {
             caller,
         );
         assert!(result.is_err());
-        assert!(runner.commands.is_empty());
+        assert!(runner.commands.is_empty(), "{:?}", runner.commands);
     }
 }
 
@@ -74,7 +74,7 @@ fn public_preparation_rejects_root_before_prompting_or_network_io() {
     );
 
     assert!(result.is_err());
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn apply_rejects_missing_ingress_bytes_before_effects() {
     );
 
     assert!(result.is_err());
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
     assert!(
         apply_setup_from(
             handoff_runner.commands[0].stdin.as_slice(),
@@ -169,7 +169,7 @@ fn package_mutation_after_preparation_is_rejected_before_root_commands() {
     );
 
     assert!(result.is_err());
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn root_rejects_a_setup_binary_changed_after_unprivileged_verification() {
     );
 
     assert!(result.is_err());
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 }
 
 #[test]
@@ -234,7 +234,7 @@ fn package_format_and_platform_are_verified_before_prompt_or_sudo() {
             _ => unreachable!(),
         };
         assert!(exact_error, "{case} must be rejected by its exact boundary");
-        assert!(runner.commands.is_empty());
+        assert!(runner.commands.is_empty(), "{:?}", runner.commands);
     }
 }
 
@@ -259,7 +259,7 @@ fn privileged_plan_rejects_unknown_fields_even_with_a_valid_frame_digest() {
     );
 
     assert!(result.is_err());
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 }
 
 #[test]
@@ -286,7 +286,7 @@ fn semantic_plan_validation_precedes_any_root_artifact_processing() {
     );
 
     assert!(matches!(result, Err(SetupError::PrivilegedInput)));
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 }
 
 #[test]
@@ -376,7 +376,7 @@ fn system_path_operations_cannot_use_a_synthetic_caller_identity() {
     );
 
     assert!(matches!(result, Err(SetupError::CallerPhase)));
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 }
 
 #[test]
@@ -422,7 +422,7 @@ fn symlinked_configuration_is_isolated_without_blocking_a_fresh_setup() {
     .unwrap();
 
     assert_eq!(prompt.secrets, 0);
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
     let mut handoff = RecordingRunner::default();
     handoff_to_root_with_authority(&prepared, &mut handoff, &repository_root_authority()).unwrap();
     let result = apply_setup_from(
@@ -434,7 +434,7 @@ fn symlinked_configuration_is_isolated_without_blocking_a_fresh_setup() {
         CallerIdentity::sudo_root(1000),
     );
     assert!(matches!(result, Err(SetupError::ObservationUnavailable(_))));
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
     assert_eq!(
         fs::read(real_directory.join("agent.toml")).unwrap(),
         original_config

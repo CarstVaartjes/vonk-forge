@@ -499,7 +499,7 @@ async fn a_refused_inspection_grant_of_a_retained_or_collective_start_waits() {
     ] {
         let (settled, asked, _, _) = settle_failed(Seen::Running, failed).await;
         assert!(waits(settled));
-        assert!(asked.is_empty());
+        assert!(asked.is_empty(), "{asked:?}");
     }
 }
 
@@ -534,7 +534,7 @@ fn process_exited() -> HostRuntimeError {
 async fn an_unread_inspection_of_a_retained_start_waits_and_stops_nothing() {
     let (settled, asked, _, _) = settle_failed(Seen::Running, Failed::Retained(lost_reply())).await;
     assert!(waits(settled));
-    assert!(asked.is_empty());
+    assert!(asked.is_empty(), "{asked:?}");
 }
 
 /// An unread inspection of a collective readiness phase is observed again,
@@ -544,7 +544,7 @@ async fn an_unread_inspection_of_a_collective_phase_is_observed_again() {
     let (settled, asked, _, _) =
         settle_failed(Seen::Running, Failed::Collective(lost_reply())).await;
     assert!(matches!(ended(settled), ExecutionResult::Unknown(_)));
-    assert!(asked.is_empty());
+    assert!(asked.is_empty(), "{asked:?}");
 }
 
 /// A definite answer ends a collective phase with the helper's typed code.
@@ -563,7 +563,7 @@ async fn a_definite_answer_ends_a_collective_phase_with_the_helpers_code() {
         failure.failure_kind,
         Some(AgentFailureKind::TemporaryDependency)
     );
-    assert!(asked.is_empty());
+    assert!(asked.is_empty(), "{asked:?}");
 }
 
 /// A retained start whose inspection found the process exited is reported as
@@ -583,7 +583,7 @@ async fn a_retained_start_whose_process_exited_is_reported_not_waited_on() {
         failure.failure_kind,
         Some(AgentFailureKind::TemporaryDependency)
     );
-    assert!(asked.is_empty());
+    assert!(asked.is_empty(), "{asked:?}");
 }
 
 /// The readiness guard and the evidence read before a stop name the start's
