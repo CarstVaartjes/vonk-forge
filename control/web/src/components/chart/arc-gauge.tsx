@@ -86,7 +86,9 @@ export function ArcGauge({
           </svg>
         )}
         <div className="arc-gauge-text">
-          <strong style={reading ? ({ "--chars": reading.length } as CSSProperties) : undefined}>
+          <strong
+            style={reading && scaled ? ({ "--chars": reading.length } as CSSProperties) : undefined}
+          >
             {reading ?? <NoReading />}
           </strong>
           <span>{title}</span>
