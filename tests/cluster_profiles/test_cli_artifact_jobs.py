@@ -24,7 +24,10 @@ from test_control_client_requests import (
     _token,
 )
 
-from cluster_profiles import cli, cli_artifact_jobs
+from cluster_profiles import cli
+from cluster_profiles.cli_artifact_jobs import client as artifact_client
+from cluster_profiles.cli_artifact_jobs import inputs as artifact_inputs
+from cluster_profiles.cli_artifact_jobs import outputs as artifact_outputs
 from cluster_profiles.control_client.errors import (
     ControlHTTPError,
     ControlNotFound,
@@ -53,21 +56,19 @@ _REAL_SLEEP = time.sleep
 def artifact_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """Exercise retry deadlines without sleeping against simulated transports."""
     now = [100.0]
-    monkeypatch.setattr(
-        cli_artifact_jobs,
-        "time",
-        SimpleNamespace(
-            monotonic=lambda: now[0],
-            sleep=lambda delay: now.__setitem__(0, now[0] + delay),
-        ),
+    clock = SimpleNamespace(
+        monotonic=lambda: now[0],
+        sleep=lambda delay: now.__setitem__(0, now[0] + delay),
     )
+    monkeypatch.setattr(artifact_client, "time", clock)
+    monkeypatch.setattr(artifact_outputs, "time", clock)
     return now
 
 
 def test_artifact_retry_clock_preserves_infrastructure_time(artifact_clock) -> None:
     """Catches a virtual retry clock leaking into subprocess and pytest workers."""
-    cli_artifact_jobs.time.sleep(1.0)
-    assert cli_artifact_jobs.time.monotonic() == artifact_clock[0] == 101.0
+    artifact_client.time.sleep(1.0)
+    assert artifact_client.time.monotonic() == artifact_clock[0] == 101.0
     assert time.monotonic is _REAL_MONOTONIC
     assert time.sleep is _REAL_SLEEP
 
@@ -137,7 +138,7 @@ def test_create_canonicalizes_moss_output_media_without_mutating_binding() -> No
         "output_limits": limits,
         "timeout_seconds": 1,
     }
-    body = cli_artifact_jobs._canonical_create(create, [], _capabilities())
+    body = artifact_inputs._canonical_create(create, [], _capabilities())
     expected = {
         **limits,
         "allowed_media_types": ["application/x-ndjson", "video/mp4"],
@@ -153,7 +154,7 @@ def test_create_canonicalizes_moss_output_media_without_mutating_binding() -> No
 @pytest.mark.parametrize("media", ["Video/MP4", "video/mp4; codecs=h264"])
 def test_create_rejects_invalid_media_spelling_before_sending(media: str) -> None:
     with pytest.raises(ValueError):
-        cli_artifact_jobs._canonical_create(
+        artifact_inputs._canonical_create(
             {
                 "interface": "artifact-job",
                 "parameters": {},
