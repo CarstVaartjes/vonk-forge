@@ -45,6 +45,7 @@ _URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
 _BINDING_NAME = re.compile(BINDING_NAME_PATTERN)
 _ALIAS = TypeAdapter(EndpointAlias)
 _ORIGIN = TypeAdapter(Origin)
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
 
 #: LiteLLM's own reserved model names: a key's ``models`` list gives them meaning.
 RESERVED_ALIASES: Final = frozenset(
@@ -73,7 +74,11 @@ _PROXY_WIDE: Final = frozenset(
 )
 _CLIENT_SIDE: Final = frozenset({"configurable_clientside_auth_params"})
 #: The Controller owns retries and fallbacks: the router never retries across deployments.
-_CONTROLLER_PARAMS: Final = frozenset({"num_retries", "max_retries"})
+#: ``custom_llm_provider`` overrides the ``model`` prefix, so a bound secret could
+#: reach a provider no binding approved.
+_CONTROLLER_PARAMS: Final = frozenset(
+    {"num_retries", "max_retries", "custom_llm_provider"}
+)
 _INSECURE_TLS: Final = frozenset({"ssl_verify"})
 #: Fields that carry a credential: only a reference to an approved binding is accepted.
 _SECRET_PARAMS: Final = frozenset(
@@ -339,6 +344,8 @@ def _origins(
 
     origins: dict[str, str] = {}
     for key in sorted(params):
+        if key in _SECRET_PARAMS:
+            continue  # a secret-typed field is judged as a reference, never echoed
         for path, text in _strings(params[key], f"{_PARAMS}.{key}"):
             if _URL.match(text) is None:
                 if key in _ENDPOINT_PARAMS:
@@ -363,6 +370,8 @@ def _origin(text: str) -> str | ExternalEntryCode:
         return ExternalEntryCode.TYPE_MISMATCH
     if parts.scheme != "https" or not host:
         return ExternalEntryCode.INSECURE_DESTINATION
+    if host.endswith(".") or _numeric_shorthand(host):
+        return ExternalEntryCode.PRIVATE_ADDRESS
     if parts.username is not None or parts.password is not None:
         return ExternalEntryCode.LITERAL_SECRET
     origin = (
@@ -390,19 +399,42 @@ def _private_approved(
     )
 
 
+def _numeric_shorthand(host: str) -> bool:
+    """A host a resolver reads as an IPv4 address though it is not dotted-quad.
+
+    The WHATWG "ends in a number" rule: ``127.1``, ``2130706433``, ``0x7f000001``
+    and ``0177.0.0.1`` all end in a digit-only or ``0x`` label.  A real address
+    is judged by :func:`_private_host`.
+    """
+
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        last = host.rsplit(".", 1)[-1]
+        return last.isdigit() or last.lower().startswith("0x")
+    return False
+
+
 def _private_host(host: str) -> bool:
-    """Whether the host is ``localhost`` or an IP literal outside the public ranges.
+    """Whether the host is ``localhost``, a dotless name or a non-public IP literal.
 
     Loopback, link-local and metadata, private, CGNAT, multicast and reserved
-    addresses are all "not global"; admission does no DNS lookup.
+    addresses are all "not global", and so is the IPv4 embedded in an
+    IPv4-compatible (``::a.b.c.d``) or NAT64 (``64:ff9b::/96``) address.  A
+    dotless name is a Docker service or a LAN host.  Admission does no DNS lookup.
     """
 
     if host == "localhost" or host.endswith(".localhost"):
         return True
     try:
-        return not ipaddress.ip_address(host).is_global
+        address = ipaddress.ip_address(host)
     except ValueError:
-        return False
+        return "." not in host
+    if isinstance(address, ipaddress.IPv6Address) and (
+        address.packed[:12] == bytes(12) or address in _NAT64
+    ):
+        return not ipaddress.IPv4Address(address.packed[12:]).is_global
+    return not address.is_global
 
 
 def _binding_references(

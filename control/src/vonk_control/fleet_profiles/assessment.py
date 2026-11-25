@@ -75,6 +75,7 @@ from vonk_control.fleet_profiles.projection_support import (
     _review_effects_digest,
 )
 from vonk_control.fleet_profiles.read_observation import profile_read
+from vonk_control.gateway.alias_namespace import require_alias_not_external
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode, FleetProfile, FleetProfileApplication
@@ -718,6 +719,11 @@ class FleetProfileService:
             )
             ordered_assessments = sorted(
                 assignment_assessments, key=lambda item: item.assignment_id
+            )
+            # A name an external model serves is shown as refused, not previewed.
+            require_alias_not_external(
+                session,
+                {item.alias for item in resolved_assignments if item.alias},
             )
             decision = FleetProfileReviewedDecision(
                 profile_id=profile_id,

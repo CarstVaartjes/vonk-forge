@@ -220,6 +220,11 @@ REFUSALS = {
         "litellm_params.api_base",
         ExternalEntryCode.TYPE_MISMATCH,
     ),
+    "provider override": (
+        _openai(custom_llm_provider="ollama"),
+        "litellm_params.custom_llm_provider",
+        ExternalEntryCode.CONTROLLER_OWNED_FIELD,
+    ),
     "unknown provider": (
         _openai(model="nowhere/x"),
         "litellm_params.model",
@@ -256,6 +261,37 @@ def test_an_approved_private_origin_is_accepted_only_with_its_binding() -> None:
     unbound = _validate(_openai(api_base="https://10.1.2.3/v1", api_key=""))
     assert isinstance(unbound, list)
     assert [item.code for item in unbound] == [ExternalEntryCode.PRIVATE_ADDRESS]
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.1",
+        "2130706433",
+        "0x7f000001",
+        "0x7f.1",
+        "0177.0.0.1",
+        "017700000001",
+        "0",
+        "api.partner.example.",
+        "ollama",
+        "[::127.0.0.1]",
+        "[64:ff9b::7f00:1]",
+    ],
+)
+def test_a_host_a_resolver_reads_as_a_private_address_is_refused(host: str) -> None:
+    # Break caught: only dotted-quad literals were judged, so shorthand and
+    # embedded forms reached loopback with the binding's secret.
+    problems = _validate(_openai(api_base=f"https://{host}/v1"))
+    assert isinstance(problems, list)
+    assert ExternalEntryCode.PRIVATE_ADDRESS in {item.code for item in problems}
+
+
+def test_a_secret_field_never_echoes_into_a_problem() -> None:
+    problems = _validate(_openai(api_key="https://user@10.0.0.1/x"))
+    assert isinstance(problems, list)
+    assert SECRET not in json.dumps([item.model_dump(mode="json") for item in problems])
+    assert all(item.observed is None for item in problems)
 
 
 def test_an_alias_another_owner_serves_is_refused() -> None:

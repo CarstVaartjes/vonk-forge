@@ -89,10 +89,6 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "An external row reads back and owns its name; run creation and rename_run are refused a name an external model owns; a local run owns its name against an external claim.",
     ),
     (
-        "control/tests/test_gateway_alias_namespace_postgres.py",
-        "Real PostgreSQL: an external claim and a local admission on one name leave one owner; the loser is busy, then refused.",
-    ),
-    (
         "control/tests/test_identity_creation_postgres.py",
         "Concurrent PostgreSQL insert, replay and row-lock fault injection at content and request boundaries.",
     ),

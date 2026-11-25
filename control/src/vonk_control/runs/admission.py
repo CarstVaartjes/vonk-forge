@@ -51,10 +51,7 @@ from vonk_control.fleet_profiles.capacity import (
     sibling_profile_ports,
 )
 from vonk_control.fleet_profiles.port_promises import port_binds
-from vonk_control.gateway.alias_namespace import (
-    lock_alias_namespace,
-    require_alias_not_external,
-)
+from vonk_control.gateway.alias_namespace import require_alias_not_external
 from vonk_control.gpu.health import gpu_health_reason
 from vonk_control.install_admission.contracts import AdmissionReason, reason_documents
 from vonk_control.inventory.repository import (
@@ -1041,7 +1038,6 @@ class RunAdmissionService:
         workload_intent_ordinal: int | None = None,
     ) -> str:
         node_ids = tuple(node.node_id for node in plan.nodes)
-        lock_alias_namespace(session)
         require_alias_not_external(session, (plan.alias,))
         lock_admission_rows(
             session,

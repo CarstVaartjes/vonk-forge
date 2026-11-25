@@ -1,9 +1,10 @@
 """One namespace for the model names clients call: local runs and external models.
 
 A name decides where a client's data goes, so two owners must never serve it.
-Taking an alias is one decision under one lock: the owner takes the namespace
-row (:func:`lock_alias_namespace`, first in the admission lock order), asks who
-serves the name now (:func:`alias_owner`) and writes in the same transaction.
+Nothing locks: an owner reads who serves the name (:func:`alias_owner`) and
+writes; a race is settled by the unique alias of the external row and by the
+renderer, which leaves out an external entry whose alias a local route serves
+(the local route wins until the external owner is refused again).
 
 Local owners replace each other by design (the newest accepted request for a
 name owns it), so a local producer is refused only by an external owner
@@ -18,24 +19,19 @@ from collections.abc import Collection
 from enum import StrEnum
 
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-from vonk_control.admission_locking import AdmissionRowLock, lock_admission_rows
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
 from vonk_control.gateway.external_contract import ExternalEntryCode
 from vonk_control.models.execution import ACTIVE_RUN_STATES, RecipeRun
 from vonk_control.models.fleet import FleetProfileApplication, FleetProfileSelection
-from vonk_control.models.gateway import GatewayAliasNamespace, GatewayExternalDeployment
+from vonk_control.models.gateway import GatewayExternalDeployment
 from vonk_control.stored.rows import read_row_column
-
-_SINGLETON = 1
 
 
 class AliasOwner(StrEnum):
@@ -59,38 +55,6 @@ class AliasTaken(InvalidRequestError):
         self.owner = owner
 
 
-def lock_alias_namespace(session: Session) -> None:
-    """Take the namespace row for this transaction (create it once, never skip it).
-
-    The lock is the first of the admission order and never waits: a refusal is
-    :class:`~vonk_control.admission_locking.AdmissionLockBusy`, retried by the
-    owning admission.
-    """
-
-    dialect_insert = (
-        sqlite_insert if session.get_bind().dialect.name == "sqlite" else pg_insert
-    )
-    session.execute(
-        dialect_insert(GatewayAliasNamespace)
-        .values(singleton_id=_SINGLETON)
-        .on_conflict_do_nothing(index_elements=[GatewayAliasNamespace.singleton_id])
-    )
-    locked = lock_admission_rows(
-        session,
-        (
-            AdmissionRowLock(
-                "alias-namespace",
-                GatewayAliasNamespace,
-                select(GatewayAliasNamespace).where(
-                    GatewayAliasNamespace.singleton_id == _SINGLETON
-                ),
-            ),
-        ),
-    )
-    if not locked["alias-namespace"]:  # a lock on no row would silently lock nothing
-        raise RuntimeError("the alias namespace row is missing")
-
-
 def alias_owner(session: Session, alias: str) -> AliasOwner | None:
     """Who serves ``alias`` now: an external row, an active run or the selected profile."""
 
@@ -109,9 +73,8 @@ def require_alias_not_external(session: Session, aliases: Collection[str]) -> No
 
 
 def claim_external_alias(session: Session, alias: str) -> None:
-    """Under the namespace lock, refuse an external model whose name is served."""
+    """Refuse an external model whose name another owner serves."""
 
-    lock_alias_namespace(session)
     owner = alias_owner(session, alias)
     if owner is not None:
         raise AliasTaken(alias, owner)

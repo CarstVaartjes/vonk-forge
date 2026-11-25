@@ -99,9 +99,9 @@ schema reconciliation drops every table in the Controller's `public` schema that
 [Fleet words, vonkctl tests and schema reconciliation](docs/agent-rules.md#fleet-words-vonkctl-tests-and-schema-reconciliation).
 
 Model names clients call are one namespace shared by local runs and external
-models (`gateway/alias_namespace.py`). A producer of a name takes
-`lock_alias_namespace` first of all row locks, asks `alias_owner` and writes in
-the same transaction; a local producer is refused only by an external owner. An
+models (`gateway/alias_namespace.py`). Nothing locks: a producer of a name reads
+`alias_owner` and writes; a local producer is refused only by an external owner,
+and a race is settled by the unique alias and the renderer (a local route wins). An
 external entry is admitted only by `validate_external_entry` against the pinned
 LiteLLM surface (`deploy/compose/litellm/surface.json`, regenerated with every
 LiteLLM bump, see [image pin refresh](docs/image-pin-refresh.md)); a credential is

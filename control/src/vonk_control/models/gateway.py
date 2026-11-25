@@ -1,4 +1,4 @@
-"""Models: gateway external models, their credential bindings and the alias namespace."""
+"""Models: gateway external models, and their credential bindings."""
 
 from __future__ import annotations
 
@@ -119,19 +119,3 @@ class GatewayCredentialBinding(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-
-
-class GatewayAliasNamespace(Base):
-    """The one row every alias decision locks, so two owners cannot take one name.
-
-    An alias decides where a client's data goes; the lock turns "check, then
-    write" into one decision across the profile, run and external owners.
-    """
-
-    __tablename__ = "gateway_alias_namespace"
-    __table_args__ = (
-        CheckConstraint(
-            "singleton_id = 1", name="ck_gateway_alias_namespace_singleton"
-        ),
-    )
-    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)

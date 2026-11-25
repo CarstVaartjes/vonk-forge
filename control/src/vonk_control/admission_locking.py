@@ -28,7 +28,6 @@ from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
 _BUSY_SQLSTATES = frozenset({"55P03", "40P01", "40001", "57014"})
 _ROW_LOCK_ORDER = (
-    "gateway_alias_namespace",
     "fleet_profiles",
     "agent_nodes",
     "catalog_document_revisions",
@@ -52,7 +51,7 @@ _ROW_LOCK_RANK = {table: rank for rank, table in enumerate(_ROW_LOCK_ORDER)}
 # updater but never the KEY SHARE a child row's foreign-key check takes (a
 # child insert, or a child row written twice in one transaction), so contact,
 # result, snapshot and telemetry writes cannot refuse admission.
-_KEY_STABLE_TABLES = frozenset({"agent_nodes", "gateway_alias_namespace"})
+_KEY_STABLE_TABLES = frozenset({"agent_nodes"})
 
 
 class AdmissionLockBusy(UnknownOutcomeError, RuntimeError):

@@ -52,7 +52,7 @@ class FleetProfileService:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         # A name an external model serves is not for a profile to claim; apply
-        # decides under the namespace lock, this refuses the draft early.
+        # also refuses it; this refuses the draft early.
         require_alias_not_external(
             session,
             {item.assignment_name for item in values if item.assignment_name},
