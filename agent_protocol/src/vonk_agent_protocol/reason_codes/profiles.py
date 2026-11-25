@@ -100,6 +100,12 @@ class ProjectionCode(WireEnum):
     INVENTORY_STALE = "inventory.stale"
     #: One RDMA device of a cabled port stays flat while its sibling carries traffic.
     NETWORK_RAILS_UNDERUSED = "network.rails-underused"
+    #: The Spark declares a fabric address, yet no RDMA port is ACTIVE.
+    NETWORK_FABRIC_DOWN = "network.fabric-down"
+    #: An ACTIVE RDMA port negotiated a lower rate than the declared fabric bandwidth.
+    NETWORK_FABRIC_RATE_LOW = "network.fabric-rate-low"
+    #: An RDMA device counted link or transport errors in the last window.
+    NETWORK_FABRIC_ERRORS = "network.fabric-errors"
     NETWORK_NAS_ROUTE_WIFI_NO_WIRED_PORT = "network.nas-route-wifi-no-wired-port"
     NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_DOWN = "network.nas-route-wifi-wired-port-down"
     NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_UNUSED = (

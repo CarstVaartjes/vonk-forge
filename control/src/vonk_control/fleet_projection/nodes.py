@@ -39,6 +39,10 @@ from vonk_control.fleet_projection.common import (
     telemetry_point,
 )
 from vonk_control.fleet_projection.display_memory import display_memory_advice
+from vonk_control.fleet_projection.fabric_health import (
+    fabric_down_warning,
+    fabric_health_warnings,
+)
 from vonk_control.fleet_projection.fabric_rails import fabric_rails_warning
 from vonk_control.fleet_projection.host_checks import host_checks, host_checks_note
 from vonk_control.fleet_projection.memory_fragmentation import (
@@ -197,6 +201,7 @@ def _node(
     warnings.extend(
         _host_settings_warnings(
             None if inventory_state is None else inventory_state.host_settings,
+            None if inventory_state is None else inventory_state.fabric_bandwidth_mbps,
         )
     )
     swap_warning = _swap_warning(
@@ -234,6 +239,12 @@ def _node(
             )
         )
     if telemetry_state is not None and telemetry_state.freshness != "stale":
+        fabric_down = fabric_down_warning(
+            None if inventory_state is None else inventory_state.fabric_address,
+            telemetry_state.sample,
+        )
+        if fabric_down is not None:
+            warnings.append(fabric_down)
         low_clock = sustained_low_cpu_clock(recent_telemetry)
         if low_clock is not None:
             warnings.append(
@@ -493,7 +504,9 @@ def _swap_warning(
     )
 
 
-def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]:
+def _host_settings_warnings(
+    host: HostSettings | None, fabric_bandwidth_mbps: int | None
+) -> list[ProjectionReason]:
     """Drift from the declared headless Spark; unknown (an older agent) is none."""
     warnings: list[ProjectionReason] = []
     if host is not None and (failure := host.store_retention_failure) is not None:
@@ -536,6 +549,8 @@ def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]
         warnings.append(fragmented)
     if host is not None and (rails := fabric_rails_warning(host)):
         warnings.append(rails)
+    if host is not None:
+        warnings.extend(fabric_health_warnings(host, fabric_bandwidth_mbps))
     return warnings
 
 
