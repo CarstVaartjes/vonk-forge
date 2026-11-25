@@ -649,6 +649,14 @@ jobs:
           tests/acceptance/litellm_model_info_proof.py
           --image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
           --work "$RUNNER_TEMP/model-info-proof"
+      - name: Check the LiteLLM surface against the pinned image
+        run: |
+          set -euo pipefail
+          image=$(python3 -c 'import json; print(json.load(open("deploy/compose/images.lock.json"))["build_bases"]["litellm"])')
+          docker run --rm -i -e "VONK_LITELLM_IMAGE_DIGEST=${image##*@}" \
+            --entrypoint python "$image" - < tools/litellm_surface.py \
+            > "$RUNNER_TEMP/litellm-surface.json"
+          diff -u deploy/compose/litellm/surface.json "$RUNNER_TEMP/litellm-surface.json"
       - name: Render the installer payload and the local image overlay
         run: |
           set -euo pipefail
