@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, cast
+from typing import Annotated
 
 from pydantic import (
     BaseModel,
@@ -79,7 +79,8 @@ class RecoveredAvailabilityPayload(AvailabilityJobPayload):
     def observation_or_none(cls, value: object, info: ValidationInfo) -> object:
         assert info.field_name is not None
         field = AvailabilityJobPayload.model_fields[info.field_name]
-        adapter = TypeAdapter(cast(Any, field.annotation))
+        assert field.annotation is not None
+        adapter = TypeAdapter(field.annotation)
         try:
             return read_stored_document(
                 lambda document: adapter.validate_json(
