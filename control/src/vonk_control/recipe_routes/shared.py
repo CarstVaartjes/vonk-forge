@@ -9,7 +9,7 @@ import threading
 import uuid
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from pydantic import TypeAdapter
@@ -29,6 +29,7 @@ from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_control.admission_locking import ConstraintReplay, admitting
 from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
 from vonk_control.failures.classification import disposition
+from vonk_control.gateway.external_publication import ExternalPlan
 from vonk_control.gateway.litellm import LiteLlmGeneration, LiteLlmPolicy, RouteState
 from vonk_control.gateway.route_bundle_contract import RouteEndpointDocument
 from vonk_control.models.jobs import Job
@@ -197,6 +198,8 @@ class _RecipeCandidate:
     included: frozenset[str]
     policy: LiteLlmPolicy
     endpoints: dict[str, _RecipeEndpoint]
+    #: The external models the generation serves beside the local routes.
+    externals: ExternalPlan = field(default_factory=ExternalPlan)
 
 
 @dataclass(frozen=True)
@@ -241,6 +244,9 @@ class _Publication:
     # A recovering run's failure is committed on the run; it must not stop the
     # maintenance pass that found it from being reported as progress.
     contained: bool = False
+    # The failure hook settles what blamed the generation (it blocked the entries it
+    # introduced): repeating the same effect would only wait out the same timeout.
+    settles_failure: bool = False
 
 
 def route_publication_owner_lock_statement():

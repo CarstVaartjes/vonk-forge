@@ -83,7 +83,9 @@ class AtomicRecipeRoutePublisher:
         """Activate the candidate's routes; a withdrawal requires only ``drained``."""
         return self._activate(
             candidate.state.digest,
-            render_config(candidate.state, candidate.policy),
+            render_config(
+                candidate.state, candidate.policy, candidate.externals.entries
+            ),
             endpoints=candidate.endpoints,
             state=GatewayRouteState.PUBLISHED,
             required=required,

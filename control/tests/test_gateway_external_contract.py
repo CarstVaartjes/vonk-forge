@@ -333,3 +333,48 @@ def test_an_external_entry_renders_beside_local_routes_and_round_trips() -> None
     assert served["model_info"]["vonk_origin"] == "external"
     parsed = LiteLlmConfig.model_validate(document)
     assert parsed.model_list == [entry]
+
+
+@pytest.mark.parametrize(
+    "provider",
+    ["ollama", "ollama_chat", "lm_studio", "llamafile", "xinference", "hosted_vllm"],
+)
+def test_a_provider_with_a_local_default_base_needs_its_own_https_base(
+    provider: str,
+) -> None:
+    # Break caught: such a provider sends to its built-in ``http://localhost``
+    # default when ``api_base`` is absent, past the https-only rule.
+    bare = ExternalModelInput(
+        model_name="local-ish", litellm_params={"model": f"{provider}/llama3"}
+    )
+    problems = _validate(bare)
+    assert isinstance(problems, list)
+    assert (
+        "litellm_params.api_base",
+        ExternalEntryCode.INSECURE_DESTINATION,
+    ) in {(item.path, item.code) for item in problems}
+    named = ExternalModelInput(
+        model_name="local-ish",
+        litellm_params={"model": f"{provider}/llama3", "api_base": f"{PARTNER}/v1"},
+    )
+    assert isinstance(_validate(named), ExternalDeploymentSpec)
+
+
+def test_the_default_https_port_is_one_origin_in_an_entry_and_a_binding() -> None:
+    # Break caught: ``https://host:443`` and ``https://host`` were two origins, so
+    # a binding approving one refused the other.
+    on_port = _validate(_openai(api_base=f"{PARTNER}:443/v1"))
+    assert isinstance(on_port, ExternalDeploymentSpec)
+    assert on_port.destination.origins == [PARTNER]
+    binding = CredentialBinding(
+        name="PARTNER",
+        revision=1,
+        destinations=[ApprovedDestination(origin=f"{PARTNER}:443")],
+    )
+    assert binding.destinations[0].origin == PARTNER
+    assert (
+        validate_external_entry(
+            _openai(), _surface(), {"PARTNER": binding}, taken_aliases=()
+        ).__class__
+        is ExternalDeploymentSpec
+    )

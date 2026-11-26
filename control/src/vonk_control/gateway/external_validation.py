@@ -21,11 +21,13 @@ from jsonschema import Draft202012Validator
 from pydantic import JsonValue, TypeAdapter
 from vonk_forge_contracts import EndpointAlias
 
+from vonk_agent_protocol.state_machines import ExternalBlockReason
 from vonk_control.gateway.external_contract import (
     BINDING_NAME_PATTERN,
     CREDENTIAL_ENV_PREFIX,
     PROVIDER_ORIGIN_PREFIX,
     CredentialBinding,
+    DefaultBaseProvider,
     ExternalDeploymentSpec,
     ExternalDestination,
     ExternalEntryCode,
@@ -80,6 +82,12 @@ _CONTROLLER_PARAMS: Final = frozenset(
     {"num_retries", "max_retries", "custom_llm_provider"}
 )
 _INSECURE_TLS: Final = frozenset({"ssl_verify"})
+#: Providers whose adapter has a plain-``http`` or local default ``api_base`` (or none
+#: at all), found in LiteLLM v1.106.7 by searching ``llms/`` and ``main.py`` for
+#: ``http://`` defaults and ``*_API_BASE`` fallbacks.  Without an explicit ``api_base``
+#: the adapter would send a request to that default, past the ``https``-only rule, so
+#: the entry must name its own (which is then judged as every other endpoint is).
+_DEFAULT_BASE_PROVIDERS: Final = frozenset(item.value for item in DefaultBaseProvider)
 #: Fields that carry a credential: only a reference to an approved binding is accepted.
 _SECRET_PARAMS: Final = frozenset(
     {
@@ -162,6 +170,10 @@ def validate_external_entry(
         None,
     )
     provider = str(params.get("model", "")).partition("/")[0]
+    if provider in _DEFAULT_BASE_PROVIDERS and "api_base" not in params:
+        _problem(
+            f"{_PARAMS}.api_base", ExternalEntryCode.INSECURE_DESTINATION, problems
+        )
     origins = sorted(found) or [PROVIDER_ORIGIN_PREFIX + provider]
     approving = [bindings.get(name) for name in sorted(references)]
     for name, binding in zip(sorted(references), approving, strict=True):
@@ -177,6 +189,34 @@ def validate_external_entry(
         model_info=info,
         destination=ExternalDestination(origins=origins, region=region),
         credential_bindings=sorted(references),
+    )
+
+
+def destination_block(
+    spec: ExternalDeploymentSpec, bindings: Mapping[str, CredentialBinding]
+) -> ExternalBlockReason | None:
+    """Why the bindings an accepted spec references no longer let it publish, or ``None``.
+
+    The same destination rule as admission, read from the spec alone (it needs no
+    surface), so a worker can re-judge a stored spec after a binding changed.
+    """
+
+    approving = [bindings.get(name) for name in sorted(spec.credential_bindings)]
+    if any(binding is None for binding in approving):
+        return ExternalBlockReason.BINDING_MISSING
+    destination = spec.destination
+    problems: list[ExternalEntryProblem] = []
+    for binding in approving:
+        _check_binding(
+            binding, _PARAMS, destination.origins, destination.region, {}, problems
+        )
+    unapproved = any(
+        _private_origin(origin) and not _private_approved(origin, approving)
+        for origin in destination.origins
+        if not origin.startswith(PROVIDER_ORIGIN_PREFIX)
+    )
+    return (
+        ExternalBlockReason.DESTINATION_NOT_APPROVED if problems or unapproved else None
     )
 
 

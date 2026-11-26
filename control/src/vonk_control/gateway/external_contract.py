@@ -12,10 +12,11 @@ stays in the NAS custody directory.
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, JsonValue, StringConstraints
+from pydantic import BeforeValidator, ConfigDict, Field, JsonValue, StringConstraints
 from vonk_forge_contracts import EndpointAlias
 
 from vonk_control.stored.json_values import ExternalPassthrough
@@ -31,10 +32,27 @@ BindingName = Annotated[str, StringConstraints(pattern=f"^{BINDING_NAME_PATTERN}
 #: The origin of a provider-native destination that names no URL.
 PROVIDER_ORIGIN_PREFIX = "provider:"
 
+_DEFAULT_HTTPS_PORT = re.compile(r"^(https://(?:\[[0-9a-f:.]+\]|[a-z0-9.\-]+)):443$")
+
+
+def normalise_origin(value: object) -> object:
+    """The one spelling of an origin: the default ``https`` port is left off.
+
+    ``https://host`` and ``https://host:443`` name one origin.  Entries and
+    bindings both read their origins through this function, so a binding that
+    approves one spelling approves the other.
+    """
+
+    if isinstance(value, str) and (match := _DEFAULT_HTTPS_PORT.fullmatch(value)):
+        return match.group(1)
+    return value
+
+
 #: ``https://host[:port]`` for a network destination, ``provider:<name>`` for a
 #: provider-native one that names no URL.
 Origin = Annotated[
     str,
+    BeforeValidator(normalise_origin),
     StringConstraints(
         pattern=r"^(https://[a-z0-9.\-\[\]:]{1,253}|"
         + PROVIDER_ORIGIN_PREFIX
@@ -60,6 +78,28 @@ class RouteOrigin(StrEnum):
 
     LOCAL = "local"
     EXTERNAL = "external"
+
+
+class DefaultBaseProvider(StrEnum):
+    """LiteLLM providers whose adapter falls back to a plain-``http`` or local ``api_base``."""
+
+    A2A = "a2a"
+    A2A_AGENT = "a2a_agent"
+    CUSTOM = "custom"
+    CUSTOM_OPENAI = "custom_openai"
+    DOCKER_MODEL_RUNNER = "docker_model_runner"
+    HOSTED_VLLM = "hosted_vllm"
+    LANGFLOW = "langflow"
+    LANGGRAPH = "langgraph"
+    LEMONADE = "lemonade"
+    LLAMAFILE = "llamafile"
+    LM_STUDIO = "lm_studio"
+    OLLAMA = "ollama"
+    OLLAMA_CHAT = "ollama_chat"
+    OPENAI_LIKE = "openai_like"
+    RAGFLOW = "ragflow"
+    VLLM = "vllm"
+    XINFERENCE = "xinference"
 
 
 class ExternalEntryCode(StrEnum):

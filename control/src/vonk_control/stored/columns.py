@@ -388,6 +388,7 @@ for _table in (
     "recipe_library_sync_runs",
     "agent_certificates",
     "agent_issued_certificate_revocations",
+    "gateway_external_deployments",
 ):
     bind(_table, "wait_evidence", WaitEvidence, nullable=True)
 
