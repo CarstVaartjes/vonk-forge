@@ -672,8 +672,11 @@ def _cpu_clock_codes(
     return [w.code for w in node.warnings], [w.detail for w in node.warnings]
 
 
-def _oom_codes(*readings: tuple[int, str, int]) -> list[str]:
-    """Feed one node (age in minutes, boot, oom_kills) samples; return its warning codes."""
+def _oom_codes(*readings: tuple[int, str, int], skew_minutes: int = 0) -> list[str]:
+    """Feed one node (age in minutes, boot, oom_kills) samples; return its warning codes.
+
+    The agent clock runs ``skew_minutes`` behind: received_at is that much later.
+    """
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -706,6 +709,7 @@ def _oom_codes(*readings: tuple[int, str, int]) -> list[str]:
                 boot_id=f"00000000-0000-4000-8000-0000000000{boot}",
             )
             sample.oom_kills = kills
+            sample.received_at += timedelta(minutes=skew_minutes)
             session.add(sample)
             latest = sample
         session.flush()
@@ -721,6 +725,9 @@ def test_oom_kill_is_advised_only_for_a_rise_within_the_hour() -> None:
     assert "host.oom-kill" in _oom_codes((50, "a1", 0), (20, "a1", 1), (0, "a1", 1))
     assert "host.oom-kill" not in _oom_codes((90, "a1", 0), (70, "a1", 1), (0, "a1", 1))
     assert "host.oom-kill" not in _oom_codes((40, "a1", 5), (0, "b2", 0))
+    # The window is the Controller's receive time, not the agent's clock.
+    skewed = ((90, "a1", 0), (70, "a1", 1), (0, "a1", 1))
+    assert "host.oom-kill" in _oom_codes(*skewed, skew_minutes=60)
 
 
 def test_low_cpu_clock_is_raised_only_when_sustained_and_hot_or_loaded() -> None:
