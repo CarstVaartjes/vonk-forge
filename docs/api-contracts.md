@@ -38,6 +38,18 @@ An unavailable owner returns a typed retryable response; an unchanged target
 without the requested acceptance cannot return success. Profile saves replay
 an identical committed definition without increasing its revision.
 
+External models and their credential bindings are administrator-only routes under
+`/api/gateway/models` and `/api/gateway/credentials`. A change is previewed (the
+review names the destination and what changed from it, the bindings, the effects
+and the 30 second grace for in-flight streams, and carries an `effect_digest`),
+then accepted with exactly that digest, the `request_id` and the revision the
+operator read; a changed digest or revision is refused (409) and the same
+`request_id` returns the original acceptance. `validate` sends no traffic and returns
+every problem with its field path. No document carries a secret: a binding is a
+name, its review reports only whether the supervisor loaded a value
+(`credential_loaded`), and a deployment's `reason` is the typed `ExternalBlockReason`.
+The acceptance receipts are `gateway-model` and `gateway-credential`.
+
 Mounted operator mutations declare their semantic `ReceiptPolicy`. The guard
 also enumerates both browser-auth configurations and rejects new unclassified
 mutations. Previews declare observation semantics. Agent and authentication

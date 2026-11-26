@@ -861,7 +861,7 @@ An external model is one LiteLLM `model_list` entry that points at a provider
 outside the fleet. Local routes are unchanged: a bundle without external entries
 renders the same bytes as before, so shipping this contract restarts no gateway.
 The tables `gateway_external_deployments` (the operator's desired and the
-applied spec and the publication state; its wait columns arrive with the publisher that redrives them), `gateway_credential_bindings`
+applied spec, the publication state, its typed reason and its wait), `gateway_credential_bindings`
 (a binding name and the destinations its secret may reach; never a secret) are additive and are reconciled from the
 models at startup.
 
@@ -885,10 +885,42 @@ models at startup.
   name); an external owner is never replaced, and an external model is refused a
   name another owner serves (`alias_taken`). The renderer leaves out an
   external entry whose alias a local route serves, so the local route wins.
-- **Publication.** The external publication states are `ExternalPublicationState`;
-  the publisher and the credential custody follow in later changes. Every
-  gateway generation restarts LiteLLM, so adding, changing or removing an
-  external model cuts in-flight streams after at most 30 seconds.
+- **Publication.** `ExternalPublicationState` (pending, published, blocked,
+  withdrawing, withdrawn) has its edges and its one transition function in
+  `gateway/external_states.py`; a stored word the machine never had re-plans from
+  the operator's intent (`enabled`, `removal_requested`) instead of blocking, and
+  the reason a deployment is not serving is the typed `ExternalBlockReason`. The
+  route service builds every generation from SQL: `plan_externals`
+  (`gateway/external_publication.py`) moves each deployment along its edges and
+  returns the entries to render, and the same candidate carries them through the
+  run publication, the withdrawal and the maintenance pass (the API tick and the
+  worker's `external-model` due-wait both run `maintain`). Only the maintenance
+  pass adds or changes an entry, so a failing external entry can never fail a
+  local route's own publication. The entries' identity is part of the candidate
+  digest, and is absent with no external model, so a gateway without them keeps its
+  digest. An entry whose generation is not acknowledged within the supervisor's
+  timeout blocks exactly the entries that generation introduced (`start-failed`,
+  looked at again after five minutes) and the same pass publishes the local routes
+  without them. A removed entry never comes back, because no generation is built
+  from the previous bundle; a deployment leaves SQL (and frees its name) only after
+  the generation without it is acknowledged. Every gateway generation restarts
+  LiteLLM, so adding, changing or removing an external model cuts in-flight streams
+  after at most 30 seconds.
+- **Credential custody.** A secret is one file, `secrets/gateway-credentials/<BINDING>`,
+  on the NAS. `runtime-init` stages each into `normalized/gateway-credentials/` for the
+  LiteLLM user alone, the supervisor exports it to the LiteLLM child as
+  `VONK_CREDENTIAL_<BINDING>` (never any provider-default variable) and, once the
+  child is healthy, writes the names it loaded (never a value) to
+  `/supervisor/credentials.json`: that file is the Controller's only view of a
+  secret, and a deployment whose secret is not loaded waits as
+  `credential-missing`. Rotation is a file replacement and a `runtime-init`
+  restart, which restarts LiteLLM. Which destinations a binding's secret may reach
+  is a PostgreSQL record changed only through the binding's own preview and
+  accept; a model edit never widens it, and narrowing or removing it withdraws the
+  deployments that used the origin.
+- **Routes.** `/api/gateway/models` and `/api/gateway/credentials` (administrator
+  only): list, validate (no traffic), preview (the review and its
+  `effect_digest`) and accept (exactly that review, replayed by `request_id`).
 
 ## Scaling and networking
 

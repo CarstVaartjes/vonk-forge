@@ -114,13 +114,15 @@ def apply_event(
 ) -> ExternalPublicationState:
     """Move ``row`` along the edge ``event`` names: the one writer of ``state`` and ``reason``."""
 
+    before = (row.state, row.reason)
     state = next_state(row.state, event)
     row.state = state.value
     if event in _CLEARS_REASON:
         row.reason = None
     if reason is not None:
         row.reason = reason.value
-    row.updated_at = now
+    if (row.state, row.reason) != before:
+        row.updated_at = now  # an event that changes nothing writes nothing
     return state
 
 

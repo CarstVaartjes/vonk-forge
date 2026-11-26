@@ -649,6 +649,12 @@ jobs:
           tests/acceptance/litellm_model_info_proof.py
           --image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
           --work "$RUNNER_TEMP/model-info-proof"
+      - name: Prove an external model with a client key through the built LiteLLM image
+        run: >-
+          uv run --project control --frozen python
+          tests/acceptance/litellm_external_proof.py
+          --image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
+          --work "$RUNNER_TEMP/external-proof"
       - name: Check the LiteLLM surface against the pinned image
         run: |
           set -euo pipefail

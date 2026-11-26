@@ -19,6 +19,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm.exc import StaleDataError
 
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError
@@ -194,6 +195,11 @@ class ExternalModelService:
             except ConstraintReplan:
                 # Two accepts took one name: the unique alias settled it.
                 raise AliasTaken(alias, AliasOwner.EXTERNAL) from None
+            except StaleDataError:
+                # The publication moved the deployment while this was reviewed.
+                raise ExternalChangeConflict(
+                    "The model changed while the change was accepted; review it again."
+                ) from None
             return _accepted(row, request.action)
 
     def receipt(self, alias: str, request_id: str) -> ExternalModelView:

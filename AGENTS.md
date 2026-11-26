@@ -105,7 +105,11 @@ and a race is settled by the unique alias and the renderer (a local route wins).
 external entry is admitted only by `validate_external_entry` against the pinned
 LiteLLM surface (`deploy/compose/litellm/surface.json`, regenerated with every
 LiteLLM bump, see [image pin refresh](docs/image-pin-refresh.md)); a credential is
-a binding name, never a value. See
+a binding name, never a value. An external deployment's state changes only through
+`gateway/external_states.apply_event` (declared edges; an unknown stored word
+re-plans from the operator's `enabled`/`removal_requested` intent), the route
+service publishes it from SQL in the maintenance pass only, and its secret lives in
+NAS custody (`secrets/gateway-credentials/`), reaching only the LiteLLM child. See
 [External models](docs/architecture-overview.md#external-models-and-the-alias-namespace).
 
 Persist request identity before effects and reconcile a lost response before

@@ -225,8 +225,9 @@ sudo docker volume ls -q --filter label=com.docker.compose.project=vonk-forge \
 
 ### 2c. Optional, together with 2b: remove the project directory
 
-The installer created `docker-compose.yaml`, `.env`, `secrets/`, `backups/`
-and `backups-offhost/`, plus the hidden `.vonk-verified-secrets/` and
+The installer created `docker-compose.yaml`, `.env`, `secrets/` (with
+`secrets/gateway-credentials/` once you add an external model credential),
+`backups/` and `backups-offhost/`, plus the hidden `.vonk-verified-secrets/` and
 `.vonk-publication/` directories, and `../.vonk-setup.lock` next to the project
 directory. `backups/` holds PostgreSQL dumps; copy it elsewhere first if you may
 restore later. `secrets/` and `.env` are needed to reuse the volumes you kept
