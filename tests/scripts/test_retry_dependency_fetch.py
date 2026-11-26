@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _module():
     spec = importlib.util.spec_from_file_location(
-        "retry_dependency_fetch", ROOT / "scripts/retry_dependency_fetch.py"
+        "retry_dependency_fetch", ROOT / "scripts/ci/retry_dependency_fetch.py"
     )
     assert spec
     assert spec.loader

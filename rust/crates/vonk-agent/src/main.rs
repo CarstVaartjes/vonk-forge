@@ -833,26 +833,11 @@ async fn run_inventory_lane(
                 inventory.nas_route_interface = evidence.nas_route_interface;
                 if let Some(host) = inventory.host_settings.as_mut() {
                     host.memory_fragmentation = memory.snapshot();
-                    // Sysfs reads run off the async task and are bounded, so a
-                    // stuck read reports no devices instead of stalling the lane.
-                    let observed = tokio::time::timeout(
-                        FABRIC_OBSERVE_DEADLINE,
-                        tokio::task::spawn_blocking(move || {
-                            traffic.observe(Path::new("/sys/class/infiniband"))
-                        }),
+                    host.fabric_devices = vonk_agent::fabric_traffic::observe_bounded(
+                        traffic,
+                        PathBuf::from("/sys/class/infiniband"),
                     )
                     .await;
-                    host.fabric_devices = match observed {
-                        Ok(Ok(devices)) => devices,
-                        Ok(Err(error)) => {
-                            eprintln!("vonk-agent: fabric observation failed: {error}");
-                            Vec::new()
-                        }
-                        Err(elapsed) => {
-                            eprintln!("vonk-agent: fabric observation timed out ({elapsed}); reporting no devices");
-                            Vec::new()
-                        }
-                    };
                 }
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();
@@ -1095,9 +1080,6 @@ where
     }
     outcome
 }
-
-/// Bound on one fabric sysfs observation; past it the pass reports no devices.
-const FABRIC_OBSERVE_DEADLINE: Duration = Duration::from_secs(5);
 
 /// How often running workloads are re-observed while a claim executes: the
 /// active idle cadence, far inside the Controller's rank freshness window.

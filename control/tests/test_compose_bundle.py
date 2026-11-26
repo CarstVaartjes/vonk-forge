@@ -22,9 +22,9 @@ from vonk_control.metrics.registry import MetricsRegistry
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
-DEV_RENDERER = ROOT / "scripts/render-dev-compose"
-PRODUCTION_RENDERER = ROOT / "scripts/render-production-compose"
-BUNDLE_BUILDER = ROOT / "scripts/build-nas-compose-bundle"
+DEV_RENDERER = ROOT / "scripts/release/render-dev-compose"
+PRODUCTION_RENDERER = ROOT / "scripts/release/render-production-compose"
+BUNDLE_BUILDER = ROOT / "scripts/release/build-nas-compose-bundle"
 IMAGES = {
     f"{role}_image": f"ghcr.io/carstvaartjes/vonk-forge-{role}:v1.2.3"
     for role in ("api", "worker", "litellm")

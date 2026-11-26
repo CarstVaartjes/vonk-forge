@@ -60,7 +60,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        scripts/reuse-agent-packages pr unsealed >> "$GITHUB_OUTPUT"
+        scripts/agent/reuse-agent-packages pr unsealed >> "$GITHUB_OUTPUT"
     - name: Materialize and verify protected agent key
       shell: bash
       env:
@@ -93,7 +93,7 @@ runs:
         for set in dist:"$ARM64_PACKAGE" baseline:"$ARM64_BASELINE_PACKAGE"; do
           output=${set%%:*}
           package=${set#*:}
-          scripts/seal-agent-deb \
+          scripts/agent/seal-agent-deb \
             --unsealed "unsealed/${package%.deb}.unsealed.deb" \
             --release-private-key "$key" --output-dir "$output"
           # The evidence documents bind the binaries, not the key.
@@ -101,7 +101,7 @@ runs:
           if [[ "$output" == baseline ]]; then source=pr/baseline; fi
           find "$source" -maxdepth 1 -type f -name '*.json' \
             ! -name '*.sigstore.json' -exec cp -t "$output" {} +
-          scripts/verify-agent-deb --json "$output/$package"
+          scripts/agent/verify-agent-deb --json "$output/$package"
         done
     - name: Remove protected agent key
       if: always()
@@ -111,7 +111,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        scripts/verify-agent-systemd --json \
+        scripts/agent/verify-agent-systemd --json \
           | tee dist/vonk-forge-systemd-security.json
     - name: Upload immutable acceptance baseline packages
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -134,7 +134,7 @@ runs:
       run: |
         set -euo pipefail
         identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/agent-release\.yml@refs/heads/main$"
-        scripts/sign-package-keyless "dist/$ARM64_PACKAGE" \
+        scripts/release/sign-package-keyless "dist/$ARM64_PACKAGE" \
           "dist/${ARM64_PACKAGE}.sigstore.json" "$identity"
     - name: Attest package provenance
       uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -168,7 +168,7 @@ runs:
       run: |
         set -euo pipefail
         mkdir -p "$RUNNER_TEMP/versions"
-        scripts/agent-package-versions write "$VERSION" "$BASELINE_VERSION" \
+        scripts/agent/agent-package-versions write "$VERSION" "$BASELINE_VERSION" \
           "$RUNNER_TEMP/versions/versions.txt"
     - name: Upload the package set versions
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

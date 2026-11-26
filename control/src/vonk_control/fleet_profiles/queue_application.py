@@ -64,6 +64,7 @@ from vonk_control.fleet_profiles.contracts import (
 )
 from vonk_control.fleet_profiles.control_effects import _control_effects
 from vonk_control.fleet_profiles.dependencies import _INSTALLATION_POLICY_ADAPTER
+from vonk_control.fleet_profiles.external_alias import refuse_external_aliases
 from vonk_control.fleet_profiles.persistence import (
     _application_order_key,
     _intended_profile,
@@ -283,6 +284,10 @@ class FleetProfileService:
             # Use the reviewed snapshot. Resolving through the cache here both
             # substituted newer choices and performed storage work under SQL locks.
             frozen_assignments = tuple(preview.resolved_assignments)
+            refuse_external_aliases(
+                session,
+                {item.alias for item in frozen_assignments if item.alias is not None},
+            )
             if not selected_application:
                 self._validate_draft_review_identity(
                     session,

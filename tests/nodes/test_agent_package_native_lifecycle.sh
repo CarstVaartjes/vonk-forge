@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-helper="$repo_root/scripts/test-agent-package-native-lifecycle"
+helper="$repo_root/scripts/agent/test-agent-package-native-lifecycle"
 test_root="$(mktemp -d)"
 trap 'rm -rf -- "$test_root"' EXIT
 

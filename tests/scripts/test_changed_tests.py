@@ -8,7 +8,7 @@ import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/changed-tests"
+SCRIPT = ROOT / "scripts/dev/changed-tests"
 
 
 def _module():

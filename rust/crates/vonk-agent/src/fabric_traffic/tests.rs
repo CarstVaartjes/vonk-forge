@@ -131,3 +131,21 @@ fn an_error_counter_that_went_backwards_is_unknown_but_the_bytes_stay() {
     let device = observed.iter().find(|d| d.bytes == 3_200_000_000).unwrap();
     assert_eq!(device.errors, None);
 }
+
+#[tokio::test]
+async fn a_hung_observation_reports_no_devices_and_spawns_no_second_worker() {
+    static SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    // Hold the permit as a hung read would; the pass must not spawn a worker.
+    let held = SLOT.try_acquire().unwrap();
+    let meter = std::sync::Arc::new(Meter::default());
+    let devices = observe_with_slot(
+        meter.clone(),
+        PathBuf::from("/nonexistent"),
+        Duration::from_millis(10),
+        &SLOT,
+    )
+    .await;
+    assert_eq!(devices.len(), 0);
+    drop(held);
+    assert_eq!(SLOT.available_permits(), 1);
+}

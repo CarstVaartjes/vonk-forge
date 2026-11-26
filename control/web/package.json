@@ -9,10 +9,10 @@
     "test:e2e": "playwright test",
     "lint": "biome ci .",
     "typecheck": "tsc --noEmit -p tsconfig.check.json",
-    "prebuild": "../../scripts/prepare-generated-contracts",
-    "pretest": "../../scripts/prepare-generated-contracts",
-    "pretest:e2e": "../../scripts/prepare-generated-contracts",
-    "pretypecheck": "../../scripts/prepare-generated-contracts"
+    "prebuild": "../../scripts/dev/prepare-generated-contracts",
+    "pretest": "../../scripts/dev/prepare-generated-contracts",
+    "pretest:e2e": "../../scripts/dev/prepare-generated-contracts",
+    "pretypecheck": "../../scripts/dev/prepare-generated-contracts"
   },
   "dependencies": {
     "@fontsource-variable/onest": "5.3.1",

@@ -489,10 +489,10 @@ def incompatibilities(
                     problems.append(f"{where}: property removed")
                 elif key in ("type", "const", "$ref"):
                     problems.append(f"{where}: removed")
-                elif key == "required" and value:
+                elif key == "required" and value and not path.endswith("/properties"):
                     problems.append(f"{where}: no longer required {sorted(value)}")
                 continue
-            if key == "required":
+            if key == "required" and not path.endswith("/properties"):
                 grown = sorted(set(new[key]) - set(value))
                 if grown:
                     problems.append(f"{where}: now required {grown}")

@@ -20,7 +20,7 @@ was a source-selection audit; the suites were not executed locally.
 | profile-admission-contention | Redundant; removed | Complete control suite: `test_profile_load_submission.py::test_superseded_child_contention_is_parked_without_holding_admission`, both locked-model parameters. |
 | runtime-cache-generation | Redundant; removed | Complete control suite: `test_runtime_cache_generation_reuse.py`; CI now installs and requires skopeo. |
 | selected-profile-author-continuity | Redundant; removed | Complete control suite: `test_selected_profile_authority_continuity_postgres.py`, both disabled/demoted parameters. |
-| startup-bookkeeping-recovery | Redundant; removed | Complete control suite: `test_startup_retained_repair_postgres.py`. |
+| startup-bookkeeping-recovery | Redundant; removed | Complete control suite: `test_startup_retained_repair_postgres.py`; removed its sole-use `scripts/prove-startup-bookkeeping-counterexample`. |
 | installed-cli-transition | Unique; retained | Actual frozen prior CLI to current Controller transition, signed bootstrap and offline uv tool install; ordinary repository collection skips this opt-in lane. |
 | installed-cli-update | Unique; retained | Actual signed-wheel replacement and tamper refusal with offline uv tool installation; ordinary repository collection skips this opt-in lane. |
 | model-cache-unknown-expiry | Unique; retained | The browser consumes responses from the real PostgreSQL/API cancellation journey. Ordinary control and web suites run separately and do not supply this handoff. |
@@ -77,7 +77,7 @@ the pre-merge candidate acceptance (`release-acceptance.yml`):
 2026-11 follow-up: the five retained lanes, `installed-cli-proof` and
 `client-compatibility-report` are no longer standalone workflows. Each is a
 `ci.yml` job selected by the area of the code it proves and needed by `ci-gate`
-(`scripts/verify-ci-gate`), on the tested pull request merge commit;
+(`scripts/ci/verify-ci-gate`), on the tested pull request merge commit;
 `ci-scope.yml` is deleted. Jobs: `oci-link-fallback` (a bind-mounted cross-device
 store), `privileged-helper-oci-process` (the signed helper on ARM64 systemd),
 `model-cache-unknown-expiry`, `profile-effect-consumer`, `installed-cli-proof`

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import spark_lifecycle_contract
+from scripts.release import spark_lifecycle_contract
 from vonk_agent_protocol.installer_release import (
     InstallerAcceptanceBaselineRelease,
     InstallerCandidateRelease,

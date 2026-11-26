@@ -83,6 +83,7 @@ deploy/compose/step-ca/**
 !deploy/compose/step-ca/upstream/context-signing.patch
 !deploy/compose/step-ca/upstream/manifest.json
 !deploy/compose/step-ca/source.lock.json
+!scripts/prepare-journal-ca.py
 
 # Build-time Pydantic contract generation.
 !nas_setup/
@@ -94,14 +95,14 @@ deploy/compose/step-ca/**
 !agent_protocol/src/**
 !control/openapi-python-client.yaml
 !scripts/
-!scripts/image_policy.py
-!scripts/protocol-wheel-name
-!scripts/protocol_wheel.py
-!scripts/check_environment.py
-!scripts/ensure-project-venv
-!scripts/generate-control-clients
-!scripts/export-agent-wire-schema
-!scripts/render-dev-compose
+!scripts/release/image_policy.py
+!scripts/release/protocol-wheel-name
+!scripts/release/protocol_wheel.py
+!scripts/dev/check_environment.py
+!scripts/dev/ensure-project-venv
+!scripts/dev/generate-control-clients
+!scripts/dev/export-agent-wire-schema
+!scripts/release/render-dev-compose
 !tools/openapi-client/
 !tools/openapi-client/**
 

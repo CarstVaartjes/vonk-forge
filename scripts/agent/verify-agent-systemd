@@ -1,0 +1,279 @@
+#!/usr/bin/python3 -I
+"""Verify Vonk agent units through a disposable installed filesystem root."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from configparser import ConfigParser
+from pathlib import Path
+
+UNITS = (
+    "vonk-forge-agent.service",
+    "vonk-forge-monitor.service",
+    "vonk-forge-docker-firewall.service",
+    "vonk-forge-package-helper.service",
+    "vonk-forge-package-helper.socket",
+)
+SECURITY_UNITS = tuple(name for name in UNITS if name.endswith(".service"))
+SUMMARY = re.compile(
+    r"Overall exposure level for ([^:]+): ([0-9]+(?:\.[0-9]+)?) ([A-Z]+)"
+)
+
+
+def _canonical(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+
+
+def _run(arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        arguments,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def _install(root: Path, repository: Path) -> None:
+    shutil.copytree(
+        "/usr/lib/systemd/system",
+        root / "usr/lib/systemd/system",
+        symlinks=True,
+    )
+    unit_root = root / "usr/lib/systemd/system"
+    unit_root.mkdir(parents=True, exist_ok=True)
+    docker_unit = unit_root / "docker.service"
+    if not docker_unit.exists():
+        docker_unit.write_text(
+            "[Unit]\nDescription=Disposable Docker verification fixture\n"
+            "[Service]\nType=oneshot\nExecStart=/usr/bin/true\n"
+        )
+    for name in UNITS:
+        shutil.copy2(repository / "packaging/systemd" / name, unit_root / name)
+    for path in (
+        "usr/bin/true",
+        "usr/bin/logger",
+        "usr/bin/nvidia-smi",
+        "usr/lib/vonk-forge/vonk-agent",
+        "usr/lib/vonk-forge/vonk-monitor",
+        "usr/lib/vonk-forge/vonk-agent-helper",
+        "usr/lib/vonk-forge/vonk-forge-docker-firewall",
+    ):
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2("/bin/true", target)
+
+
+def _verify(root: Path) -> None:
+    verified = _run(
+        [
+            "systemd-analyze",
+            "verify",
+            f"--root={root}",
+            *(f"/usr/lib/systemd/system/{name}" for name in UNITS),
+        ]
+    )
+    if verified.returncode != 0:
+        raise RuntimeError(verified.stderr.strip() or verified.stdout.strip())
+
+
+def _security(root: Path, name: str) -> dict[str, object]:
+    effective = _run(
+        [
+            "systemd-analyze",
+            "security",
+            "--offline=yes",
+            f"--root={root}",
+            "--json=short",
+            name,
+        ]
+    )
+    if effective.returncode != 0:
+        raise RuntimeError(effective.stderr.strip() or effective.stdout.strip())
+    assessments = json.loads(effective.stdout)
+    if not isinstance(assessments, list) or not assessments:
+        raise RuntimeError(f"security analysis for {name} is empty")
+    by_field = {assessment.get("json_field"): assessment for assessment in assessments}
+    ambient = by_field.get("AmbientCapabilities")
+    ptrace = by_field.get("CapabilityBoundingSet_CAP_SYS_PTRACE")
+    if not isinstance(ambient, dict) or not isinstance(ptrace, dict):
+        raise TypeError(f"capability analysis for {name} is unavailable")
+    rendered = _run(
+        [
+            "systemd-analyze",
+            "security",
+            "--offline=yes",
+            f"--root={root}",
+            "--no-pager",
+            name,
+        ]
+    )
+    if rendered.returncode != 0:
+        raise RuntimeError(rendered.stderr.strip() or rendered.stdout.strip())
+    match = SUMMARY.search(rendered.stdout)
+    if match is None or match.group(1) != name:
+        raise RuntimeError(f"security summary for {name} is unavailable")
+    return {
+        "ambient_capabilities": not bool(ambient.get("set")),
+        "assessment_count": len(assessments),
+        "cap_sys_ptrace": not bool(ptrace.get("set")),
+        "exposure": match.group(3),
+        "score": float(match.group(2)),
+    }
+
+
+def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
+    unit_root = root / "usr/lib/systemd/system"
+    agent = ConfigParser(interpolation=None, strict=False)
+    helper = ConfigParser(interpolation=None, strict=False)
+    socket_unit = ConfigParser(interpolation=None, strict=True)
+    if not agent.read(unit_root / "vonk-forge-agent.service"):
+        raise RuntimeError("agent service is unavailable")
+    monitor = ConfigParser(interpolation=None, strict=False)
+    if not monitor.read(unit_root / "vonk-forge-monitor.service"):
+        raise RuntimeError("monitor service is unavailable")
+    if not helper.read(unit_root / "vonk-forge-package-helper.service"):
+        raise RuntimeError("package helper service is unavailable")
+    if not socket_unit.read(unit_root / "vonk-forge-package-helper.socket"):
+        raise RuntimeError("package helper socket is unavailable")
+    expected = {
+        "DirectoryMode": "0711",
+        "ListenStream": "/run/vonk-forge-package-helper/package-helper.sock",
+        "SocketGroup": "vonk-agent",
+        "SocketUser": "root",
+    }
+    actual = {name: socket_unit["Socket"].get(name) for name in expected}
+    if actual != expected:
+        raise RuntimeError("package helper socket ownership boundary is invalid")
+    if agent["Service"].get("RuntimeDirectory") != "vonk-forge-agent":
+        raise RuntimeError("agent runtime ownership boundary is invalid")
+    if agent["Service"].get("ExecStart") != (
+        "/usr/lib/vonk-forge/vonk-agent --config /etc/vonk-forge-agent/agent.toml run"
+    ):
+        raise RuntimeError("agent service does not execute the direct binary")
+    if (
+        agent["Unit"].get("StartLimitIntervalSec") != "0"
+        or agent["Service"].get("Restart") != "always"
+        or agent["Service"].get("RestartSec") != "30s"
+        or agent["Service"].get("Type") != "notify"
+        or agent["Service"].get("WatchdogSec") != "15min"
+        or agent["Service"].get("TimeoutStartSec") != "5min"
+    ):
+        raise RuntimeError(
+            "agent readiness, watchdog, or boot recovery policy is invalid"
+        )
+    if (
+        agent["Service"].get("PrivateDevices") != "no"
+        or agent["Service"].get("DevicePolicy") != "closed"
+    ):
+        raise RuntimeError("agent boot recovery weakened device isolation")
+    # Every installed retry owner remains eligible after any number of failures.
+    for name in UNITS:
+        if not name.endswith(".service"):
+            continue
+        path = unit_root / name
+        policy = ConfigParser(interpolation=None, strict=False)
+        policy.read(path)
+        if policy["Service"].get("Restart") in {"always", "on-failure"} and (
+            policy["Unit"].get("StartLimitIntervalSec") != "0"
+            or policy["Service"].get("RestartPreventExitStatus") is not None
+            or not policy["Service"].get("RestartSec")
+        ):
+            raise RuntimeError(f"service recovery policy is invalid: {path.name}")
+    if agent["Unit"].get("PartOf"):
+        raise RuntimeError("agent service has an indirect lifecycle owner")
+    if (
+        monitor["Service"].get("ExecStart")
+        != "/usr/lib/vonk-forge/vonk-monitor --config /etc/vonk-forge-agent/agent.toml"
+        or monitor["Service"].get("User") != "vonk-agent"
+        or monitor["Service"].get("NoNewPrivileges") != "yes"
+    ):
+        raise RuntimeError("monitor service boundary is invalid")
+    if (
+        monitor["Unit"].get("PartOf") != "vonk-forge-agent.service"
+        or "vonk-forge-monitor.service" not in agent["Unit"].get("Wants", "").split()
+    ):
+        raise RuntimeError("monitor package activation dependency is invalid")
+    if (
+        helper["Service"].get("RuntimeDirectory") != "vonk-forge-package-candidates"
+        or helper["Service"].get("RuntimeDirectoryMode") != "0700"
+        or helper["Service"].get("RuntimeDirectoryPreserve") != "restart"
+    ):
+        raise RuntimeError("package helper runtime ownership boundary is invalid")
+    return (
+        {
+            "directory_mode": expected["DirectoryMode"],
+            "group": expected["SocketGroup"],
+            "listen_stream": expected["ListenStream"],
+            "runtime_owner": expected["SocketUser"],
+        },
+        {
+            "restart": agent["Service"]["Restart"],
+            "restart_delay": agent["Service"]["RestartSec"],
+            "start_limit_interval": agent["Unit"]["StartLimitIntervalSec"],
+            "private_devices": agent["Service"]["PrivateDevices"],
+            "device_policy": agent["Service"]["DevicePolicy"],
+            "type": agent["Service"]["Type"],
+            "watchdog": agent["Service"]["WatchdogSec"],
+        },
+    )
+
+
+def verify(repository: Path) -> dict[str, object]:
+    with tempfile.TemporaryDirectory(prefix="vonk-agent-systemd-") as temporary:
+        root = Path(temporary)
+        _install(root, repository)
+        _verify(root)
+        package_helper_socket, agent_boot_recovery = _package_helper_socket(root)
+        units = {name: _security(root, name) for name in SECURITY_UNITS}
+        if any(unit["ambient_capabilities"] for unit in units.values()):
+            raise RuntimeError("agent services must not receive ambient capabilities")
+        for name, unit in units.items():
+            if unit["cap_sys_ptrace"]:
+                raise RuntimeError(
+                    f"CAP_SYS_PTRACE boundary for {name} does not match policy"
+                )
+    return {
+        "agent_boot_recovery": agent_boot_recovery,
+        "package_helper_socket": package_helper_socket,
+        "schema_version": 1,
+        "security_units": units,
+        "units": list(UNITS),
+        "verify": "passed",
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--json", action="store_true")
+    arguments = parser.parse_args()
+    repository = Path(__file__).resolve().parents[2]
+    try:
+        report = verify(repository)
+    except (
+        OSError,
+        RuntimeError,
+        TypeError,
+        subprocess.SubprocessError,
+        json.JSONDecodeError,
+    ) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+    if arguments.json:
+        print(_canonical(report), end="")
+    else:
+        print("systemd installed-root verification: passed")
+        if isinstance(units := report["security_units"], dict):
+            for name, unit in units.items():
+                print(f"{name}: {unit['score']:.1f} {unit['exposure']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

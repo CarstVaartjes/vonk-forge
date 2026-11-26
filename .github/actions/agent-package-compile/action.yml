@@ -12,7 +12,7 @@ inputs:
     description: Literal development package channel
     required: true
   publication_sequence:
-    description: Development source commit time (scripts/dev-publication-sequence)
+    description: Development source commit time (scripts/images/dev-publication-sequence)
     required: true
   version:
     description: Exact development Debian package version
@@ -47,12 +47,12 @@ runs:
       run: |
         set -euo pipefail
         test "$CHANNEL" = dev
-        test "$PUBLICATION_SEQUENCE" = "$(scripts/dev-publication-sequence "$GITHUB_SHA")"
+        test "$PUBLICATION_SEQUENCE" = "$(scripts/images/dev-publication-sequence "$GITHUB_SHA")"
         test "$SOURCE_SHA" = "$GITHUB_SHA"
         test "$GITHUB_REF" = refs/heads/main
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
         expected=$(
-          scripts/agent-package-metadata \
+          scripts/agent/agent-package-metadata \
             development "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" \
             "$SOURCE_SHA" "$PUBLICATION_SEQUENCE"
         )
@@ -167,7 +167,7 @@ runs:
           "target/$TARGET/release/vonk-build-egress" \
           "target/$TARGET/release/vonk-runtime-probe" \
           "compiled/$BINARY_SET/"
-        scripts/verify-agent-binaries \
+        scripts/agent/verify-agent-binaries \
           --architecture "$ARCHITECTURE" \
           --semantic-version "$semantic_version" \
           --build-digest "$build_digest" \

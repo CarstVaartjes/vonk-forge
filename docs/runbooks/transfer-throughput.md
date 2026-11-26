@@ -58,12 +58,12 @@ rather than raising a number.
 
 Run these from a root shell. Nothing in them changes the platform.
 
-On the NAS (`scripts/measure-nas-serving`, standard tools only):
+On the NAS (`scripts/fleet/measure-nas-serving`, standard tools only):
 
 ```bash
-sudo scripts/measure-nas-serving static
-sudo scripts/measure-nas-serving read --drop-caches
-sudo scripts/measure-nas-serving sample 120
+sudo scripts/fleet/measure-nas-serving static
+sudo scripts/fleet/measure-nas-serving read --drop-caches
+sudo scripts/fleet/measure-nas-serving sample 120
 ```
 
 On a Spark that holds an assignment (the agent log names `PLAN_DIGEST` and
@@ -71,7 +71,7 @@ On a Spark that holds an assignment (the agent log names `PLAN_DIGEST` and
 on the NAS first:
 
 ```bash
-sudo scripts/measure-transfer PLAN_DIGEST OBJECT_SHA256 NAS_ADDRESS
+sudo scripts/fleet/measure-transfer PLAN_DIGEST OBJECT_SHA256 NAS_ADDRESS
 ```
 
 Do three runs, so that the comparisons below are possible:
@@ -82,7 +82,7 @@ Do three runs, so that the comparisons below are possible:
 2. **Ingest paused:** no Hugging Face download and no other copy. Repeat
    `read` and `measure-transfer`.
 3. **Synthetic ingest:** in a second NAS terminal run
-   `sudo scripts/measure-nas-serving write-load 120 120` while the `read` test
+   `sudo scripts/fleet/measure-nas-serving write-load 120 120` while the `read` test
    and `measure-transfer` run. This reproduces the download's disk writes
    without the internet.
 
