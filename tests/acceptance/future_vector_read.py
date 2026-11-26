@@ -157,7 +157,9 @@ def check(raw: bytes) -> dict[str, Any]:
             for block in (*RECIPE_BLOCKS, "api")
             if entry.get(block) is not None
             and getattr(item, block) is None
-            and block not in item.withheld_blocks
+            # Only an API block may be withheld: its recorded facts stay. Any
+            # other block (a qualification, a display) must survive a newer word.
+            and not (block == "api" and block in item.withheld_blocks)
         )
         if WORD in (entry.get("served_capabilities") or ()) and WORD not in _words(
             item.served_capabilities
