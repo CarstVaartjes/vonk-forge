@@ -29,6 +29,7 @@ from cluster_profiles.cli_render.common import (
     _words,
 )
 from cluster_profiles.cli_render.fleet import _fleet_overview, _node
+from cluster_profiles.cli_render.gateway import _gateway_documents
 from cluster_profiles.cli_render.library import (
     LibraryNoun,
     _library,
@@ -209,6 +210,8 @@ def render_payload(
                     _library(payload, noun, detail=action == "detail", wide=wide)
             else:
                 _operation(payload, noun)
+        elif noun == "gateway":
+            _gateway_documents(payload)
         elif noun == "key":
             _gateway_keys(payload, action)
         elif noun == "run":

@@ -12,6 +12,7 @@ from pydantic import AwareDatetime, Field
 from vonk_forge_contracts import EndpointAlias
 
 from vonk_agent_protocol.identifiers import Digest
+from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 from vonk_agent_protocol.state_machines import (
     ExternalBlockReason,
     ExternalPublicationState,
@@ -63,6 +64,12 @@ class ExternalModelView(StrictModel):
     state: ExternalPublicationState
     reason: ExternalBlockReason | None = None
     next_check_at: AwareDatetime | None = None
+    #: The action that ends a wait for the operator: ``resume`` once the gateway gave
+    #: up on this content ("edit it or enable it"); ``None`` while it is retrying.
+    operator_action: OperatorActionName | None = None
+    #: How often the gateway failed to start with this content (the bound is
+    #: ``START_FAILURE_LIMIT``); a changed entry or an enable starts again from zero.
+    start_failures: int = Field(default=0, ge=0)
     #: The gateway serves the desired revision: a request for the alias reaches it.
     published: bool
 

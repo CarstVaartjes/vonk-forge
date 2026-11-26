@@ -29,7 +29,7 @@ vonkctl update --apply
 
 `vonkctl` is the local, authenticated CLI for the Controller. `vonkctl --help`
 lists its command groups (platform, metrics, fleet, model, recipe, job, profile,
-key), `run`, `auth`, `completion` and `update`. It uses the same current Controller
+key, gateway), `run`, `auth`, `completion` and `update`. It uses the same current Controller
 routes as the operator API. Machine-facing agent
 transport is separate and is not a CLI fallback.
 
@@ -91,7 +91,7 @@ options. `vonkctl GROUP COMMAND --help` shows that command's arguments and
 flags. A group run on its own shows its current state: `vonkctl platform`,
 `vonkctl metrics`, `vonkctl fleet`, `vonkctl model`, `vonkctl recipe`,
 `vonkctl profile` and `vonkctl key` are overviews. Groups
-without a view of their own (`fleet enrollment`, `recipe installation`,
+without a view of their own (`gateway`, `fleet enrollment`, `recipe installation`,
 `job`, `completion`) print their help. A mistyped command gets a
 suggestion (`unknown command 'detal' for 'vonkctl fleet'. Did you mean
 'detail'?`), a missing argument gets the usage line, and both name the help
@@ -1198,6 +1198,58 @@ recipe's served model and uses its managed upstream credential; clients keep
 using their gateway key. This requires the Controller and gateway release
 with decision support as well as the recipe. Catalog presence alone does not
 prove cache readiness or physical Spark qualification.
+
+## External models and credentials
+
+An external model is a model a partner or cloud provider serves, published through the same gateway and
+client keys as the local models. It is one LiteLLM `model_list` entry in a JSON file; the alias is its
+`model_name`. Every client key reaches every local and external model: there is no per-key allowlist.
+Only the destination is checked: https only, certificate verification always on, no private or
+reserved IP addresses, and only hosts a credential approves.
+
+A credential is a binding name such as `PARTNER`, never a value. The entry names it as
+`"api_key": "os.environ/VONK_CREDENTIAL_PARTNER"`. The secret is one file on the NAS,
+`secrets/gateway-credentials/PARTNER`, provisioned and rotated as the
+[runtime staging](../../deploy/compose/README.md#runtime-staging-runtime-init) section says; it
+never passes through `vonkctl`, the Controller API or any output. The credential's approved
+destinations live in PostgreSQL and change only through `vonkctl gateway credential`.
+
+```sh
+# 1. Approve where PARTNER's secret may be sent (review, then accept).
+vonkctl gateway credential put PARTNER --origin https://api.partner.example
+vonkctl gateway credential list                       # LOADED says whether the gateway has the secret
+
+# 2. Check, review and publish the model. Nothing is sent to the partner.
+vonkctl gateway model validate --file partner-large.json
+vonkctl gateway model put --file partner-large.json --review   # the review only
+vonkctl gateway model put --file partner-large.json --yes
+vonkctl gateway model show partner-large              # state, reason, failed starts, next check
+
+# 3. Any client key now calls it with the gateway URL and the alias.
+curl https://<controller host>/v1/chat/completions \
+  -H "Authorization: Bearer $(cat client-key)" -H "Content-Type: application/json" \
+  -d '{"model":"partner-large","messages":[{"role":"user","content":"hi"}]}'
+
+# 4. Withdraw it (keeps the entry) or remove it (deletes the entry and frees the alias).
+vonkctl gateway model disable partner-large --yes
+vonkctl gateway model remove partner-large --yes
+```
+
+Every change is reviewed first and accepted exactly as reviewed: `put`, `enable`, `disable`, `remove`
+and the credential commands read the current revision, ask the Controller for the review, and send its
+`effect_digest`, the revision and the request key with the accept. A change that no longer matches is
+refused and the command is safe to run again (a `remove` that already completed answers not found); `--request-key` reconnects to a lost response. `--review`
+stops after the review; without `--yes` a terminal asks, and a pipe refuses. `credential put` replaces the whole destination list, and `--private` applies to every origin given. A review that lists
+problems (a path and a rule each) applies nothing and exits non-zero. The entry file is never printed.
+
+Accepting a change restarts the gateway, which cuts streams in flight after 30 seconds. If the gateway
+does not start with the new entry, the local models are down until the Controller republishes without
+it; the review states that bound (`failed_start_dark_seconds`). After three failed starts of the same
+content the model stays blocked and `gateway model show` prints **Waiting for you** with the action
+`resume`: edit the entry, or run `vonkctl gateway model enable ALIAS` (the web shows **Resume**), which
+starts the count again. Narrowing or removing a credential's destinations withdraws the models that
+used them, and the review lists each one. The web manages both under **API keys**, in the External
+models and Credentials sections.
 
 ## Output and recovery
 

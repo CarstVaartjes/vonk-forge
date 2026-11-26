@@ -62,6 +62,7 @@ COMMAND_ACTIONS = {
         Word.CANCEL,
         Word.DOWNLOAD,
     ),
+    Word.GATEWAY: (None, Word.MODEL, Word.CREDENTIAL),
     "key": (None, "create", "list", "roll", "revoke"),
     "run": (None,),
 }

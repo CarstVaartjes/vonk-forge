@@ -1,5 +1,9 @@
 """Prove an external model through the real LiteLLM image, with a client's credential.
 
+The external model is added the way an operator adds it, in process: through the
+real administrator routes over SQLite (each change previewed, then accepted with the
+review's digest) and the route service's planner functions. This is not the deployed
+Controller API; ``test_fresh_nas_install.py`` runs that flow on an installed bundle.
 One client virtual key, created by the real ``GatewayKeyService`` with no model
 list (the path the API takes), reaches a local model and an external model with
 streaming. Two controlled HTTPS stubs stand in for the outside world: "partner",
@@ -16,6 +20,9 @@ The proof asserts what that client sees and what the gateway does:
   resolved secret;
 * a 307 redirect from the partner to "elsewhere" leaves "elsewhere" with no request
   that carries a credential;
+* the operator's own listing reports the model published once the supervisor
+  acknowledged it, repeated listings change nothing, and after removal the model
+  and its alias are gone from SQL;
 * after a generation without the external entries is published and the supervisor
   reloads the gateway,
   the next call to the alias fails and the partner received nothing more.
@@ -38,13 +45,16 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
 
 import openai
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from litellm_model_info_proof import (
     DB_PASSWORD,
     DB_PORT,
@@ -57,13 +67,24 @@ from litellm_model_info_proof import (
     sdk,
     wait_healthy,
 )
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_agent_protocol.state_machines import GatewayRouteState
+from vonk_control.auth import Actor
+from vonk_control.gateway.external_api import install_external_model_routes
 from vonk_control.gateway.external_contract import (
     ExternalDeploymentSpec,
     ExternalDestination,
+    ExternalRouteEntry,
 )
+from vonk_control.gateway.external_publication import (
+    ExternalPlan,
+    plan_externals,
+    record_externals,
+)
+from vonk_control.gateway.external_service import ExternalModelService
 from vonk_control.gateway.keys import GatewayKeyError, GatewayKeyService
 from vonk_control.gateway.keys_contract import GatewayKeyCreated
 from vonk_control.gateway.litellm import (
@@ -72,8 +93,14 @@ from vonk_control.gateway.litellm import (
     render_config,
     render_external_entry,
 )
+from vonk_control.gateway.litellm_surface import load_surface
 from vonk_control.gateway.route_bundle_contract import RouteAcceptedModelPolicy
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
+from vonk_control.model_primitives import Base
+from vonk_control.operator_acceptance.resolution import (
+    ControllerAPIRoute,
+    OperatorReceiptResolver,
+)
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 
 SECRET = "partner-secret-value"
@@ -235,21 +262,24 @@ def make_authority(work: Path) -> tuple[Path, ssl.SSLContext]:
     return ca_pem, context
 
 
+def partner_entry(partner_port: int) -> dict[str, object]:
+    """The one LiteLLM entry file an operator writes for the partner."""
+    return {
+        "model_name": EXTERNAL,
+        "litellm_params": {
+            "model": "openai/partner-large",
+            "api_base": f"https://{PARTNER_HOST}:{partner_port}/v1",
+            "api_key": "os.environ/VONK_CREDENTIAL_PARTNER",
+        },
+    }
+
+
 def specs(partner_port: int) -> list[ExternalDeploymentSpec]:
+    """The entries the proof renders directly: a redirecting partner and a second adapter."""
     base = f"https://{PARTNER_HOST}:{partner_port}"
     destination = ExternalDestination(origins=[base])
     secret = "os.environ/VONK_CREDENTIAL_PARTNER"
     return [
-        ExternalDeploymentSpec(
-            alias=EXTERNAL,
-            litellm_params={
-                "model": "openai/partner-large",
-                "api_base": f"{base}/v1",
-                "api_key": secret,
-            },
-            destination=destination,
-            credential_bindings=["PARTNER"],
-        ),
         ExternalDeploymentSpec(
             alias=REDIRECTED,
             litellm_params={
@@ -276,26 +306,101 @@ def specs(partner_port: int) -> list[ExternalDeploymentSpec]:
     ]
 
 
-def render(local_port: int, partner_port: int | None) -> bytes:
+class Operator:
+    """An administrator at the real routes, with the planner that publishes their changes."""
+
+    def __init__(self, work: Path) -> None:
+        engine = create_engine(f"sqlite:///{work / 'operator.sqlite'}")
+        Base.metadata.create_all(engine)
+        self.service = ExternalModelService(
+            sessionmaker(engine, expire_on_commit=False),
+            surface=lambda: load_surface(ROOT / "deploy/compose/litellm/surface.json"),
+            clock=lambda: datetime.now(UTC),
+            credentials=lambda: frozenset({"PARTNER", "VERTEX_SA"}),
+        )
+        app = FastAPI()
+        app.router.route_class = ControllerAPIRoute
+        install_external_model_routes(
+            app,
+            actor_dependency=Depends(lambda: Actor("proof", "administrator")),
+            service=self.service,
+        )
+        OperatorReceiptResolver(external_models=self.service).bind(app)
+        self.client = TestClient(app)
+
+    def change(self, path: str, request: dict[str, object]) -> dict[str, object]:
+        """Review a change, then accept exactly that review."""
+        review = self.client.post(f"{path}/preview", json=request)
+        check(review.status_code == 200, f"{path} review answered {review.text}")
+        reviewed = review.json()
+        check(not reviewed.get("problems"), f"{path} review refused: {reviewed}")
+        accepted = self.client.post(
+            f"{path}/accept",
+            json={
+                **request,
+                "request_id": str(uuid.uuid4()),
+                "effect_digest": reviewed["effect_digest"],
+            },
+        )
+        check(accepted.status_code == 200, f"{path} accept answered {accepted.text}")
+        check(SECRET not in review.text + accepted.text, "a secret is in a review")
+        return accepted.json()
+
+    def add(self, entry: dict[str, object], origin: str) -> None:
+        self.change(
+            "/api/gateway/credentials/PARTNER",
+            {"action": "put", "destinations": [{"origin": origin}]},
+        )
+        self.change(
+            f"/api/gateway/models/{EXTERNAL}", {"action": "put", "entry": entry}
+        )
+
+    def remove(self) -> None:
+        shown = self.client.get(f"/api/gateway/models/{EXTERNAL}").json()
+        self.change(
+            f"/api/gateway/models/{EXTERNAL}",
+            {"action": "remove", "expected_revision": shown["desired_revision"]},
+        )
+
+    def plan(self) -> ExternalPlan:
+        """What the next generation serves, as the maintenance pass plans it."""
+        with self.service.sessions.begin() as session:
+            return plan_externals(
+                session,
+                now=datetime.now(UTC),
+                credentials=frozenset({"PARTNER", "VERTEX_SA"}),
+                introduce=True,
+            )
+
+    def acknowledged(self, plan: ExternalPlan) -> None:
+        """The supervisor acknowledged the plan's generation."""
+        with self.service.sessions.begin() as session:
+            record_externals(session, plan, now=datetime.now(UTC))
+
+    def listing(self) -> list[dict[str, object]]:
+        listed = self.client.get("/api/gateway/models")
+        check(listed.status_code == 200, f"the listing answered {listed.status_code}")
+        check(SECRET not in listed.text, "a secret is in the listing")
+        return listed.json()["models"]
+
+
+def render(local_port: int, entries: list[ExternalRouteEntry]) -> bytes:
     """The config the publisher renders: one local route and, while published, the externals."""
     policy = LiteLlmPolicy(
         {LOCAL: RouteAcceptedModelPolicy(upstream_model="local-model")}
-    )
-    entries = (
-        []
-        if partner_port is None
-        else [
-            render_external_entry(
-                spec, f"0d4f5b0e-0000-4000-8000-0000000000{index:02d}", 1
-            )
-            for index, spec in enumerate(specs(partner_port))
-        ]
     )
     return render_config(
         RouteState({LOCAL: f"http://127.0.0.1:{local_port}/v1"}, "0" * 64),
         policy,
         entries,
     )
+
+
+def direct_entries(partner_port: int) -> list[ExternalRouteEntry]:
+    return [
+        render_external_entry(spec, f"0d4f5b0e-0000-4000-8000-0000000000{index:02d}", 1)
+        for index, spec in enumerate(specs(partner_port))
+    ]
 
 
 def client_key(work: Path) -> str:
@@ -461,9 +566,19 @@ def main() -> None:
     ca_pem, tls = make_authority(arguments.work)
     local, partner, elsewhere = serve(Local), serve(Partner, tls), serve(Elsewhere, tls)
     kit, secrets, supervisor, routes = stage_custody(arguments.work)
+    partner_port = partner.server_address[1]
+    operator = Operator(arguments.work)
+    # Add: the credential's destination, then the model, each reviewed then accepted.
+    operator.add(partner_entry(partner_port), f"https://{PARTNER_HOST}:{partner_port}")
+    check(operator.listing() == operator.listing(), "a listing changed state")
+    planned = operator.plan()
+    check(len(planned.entries) == 1, "the operator's model was not planned")
     publish(
         routes,
-        render(local.server_address[1], partner.server_address[1]),
+        render(
+            local.server_address[1],
+            [*planned.entries, *direct_entries(partner_port)],
+        ),
         "with-externals",
     )
     container, database = "vonk-external-proof", "vonk-external-proof-db"
@@ -542,14 +657,27 @@ def main() -> None:
     )
 
     def remove() -> None:
-        # What a published withdrawal does: a generation without the external
-        # entries, which the supervisor loads by restarting the child.
-        publish(routes, render(local.server_address[1], None), "without-externals")
+        # The operator removes the model; the withdrawal is a generation without
+        # the external entries, which the supervisor loads by restarting the child.
+        operator.remove()
+        withdrawal = operator.plan()
+        check(not withdrawal.entries, "a removed model is still planned")
+        publish(routes, render(local.server_address[1], []), "without-externals")
         wait_acknowledged(supervisor, 2)
+        operator.acknowledged(withdrawal)
+        check(operator.listing() == [], "the removed model is still held in SQL")
 
     try:
         wait_healthy(container)
         wait_acknowledged(supervisor, 1)
+        operator.acknowledged(planned)
+        (shown,) = operator.listing()
+        check(
+            shown["alias"] == EXTERNAL
+            and shown["state"] == "published"
+            and shown["published"] is True,
+            f"the operator does not see the model published: {shown}",
+        )
         prove_custody(supervisor)
         prove(client_key(arguments.work), elsewhere.server_address[1], remove)
     except BaseException:

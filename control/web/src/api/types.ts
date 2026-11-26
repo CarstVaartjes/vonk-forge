@@ -22,6 +22,16 @@ export type EnrollmentGrantStatus = components["schemas"]["EnrollmentGrantStatus
 export type GatewayKeyList = components["schemas"]["GatewayKeyList"];
 export type GatewayKeyCreated = components["schemas"]["GatewayKeyCreated"];
 export type GatewayKeyRevoked = components["schemas"]["GatewayKeyRevoked"];
+export type ExternalModelList = components["schemas"]["ExternalModelList"];
+export type ExternalModelView = components["schemas"]["ExternalModelView"];
+export type ExternalModelPreviewRequest = components["schemas"]["ExternalModelPreviewRequest"];
+export type ExternalModelReview = components["schemas"]["ExternalModelReview"];
+export type ExternalModelAccepted = components["schemas"]["ExternalModelAccepted"];
+export type ExternalBindingList = components["schemas"]["ExternalBindingList"];
+export type ExternalBindingView = components["schemas"]["ExternalBindingView"];
+export type ExternalBindingPreviewRequest = components["schemas"]["ExternalBindingPreviewRequest"];
+export type ExternalBindingReview = components["schemas"]["ExternalBindingReview"];
+export type ExternalBindingAccepted = components["schemas"]["ExternalBindingAccepted"];
 export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
 export type OperationDetail = components["schemas"]["OperationDetailResponse"];
@@ -393,6 +403,29 @@ export interface ControlApi extends LibraryApi {
   ): Promise<GatewayKeyCreated>;
   rollGatewayKey(name: string, requestId?: string): Promise<GatewayKeyCreated>;
   revokeGatewayKey(name: string): Promise<GatewayKeyRevoked>;
+  gatewayModels(signal?: AbortSignal): Promise<ExternalModelList>;
+  previewGatewayModel(
+    alias: string,
+    request: ExternalModelPreviewRequest,
+  ): Promise<ExternalModelReview>;
+  /** Accepts exactly the review: its digest, the request's own id. */
+  acceptGatewayModel(
+    alias: string,
+    request: ExternalModelPreviewRequest,
+    review: ExternalModelReview,
+    requestId?: string,
+  ): Promise<ExternalModelAccepted>;
+  gatewayCredentials(signal?: AbortSignal): Promise<ExternalBindingList>;
+  previewGatewayCredential(
+    name: string,
+    request: ExternalBindingPreviewRequest,
+  ): Promise<ExternalBindingReview>;
+  acceptGatewayCredential(
+    name: string,
+    request: ExternalBindingPreviewRequest,
+    review: ExternalBindingReview,
+    requestId?: string,
+  ): Promise<ExternalBindingAccepted>;
   operations(
     cursor?: string,
     signal?: AbortSignal,

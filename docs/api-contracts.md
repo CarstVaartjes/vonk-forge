@@ -49,7 +49,7 @@ operator read; a changed digest or revision is refused (409) and the same
 every problem with its field path. No document carries a secret: a binding is a
 name, its review reports only whether the supervisor loaded a value
 (`credential_loaded`), and a deployment's `reason` is the typed `ExternalBlockReason`.
-The acceptance receipts are `gateway-model` and `gateway-credential`.
+A model's view also carries the parked evidence, so an operator can tell "gave up" from "retrying": `operator_action` is `resume` when the gateway stopped trying this content (edit it, or accept an `enable`), and `start_failures` counts the failed starts of the content, which an edit or an enable resets. There is no separate resume route: `enable` is the resume. The acceptance receipts are `gateway-model` and `gateway-credential`.
 
 Mounted operator mutations declare their semantic `ReceiptPolicy`. The guard
 also enumerates both browser-auth configurations and rejects new unclassified

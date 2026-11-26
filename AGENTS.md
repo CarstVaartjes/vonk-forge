@@ -110,7 +110,7 @@ a binding name, never a value. An external deployment's state changes only throu
 re-plans from the operator's `enabled`/`removal_requested` intent), the route
 service publishes it from SQL in the maintenance pass only, and its secret lives in
 NAS custody (`secrets/gateway-credentials/`), reaching only the LiteLLM child. See
-[External models](docs/architecture-overview.md#external-models-and-the-alias-namespace).
+[External models](docs/architecture-overview.md#external-models-and-the-alias-namespace); the operator commands are `vonkctl gateway model|credential` (preview, then accept exactly that review; `enable` also resumes a parked model) and the web's External models and Credentials sections, which show only server fields and never a secret.
 
 Persist request identity before effects and reconcile a lost response before
 retrying. Reconnect to the original operation. A client timeout, disconnect, or

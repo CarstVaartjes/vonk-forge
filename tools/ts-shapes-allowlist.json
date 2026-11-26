@@ -311,6 +311,16 @@
       "file": "control/web/src/pages/login.tsx",
       "type": "LoginFailure",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
+    },
+    {
+      "file": "control/web/src/pages/credentials.tsx",
+      "type": "Pending",
+      "reason": "UI-only view model: the reviewed change an operator is asked to accept, built from generated request and review types; not an API document"
+    },
+    {
+      "file": "control/web/src/pages/external-models.tsx",
+      "type": "Pending",
+      "reason": "UI-only view model: the reviewed change an operator is asked to accept, built from generated request and review types; not an API document"
     }
   ]
 }
