@@ -567,10 +567,7 @@ def _library(
     print()
     if isinstance(cursor, str):
         shown = shlex.quote(cursor) if wide else "<cursor> (--wide prints it)"
-        # Only `library` takes --cursor; the applied filters rebuild the bare
-        # listing's --cached as well as a library listing's own filters.
-        flags = "".join(f" {flag}" for flag in applied)
-        print(f"Next page: vonkctl {noun} library{flags} --cursor {shown}")
+        print(f"Next page: add --cursor {shown} with the same filters.")
     if not rows and applied:
         print(f"Next: vonkctl {noun} library  (no filters)")
     elif not rows:
