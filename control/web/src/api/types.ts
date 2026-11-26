@@ -40,7 +40,7 @@ export type SwapShortfallEvidence = components["schemas"]["SwapShortfallEvidence
 export type OperationBlocker = components["schemas"]["OperationBlocker"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
-export type ModelDisplay = components["schemas"]["ModelDisplay"];
+export type ModelDisplay = components["schemas"]["LibraryModelDisplay"];
 export type RecipeDisplay = components["schemas"]["RecipeDisplay"];
 export type ModelLibrary = components["schemas"]["ModelLibraryResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
@@ -118,7 +118,7 @@ export function canonicalRecipeSelector(
 export type LibraryViewModel = {
   page_local?: boolean;
   // The published library text; null until the first sync that carries it.
-  model_display: components["schemas"]["ModelDisplay"] | null;
+  model_display: ModelDisplay | null;
   model: { kind: "model"; publisher: string; slug: string; content_sha256: string };
   model_document: Pick<ModelDefinition, "identity" | "format">;
   model_file_count: WireNumber;

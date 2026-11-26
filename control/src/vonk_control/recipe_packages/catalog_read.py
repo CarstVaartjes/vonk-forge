@@ -5,14 +5,18 @@ signed index: it verifies every entry's digest, skips an entry it cannot run,
 drops an unreadable optional block and keeps a word a newer minor added. This
 module turns its report into the sync's own terms:
 
-- a skipped entry is a sync problem (it pauses retraction, like any skip);
+- an entry skipped for a word this release does not know where it cannot keep
+  one (a newer executed discriminator) is withheld with a note: it needs a
+  newer platform. The rest applies and the sync stays current, but the view is
+  incomplete, so retraction pauses: the older revision stays offered and a
+  saved profile naming it keeps resolving;
+- any other skipped entry is a sync problem (it pauses retraction);
 - a dropped block is a note: the entry applies without it;
-- a word this Controller does not know is noted and read without
-  (``known_words``): left out of a list, read as a cautious neutral value, or,
-  failing both, its enclosing object is left out. A block that cannot stand
-  without it is withheld (``None``) and noted. No unknown word reaches what the
-  Controller stores or serves; a stored display stays until a readable one
-  arrives.
+- a word this Controller does not know is noted (``known_words``): a capability
+  is kept by its name; any other word is left out of a list, read as a
+  cautious neutral value, or, failing both, its enclosing object is left out.
+  A block that cannot stand without it is withheld (``None``) and noted. A
+  stored display stays until a readable one arrives.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from vonk_forge_contracts.catalog_reader import (
     CatalogProblem,
     CatalogSection,
     DroppedBlock,
+    FaultReason,
     SkippedEntry,
     UnrecognisedWordReport,
 )
@@ -43,6 +48,8 @@ _NAMED = 3
 @dataclass(frozen=True, slots=True)
 class ReaderReport:
     problems: tuple[ManagedCatalogSyncProblem, ...]
+    #: Entries that need a newer platform: noted, and they pause retraction.
+    withheld: tuple[ManagedCatalogSyncProblem, ...]
     notes: tuple[ManagedCatalogSyncProblem, ...]
     #: The blocks carrying an unknown word, by section and ``publisher/slug``.
     unknown: Mapping[tuple[CatalogSection, str], frozenset[str]]
@@ -52,11 +59,20 @@ def report(problems: Iterable[CatalogProblem]) -> ReaderReport:
     """Map the reader's problems to sync problems, notes and unknown-word blocks."""
 
     skipped: list[ManagedCatalogSyncProblem] = []
+    withheld: list[ManagedCatalogSyncProblem] = []
     dropped: dict[tuple[CatalogSection, str, str, str], list[str]] = {}
     words: list[UnrecognisedWordReport] = []
     unknown: dict[tuple[CatalogSection, str], set[str]] = {}
     for problem in problems:
         match problem:
+            case SkippedEntry(reason=FaultReason.UNKNOWN_WORD):
+                withheld.append(
+                    _problem(
+                        f"index {problem.section.value} entry "
+                        f"{_shown(problem.entry)} is withheld: "
+                        f"{_shown(problem.field)} needs a newer platform"
+                    )
+                )
             case SkippedEntry():
                 skipped.append(
                     _problem(
@@ -87,13 +103,14 @@ def report(problems: Iterable[CatalogProblem]) -> ReaderReport:
     ] + [
         _problem(
             f"index {word.section.value} {_shown(word.field)} word "
-            f"{_shown(word.word)!r} is unknown to this Controller; read without it "
+            f"{_shown(word.word)!r} is unknown to this Controller "
             f"for {_entries(word.entries)}"
         )
         for word in words
     ]
     return ReaderReport(
         problems=tuple(skipped),
+        withheld=tuple(withheld),
         notes=tuple(notes),
         unknown={key: frozenset(blocks) for key, blocks in unknown.items()},
     )
@@ -111,7 +128,7 @@ def known_entries[E: (CatalogModelEntry, CatalogRecipeEntry)](
     """
 
     known: list[E] = []
-    withheld: dict[str, list[str]] = {}
+    withheld: dict[tuple[str, str], list[str]] = {}
     for entry in entries:
         identity = entry.document.identity
         name = f"{identity.publisher}/{identity.slug}"
@@ -119,17 +136,16 @@ def known_entries[E: (CatalogModelEntry, CatalogRecipeEntry)](
         for block in sorted(unknown.get((section, name), ())):
             try:
                 update[block] = known_field(getattr(entry, block))
-            except BlockWithheld:
+            except BlockWithheld as reason:
                 update[block] = None
-                # Noted below, once per block: never a silent absence.
-                withheld.setdefault(block, []).append(name)
+                # Noted below, once per block and reason: never a silent absence.
+                withheld.setdefault((block, reason.reason), []).append(name)
         known.append(entry.model_copy(update=update) if update else entry)
     notes = [
         _problem(
-            f"index {section.value} {block} withheld for {_entries(names)}: "
-            "it cannot stand without an unknown word"
+            f"index {section.value} {block} withheld for {_entries(names)}: {reason}"
         )
-        for block, names in withheld.items()
+        for (block, reason), names in withheld.items()
     ]
     return known, notes
 

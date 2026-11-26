@@ -1875,37 +1875,8 @@
       "type": "object"
     },
     "CapabilityName": {
-      "enum": [
-        "3d-generation",
-        "audio-generation",
-        "audio-understanding",
-        "background-removal",
-        "chat",
-        "code-generation",
-        "decision",
-        "image-editing",
-        "image-generation",
-        "image-understanding",
-        "image-upscaling",
-        "material-estimation",
-        "motion-capture",
-        "motion-generation",
-        "ocr",
-        "parametric-body-model",
-        "person-detection",
-        "reasoning",
-        "retopology",
-        "speculative-decoding",
-        "speech-recognition",
-        "text-generation",
-        "text-to-speech",
-        "tool-use",
-        "video-generation",
-        "video-understanding",
-        "voice-cloning",
-        "voice-design"
-      ],
-      "title": "CapabilityName",
+      "maxLength": 64,
+      "minLength": 1,
       "type": "string"
     },
     "CapacityReservations": {
@@ -9788,6 +9759,97 @@
       "title": "LibraryLocalState",
       "type": "object"
     },
+    "LibraryModelDisplay": {
+      "description": "The published Model display as the Library serves it.\n\nThe contract's ``ModelDisplay`` with each capability as its name, so a\ncapability this Controller's contract does not list is shown, not refused.",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/CapabilityName"
+          },
+          "maxItems": 64,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "description": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "family_title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Family Title",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/ModelDisplayIdentity"
+        },
+        "kind": {
+          "const": "model-display",
+          "default": "model-display",
+          "title": "Kind",
+          "type": "string"
+        },
+        "license": {
+          "$ref": "#/$defs/ModelLicense"
+        },
+        "lineage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelLineage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "modalities": {
+          "items": {
+            "enum": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "3d",
+              "embeddings"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Modalities",
+          "type": "array"
+        },
+        "model_title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Model Title",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9.-]{0,39}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "identity",
+        "family_title",
+        "model_title",
+        "description",
+        "tags",
+        "modalities",
+        "capabilities",
+        "license"
+      ],
+      "title": "LibraryModelDisplay",
+      "type": "object"
+    },
     "LibraryProjectionCode": {
       "description": "Reasons the library projection truncates what it lists.",
       "enum": [
@@ -9855,7 +9917,7 @@
         "model_display": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ModelDisplay"
+              "$ref": "#/$defs/LibraryModelDisplay"
             },
             {
               "type": "null"
@@ -10665,96 +10727,6 @@
         "files"
       ],
       "title": "ModelDefinition",
-      "type": "object"
-    },
-    "ModelDisplay": {
-      "properties": {
-        "capabilities": {
-          "items": {
-            "$ref": "#/$defs/CapabilityName"
-          },
-          "maxItems": 64,
-          "title": "Capabilities",
-          "type": "array"
-        },
-        "description": {
-          "maxLength": 4000,
-          "minLength": 1,
-          "title": "Description",
-          "type": "string"
-        },
-        "family_title": {
-          "maxLength": 120,
-          "minLength": 1,
-          "title": "Family Title",
-          "type": "string"
-        },
-        "identity": {
-          "$ref": "#/$defs/ModelDisplayIdentity"
-        },
-        "kind": {
-          "const": "model-display",
-          "default": "model-display",
-          "title": "Kind",
-          "type": "string"
-        },
-        "license": {
-          "$ref": "#/$defs/ModelLicense"
-        },
-        "lineage": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ModelLineage"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "modalities": {
-          "items": {
-            "enum": [
-              "text",
-              "image",
-              "audio",
-              "video",
-              "3d",
-              "embeddings"
-            ],
-            "type": "string"
-          },
-          "minItems": 1,
-          "title": "Modalities",
-          "type": "array"
-        },
-        "model_title": {
-          "maxLength": 120,
-          "minLength": 1,
-          "title": "Model Title",
-          "type": "string"
-        },
-        "tags": {
-          "items": {
-            "pattern": "^[a-z0-9][a-z0-9.-]{0,39}$",
-            "type": "string"
-          },
-          "maxItems": 20,
-          "title": "Tags",
-          "type": "array"
-        }
-      },
-      "required": [
-        "identity",
-        "family_title",
-        "model_title",
-        "description",
-        "tags",
-        "modalities",
-        "capabilities",
-        "license"
-      ],
-      "title": "ModelDisplay",
       "type": "object"
     },
     "ModelDisplayIdentity": {

@@ -52,6 +52,7 @@ from sqlalchemy import JSON, inspect
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.types import TypeDecorator
+from vonk_forge_contracts.unrecognised import read_context
 
 from vonk_control.lifecycle.evidence import (
     BookkeepingReason,
@@ -120,6 +121,9 @@ class JsonColumn:
     #: Contracts whose own fields are checked by the guard elsewhere (a
     #: package boundary such as ``vonk_forge_contracts``).
     note: str = ""
+    #: Every read and write of this column validates in the catalog reader's
+    #: context, which keeps a word a newer contract minor added (a display).
+    keeps_unrecognised: bool = False
     _adapters: dict[str | None, TypeAdapter[Any]] = field(
         default_factory=dict, repr=False, compare=False, hash=False
     )
@@ -159,6 +163,7 @@ def bind(
     nullable: bool = False,
     discriminator: str | None = None,
     note: str = "",
+    keeps_unrecognised: bool = False,
 ) -> JsonColumn:
     """Register the contract of ``table.column``; each column is bound once."""
 
@@ -179,6 +184,7 @@ def bind(
         nullable=nullable,
         discriminator=discriminator,
         note=note,
+        keeps_unrecognised=keeps_unrecognised,
     )
     _REGISTRY[key] = binding
     return binding
@@ -266,12 +272,21 @@ def _row_subject(row: object) -> str:
     return "?"
 
 
-def _validate(adapter: TypeAdapter[Any], raw: object) -> Any:
+def _validate(binding: JsonColumn, adapter: TypeAdapter[Any], raw: object) -> Any:
     # The JSON path keeps decoded database values under the same strict
     # semantics as bytes received on the wire.
     return read_stored_document(
-        lambda document: adapter.validate_json(json.dumps(document, allow_nan=False)),
+        lambda document: _validate_json(
+            binding, adapter, json.dumps(document, allow_nan=False)
+        ),
         raw,
+    )
+
+
+def _validate_json(binding: JsonColumn, adapter: TypeAdapter[Any], text: str) -> Any:
+    """One document of ``binding``, in the reader's context when it keeps words."""
+    return adapter.validate_json(
+        text, context=read_context() if binding.keeps_unrecognised else None
     )
 
 
@@ -313,7 +328,7 @@ def read_column(
             f"no contract for kind {kind!r}",
         )
     try:
-        return _validate(adapter, raw)
+        return _validate(binding, adapter, raw)
     except (TypeError, ValueError, KeyError) as error:
         note = stored_document_detail(error) or type(error).__name__
     return retire_as_unknown(
@@ -343,7 +358,7 @@ def dump_column(binding: JsonColumn, value: object, *, kind: str | None = None) 
     ):
         typed = value
     else:
-        typed = adapter.validate_json(json.dumps(value, allow_nan=False))
+        typed = _validate_json(binding, adapter, json.dumps(value, allow_nan=False))
     return adapter.dump_python(typed, mode="json")
 
 
@@ -443,7 +458,7 @@ def _check(binding: JsonColumn, value: object, kind: str | None) -> str | None:
                 item.model_dump(mode="json") if isinstance(item, BaseModel) else item
                 for item in value
             ]
-        adapter.validate_json(json.dumps(value, allow_nan=False))
+        _validate_json(binding, adapter, json.dumps(value, allow_nan=False))
     except (TypeError, ValueError) as error:
         return stored_document_detail(error) or type(error).__name__
     return None

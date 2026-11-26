@@ -26,9 +26,9 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 from vonk_forge_contracts import (
     ModelDisplay,
     RecipeDisplay,
-    read_model_display,
     read_recipe_display,
 )
+from vonk_forge_contracts.unrecognised import read_context
 
 from vonk_agent_protocol.state_machines import machine_check
 from vonk_control.catalog.revision_contract import PublishedDocument
@@ -121,7 +121,13 @@ class CatalogDocument(Base):
         return None if self.display is None else read_recipe_display(self.display)
 
     def model_display(self) -> ModelDisplay | None:
-        return None if self.display is None else read_model_display(self.display)
+        # Read as the sync stored it: a capability a newer contract minor
+        # added is kept as its name (``recipe_packages.known_words``).
+        if self.display is None:
+            return None
+        return ModelDisplay.model_validate(
+            self.display, extra="ignore", context=read_context()
+        )
 
     def readable_recipe_display(self) -> RecipeDisplay | None:
         """The display, or None (noted once) when this contract cannot read it."""
