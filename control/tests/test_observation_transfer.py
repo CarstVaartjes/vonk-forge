@@ -14,7 +14,7 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from httpx import Request, Response
+from httpx2 import Request, Response
 from jsonschema import Draft202012Validator
 from pydantic import JsonValue, TypeAdapter
 from sqlalchemy import create_engine

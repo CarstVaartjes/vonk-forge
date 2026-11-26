@@ -233,7 +233,7 @@ jobs:
       # Build generated release inputs from locked dependencies; no generated
       # inventory files are checked into the source tree.
       - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version-file: .tool-versions
           python-version: "3.15"
@@ -1197,7 +1197,7 @@ jobs:
     # Match control/web/package-lock.json; browsers and system libraries are baked in.
     # https://playwright.dev/docs/ci#via-containers
     container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
       options: --init --ipc=host
     steps:
       - name: Check out repository

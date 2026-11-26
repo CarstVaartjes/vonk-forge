@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-import httpx
+import httpx2 as httpx
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.routing import APIRoute
