@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import copy
 import json
+import urllib.error
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from cluster_profiles.cli_update import CliUpdateUnavailable
+from cluster_profiles import cli_update
 from tools import client_compatibility_report
 from tools.client_compatibility_report import breaks, main
 
@@ -133,11 +134,8 @@ def _run(
 ) -> int:
     candidate = tmp_path / "candidate.json"
     candidate.write_text(json.dumps(_contract({"type": "string"}, extra_route=False)))
-    monkeypatch.setattr(client_compatibility_report.time, "sleep", lambda _: None)
 
     def fetch(_channel: str) -> tuple[str, str, object]:
-        if isinstance(published, Exception):
-            raise published
         return cast("tuple[str, str, object]", published)
 
     monkeypatch.setattr(client_compatibility_report, "_published_contract", fetch)
@@ -176,17 +174,17 @@ def test_only_a_stable_1_0_break_fails(
     )
 
 
-def test_an_unreachable_gated_channel_does_not_fail(
+def test_an_unpublished_stable_pointer_does_not_fail(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    error = CliUpdateUnavailable("no answer")
+    def not_found(request: Any, *, timeout: float) -> Any:
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
 
-    assert (
-        _run(
-            monkeypatch,
-            tmp_path,
-            ["--channel", "stable", "--gate-channel", "stable"],
-            error,
-        )
-        == 0
-    )
+    monkeypatch.setattr(cli_update, "open_https", not_found)
+    monkeypatch.setattr(cli_update.time, "sleep", lambda _: None)
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps(_BREAKING))
+
+    argv = ["--candidate", str(candidate), "--channel", "stable"]
+
+    assert main([*argv, "--gate-channel", "stable"]) == 0

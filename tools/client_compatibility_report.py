@@ -12,10 +12,12 @@ contract-mismatch check answers ``client.contract_mismatch`` with
 A channel named by ``--gate-channel`` is a gate from its 1.0 release on: the
 stable channel supports the previous stable vonkctl for one minor, so a break
 against a published release of major 1 or later exits 1. A 0.x release is only
-reported, and so is every channel not named. A channel that is not published
-yet (its signed pointer answers 404) or whose server does not answer after a
-bounded retry is reported and does not fail: an outage waits, it does not fail.
-Invalid or malformed signed data still raises.
+reported, and so is every channel not named. Only a signature or digest that
+does not verify (``CliUpdateIngressError``) fails closed, as in
+``run_update``. Any other update error (a channel not published yet, whose
+signed pointer answers 404; an outage after the bounded retries of the
+download; an expired manifest; a release not yet observable) is a
+``::warning::`` and does not fail: an outage waits, it does not fail.
 
     python tools/client_compatibility_report.py \\
         --candidate src/cluster_profiles/schemas/control-openapi.json \\
@@ -43,10 +45,8 @@ import argparse
 import hashlib
 import io
 import json
-import random
 import re
 import sys
-import time
 import zipfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -56,17 +56,14 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from cluster_profiles.cli_update import (
     _NOTICE_ORIGIN,
     INSTALLER_PUBLIC_KEY,
+    CliUpdateError,
     CliUpdateIngressError,
-    CliUpdateNotPublished,
-    CliUpdateUnavailable,
     _download,
     _signed_release,
 )
 
 _REFERENCE = "#/components/schemas/"
 _OPENAPI_MEMBER = "cluster_profiles/schemas/control-openapi.json"
-_POINTER = "/current.manifest"
-_FETCH_TRIES = 3
 
 
 class _Read(BaseModel):
@@ -395,19 +392,6 @@ def _published_contract(channel: str) -> tuple[str, str, JsonValue]:
     return label, str(release["version"]), document
 
 
-def _published_contract_retrying(channel: str) -> tuple[str, str, JsonValue]:
-    """``_published_contract`` with bounded backoff and jitter over an outage."""
-
-    for attempt in range(_FETCH_TRIES):
-        try:
-            return _published_contract(channel)
-        except CliUpdateUnavailable:
-            if attempt == _FETCH_TRIES - 1:
-                raise
-            time.sleep(2**attempt + random.uniform(0, 1))
-    raise AssertionError("unreachable")  # pragma: no cover
-
-
 def _major(version: str) -> int:
     return int(version.split(".", 1)[0])
 
@@ -442,19 +426,17 @@ def main(argv: list[str] | None = None) -> int:
     for channel in args.channel:
         gated = channel in args.gate_channel
         try:
-            label, version, prior = _published_contract_retrying(channel)
-        except CliUpdateNotPublished as error:
-            if gated and not error.url.endswith(f"/{channel}{_POINTER}"):
-                raise
-            print(f"### {channel}\n\nNot published: no break to compare.\n")
-            continue
-        except CliUpdateUnavailable as error:
-            print(f"::warning::{channel} contract unavailable: {error}")
-            print(f"### {channel}\n\nPublished contract unavailable: {error}\n")
-            continue
+            label, version, prior = _published_contract(channel)
         except Exception as error:
-            if gated:
+            # Only an unverified signature or digest fails closed; any other
+            # update error is an outage that waits.
+            waits = isinstance(error, CliUpdateError) and not isinstance(
+                error, CliUpdateIngressError
+            )
+            if gated and not waits:
                 raise
+            if waits:
+                print(f"::warning::{channel} contract unavailable: {error}")
             print(f"### {channel}\n\nPublished contract unavailable: {error}\n")
             continue
         found = breaks(prior, candidate)

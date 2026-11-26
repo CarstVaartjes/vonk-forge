@@ -193,6 +193,7 @@ def test_only_shown_response_words_open() -> None:
             "schemas": {
                 "Thing": {
                     "type": "object",
+                    "additionalProperties": False,
                     "properties": {
                         "reason": reference("ShownCode"),
                         "state": reference("LifecycleState"),
@@ -201,6 +202,7 @@ def test_only_shown_response_words_open() -> None:
                 },
                 "Order": {
                     "type": "object",
+                    "additionalProperties": False,
                     "properties": {"mode": reference("OrderMode")},
                 },
                 "ShownCode": {"enum": ["a.b"], "title": "ShownCode", "type": "string"},
@@ -218,6 +220,9 @@ def test_only_shown_response_words_open() -> None:
         "type": "string",
         "minLength": 1,
     }
+    # A response object is open; a request object stays closed.
+    assert "additionalProperties" not in schemas["Thing"]
+    assert schemas["Order"]["additionalProperties"] is False
     # Decided by vonkctl, and authored by it in a request: both stay closed.
     assert schemas["LifecycleState"]["enum"] == ["queued"]
     assert schemas["OrderMode"]["enum"] == ["fast"]

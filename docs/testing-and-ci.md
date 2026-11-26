@@ -37,10 +37,13 @@ Every change lands through an integration PR: a same-repository
 CLI wheel of each published channel. Against the stable channel it is a gate
 from 1.0 on: a response shape the published stable vonkctl would refuse fails
 the job (`--gate-channel stable`), which is how the N-1 support window is
-enforced. The dev channel and a 0.x stable are only reported. A stable channel
-that is not published yet (its signed pointer answers 404) or that does not
-answer after three tries with backoff is reported and does not fail the job;
-invalid signed data still does.
+enforced. The dev channel and a 0.x stable are only reported. Only a signature
+or digest that does not verify fails the job (as in `run_update`); any other
+update error, such as a stable channel not published yet (its signed pointer
+answers 404), an outage, or an expired manifest, is a `::warning::` and the
+job passes. vonkctl's shipped OpenAPI copy opens response objects
+(`additionalProperties: false` is dropped, `open_shown_words`), so an added
+optional response field is not reported as a break.
 
 A member PR is done when its review has passed.
 Adding the `release-acceptance` label re-runs `ci.yml` in full at once.

@@ -7,6 +7,14 @@ adds a word (a reason, attention or wait-owner code) is read, and the word is
 shown as sent. The sets it decides by stay closed, so a word it does not know
 there is a contract mismatch, answered by ``vonkctl update --apply``.
 
+Likewise a response object is open there: the Controller's strict response
+models carry ``additionalProperties: false``, which would refuse every optional
+field a newer Controller adds, so the shipped copy drops it on every component
+a response carries (as ``tools/vonkctl_json_contract.py`` does for the
+``--json`` contract). A request component stays closed. This keeps the
+stable-channel compatibility gate (``tools/client_compatibility_report.py``)
+firing only on real breaks.
+
 This is forward tolerance in the reader, not a shim for an older Controller:
 the CLI keeps one contract and one reading path.
 
@@ -109,10 +117,27 @@ def response_word_sets(document: object) -> frozenset[str]:
     )
 
 
+def _drop_closed_objects(node: _Json) -> None:
+    if isinstance(node, dict):
+        if node.get("additionalProperties") is False:
+            del node["additionalProperties"]
+        for value in node.values():
+            _drop_closed_objects(value)
+    elif isinstance(node, list):
+        for value in node:
+            _drop_closed_objects(value)
+
+
 def open_shown_words(document: object) -> None:
-    """Open, in place, every response word set of ``document`` vonkctl only shows."""
+    """Open, in place, what vonkctl only reads of a response in ``document``.
+
+    That is every response word set it only shows, and the closing of every
+    response object.
+    """
 
     schemas = _schemas(document)
+    for name in received_schemas(document):
+        _drop_closed_objects(schemas.get(name))
     for name in response_word_sets(document) - DECIDED_BY:
         shown = schemas[name]
         kept = (
