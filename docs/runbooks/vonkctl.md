@@ -90,8 +90,8 @@ with their arguments, for example `vonkctl fleet detail <spark>`, and no
 options. `vonkctl GROUP COMMAND --help` shows that command's arguments and
 flags. A group run on its own shows its current state: `vonkctl platform`,
 `vonkctl metrics`, `vonkctl fleet`, `vonkctl model`, `vonkctl recipe`,
-`vonkctl profile`, `vonkctl key` and `vonkctl gateway` are overviews. Groups
-without a view of their own (`fleet enrollment`, `recipe installation`,
+`vonkctl profile` and `vonkctl key` are overviews. Groups
+without a view of their own (`gateway`, `fleet enrollment`, `recipe installation`,
 `job`, `completion`) print their help. A mistyped command gets a
 suggestion (`unknown command 'detal' for 'vonkctl fleet'. Did you mean
 'detail'?`), a missing argument gets the usage line, and both name the help
@@ -1238,8 +1238,8 @@ vonkctl gateway model remove partner-large --yes
 Every change is reviewed first and accepted exactly as reviewed: `put`, `enable`, `disable`, `remove`
 and the credential commands read the current revision, ask the Controller for the review, and send its
 `effect_digest`, the revision and the request key with the accept. A change that no longer matches is
-refused and the command is safe to run again; `--request-key` reconnects to a lost response. `--review`
-stops after the review; without `--yes` a terminal asks, and a pipe refuses. A review that lists
+refused and the command is safe to run again (a `remove` that already completed answers not found); `--request-key` reconnects to a lost response. `--review`
+stops after the review; without `--yes` a terminal asks, and a pipe refuses. `credential put` replaces the whole destination list, and `--private` applies to every origin given. A review that lists
 problems (a path and a rule each) applies nothing and exits non-zero. The entry file is never printed.
 
 Accepting a change restarts the gateway, which cuts streams in flight after 30 seconds. If the gateway

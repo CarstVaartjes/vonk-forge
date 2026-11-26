@@ -29,16 +29,13 @@ def _destination(value: object) -> str:
 def _approved(destinations: object) -> str:
     if not isinstance(destinations, list):
         return _text(None)
-    return (
-        ", ".join(
-            _text(item.get("origin"))
-            + (f" ({_text(item['region'])})" if item.get("region") else "")
-            + (" [private]" if item.get("private") else "")
-            for item in destinations
-            if isinstance(item, Mapping)
-        )
-        or Word.NONE
-    )
+    return ", ".join(
+        _text(item.get("origin"))
+        + (f" ({_text(item['region'])})" if item.get("region") else "")
+        + (" [private]" if item.get("private") else "")
+        for item in destinations
+        if isinstance(item, Mapping)
+    ) or _words([])
 
 
 def _model_rows(payload) -> None:
@@ -137,8 +134,13 @@ def _review(review, target: str) -> None:
     _field("Destination", _destination(review.get("destination")))
     if review.get("changed_from") is not None:
         _field("Moved from", _destination(review.get("changed_from")))
+    _field("Credentials", _words(review.get("credential_bindings")))
     _field("Effects", _words(review.get("effects")))
     _field("Gateway grace", f"{_text(review.get('grace_seconds'))} s")
+    _field(
+        "Local models dark at most (failed start)",
+        f"{_text(review.get('failed_start_dark_seconds'))} s",
+    )
 
 
 def _change(payload, target: object) -> None:

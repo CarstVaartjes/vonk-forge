@@ -26,6 +26,7 @@ if __package__ in {None, ""}:
 
 import yaml
 
+from tests.acceptance import external_operator_flow
 from tests.acceptance.runtime import (
     AcceptanceError,
     _compose_rows,
@@ -58,6 +59,9 @@ DEFAULT_SERVICES = {
 }
 TAILSCALE_SERVICES = {"tailscale-configurator", "tailscale-gateway"}
 LOCAL_SERVICES = DEFAULT_SERVICES - TAILSCALE_SERVICES
+#: Acceptance-only Compose overlays added after the candidate image overlay (the
+#: external-model flow's gateway trust).
+EXTRA_OVERLAYS: list[Path] = []
 SAFE_URL = re.compile(r"https://[A-Za-z0-9._~:/-]+\Z")
 SAFE_DNS_SUFFIX = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\Z"
@@ -596,12 +600,21 @@ def reference_compose() -> list[str]:
     ):
         raise AcceptanceError("reference Compose fixture is unavailable")
     overlay = os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+    files: list[Path] = []
     if overlay:
         candidate = Path(overlay)
         if not candidate.is_absolute() or not candidate.is_file():
             raise AcceptanceError("candidate Compose overlay is unavailable")
-        return [str(executable), "-f", "docker-compose.yaml", "-f", str(candidate)]
-    return [str(executable)]
+        files.append(candidate)
+    files.extend(EXTRA_OVERLAYS)
+    if not files:
+        return [str(executable)]
+    return [
+        str(executable),
+        "-f",
+        "docker-compose.yaml",
+        *(argument for file in files for argument in ("-f", str(file))),
+    ]
 
 
 def parsed_environment(bundle: Path) -> dict[str, str]:
@@ -1598,6 +1611,14 @@ def exercise_compose(
         assert_candidate_image_graph(document["services"], candidate["services"])
 
     started = () if tailscale_mode == "full" else tuple(sorted(expected))
+    external_flow = tailscale_mode == "disabled"
+    if external_flow:
+        # Before the stack starts: the secret in custody, and the gateway's trust.
+        EXTRA_OVERLAYS[:] = [
+            external_operator_flow.prepare(
+                bundle, bundle.parent.parent / "external-flow"
+            )
+        ]
 
     def bring_up() -> None:
         try:
@@ -1639,6 +1660,10 @@ def exercise_compose(
     try:
         bring_up()
         verify_running()
+        if external_flow:
+            external_operator_flow.exercise(
+                reference_compose, bundle, bundle.parent.parent / "external-flow"
+            )
         if reinstall is not None:
             # The Controller has started and prepared its host mounts. The
             # bundle must still be what the installer made for its owner, and
@@ -1693,6 +1718,7 @@ def exercise_compose(
             service_addresses=service_addresses,
         )
     finally:
+        external_operator_flow.cleanup()
         run(
             [
                 *reference_compose(),

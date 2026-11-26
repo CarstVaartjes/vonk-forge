@@ -767,7 +767,7 @@ def _add_gateway_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(credential_list)
     credential_put = credential_actions.add_parser(
         ExternalBindingAction.PUT,
-        help="Approve the destinations a credential may be sent to",
+        help="Set the destinations a credential may be sent to (replaces the list)",
     )
     credential_put.add_argument("name", help="Binding name, e.g. PARTNER")
     credential_put.add_argument(
@@ -784,7 +784,7 @@ def _add_gateway_commands[ControllerParserT: argparse.ArgumentParser](
     credential_put.add_argument(
         "--private",
         action="store_true",
-        help="Approve origins whose host is a private IP address",
+        help="Approve every origin given although its host is a private IP address",
     )
     _change_flags(credential_put)
     credential_remove = credential_actions.add_parser(

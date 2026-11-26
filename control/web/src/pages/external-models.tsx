@@ -21,7 +21,17 @@ function failure(error: unknown, fallback: string): string {
 
 /** The Controller's own words for a review: its typed effects and the gateway's grace. */
 function consequence(review: ExternalModelReview): string {
-  return `Effects: ${review.effects.join(", ")}. Streams in flight are cut after ${String(review.grace_seconds)} s.`;
+  const parts = [
+    review.destination ? `Destination: ${review.destination.origins.join(", ")}.` : "",
+    review.changed_from ? `Moves from: ${review.changed_from.origins.join(", ")}.` : "",
+    review.credential_bindings?.length
+      ? `Credentials: ${review.credential_bindings.join(", ")}.`
+      : "",
+    `Effects: ${review.effects.join(", ")}.`,
+    `Streams in flight are cut after ${String(review.grace_seconds)} s.`,
+    `If the gateway does not start with this entry, local models are down for at most ${String(review.failed_start_dark_seconds)} s.`,
+  ];
+  return parts.filter(Boolean).join(" ");
 }
 
 /** External models: published through the same gateway and client keys as the local ones. */

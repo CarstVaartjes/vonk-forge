@@ -287,6 +287,12 @@ def _entry(source: str) -> ExternalModelInput:
             "the entry file must hold one JSON object with a model_name: "
             "the alias clients call"
         )
+    unknown = sorted(set(document) - {"model_name", "litellm_params", "model_info"})
+    if unknown:
+        # The generated model would drop them silently before the server could refuse.
+        raise LocalInputError(
+            f"the entry has unknown top-level keys: {', '.join(unknown)}"
+        )
     return ExternalModelInput.from_dict(document)
 
 

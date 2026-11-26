@@ -1,10 +1,10 @@
 """Prove an external model through the real LiteLLM image, with a client's credential.
 
-The external model is added the way an operator adds it: through the real
-administrator routes (``/api/gateway/credentials`` and ``/api/gateway/models``), each
-change reviewed and then accepted with the review's digest, then planned and published
-by the route service's own planner and acknowledged by the real supervisor. It is
-removed the same way. One client virtual key, created by the real ``GatewayKeyService`` with no model
+The external model is added the way an operator adds it, in process: through the
+real administrator routes over SQLite (each change previewed, then accepted with the
+review's digest) and the route service's planner functions. This is not the deployed
+Controller API; ``test_fresh_nas_install.py`` runs that flow on an installed bundle.
+One client virtual key, created by the real ``GatewayKeyService`` with no model
 list (the path the API takes), reaches a local model and an external model with
 streaming. Two controlled HTTPS stubs stand in for the outside world: "partner",
 an OpenAI-compatible upstream behind a custom ``api_base`` that checks the credential

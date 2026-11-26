@@ -64,7 +64,6 @@ class Word(StrEnum):
     MODEL = "model"
     CREDENTIAL = "credential"
     ALIAS = "alias"
-    NONE = "none"
     SHOW = "show"
     VALIDATE = "validate"
 
