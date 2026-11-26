@@ -52,12 +52,12 @@ from cluster_profiles.serving_execution import (
     ServingExecutionError,
     evaluate_http_response,
 )
-from scripts.development_slice_client import SliceError, require_object
-from scripts.retry_dependency_fetch import (
+from scripts.ci.retry_dependency_fetch import (
     FETCH_DEADLINE_SECONDS,
     MAX_ATTEMPTS,
     backoff,
 )
+from scripts.fleet.development_slice_client import SliceError, require_object
 from tests.acceptance.controller_contract import ControllerContract
 from tests.acceptance.ephemeral import (
     release_public_key,

@@ -1,6 +1,6 @@
 # Principle guards
 
-`scripts/check-added-lines [PATCH_FILE|-]` checks added lines in an externally
+`scripts/dev/check-added-lines [PATCH_FILE|-]` checks added lines in an externally
 supplied unified diff. CI creates the patch against its explicit PR/merge-group
 base; local callers may supply their own patch. The script, Python scanners and
 fixture tests consume source and patch text without reading Git or history.

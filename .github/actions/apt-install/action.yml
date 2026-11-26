@@ -14,4 +14,4 @@ runs:
       run: |
         set -euo pipefail
         read -r -a packages <<< "$PACKAGES"
-        scripts/ci-apt-install "${packages[@]}"
+        scripts/ci/ci-apt-install "${packages[@]}"

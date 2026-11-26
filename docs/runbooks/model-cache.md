@@ -63,7 +63,7 @@ About 280 MB/s is the ceiling on 2.5 GbE, shared by every Spark copying at the
 same time. When a copy runs far below it, follow the
 [transfer throughput runbook](transfer-throughput.md): it measures the network,
 the Controller round trip, the NAS disks and CPU separately with
-`scripts/measure-transfer` (on a Spark) and `scripts/measure-nas-serving` (on
+`scripts/fleet/measure-transfer` (on a Spark) and `scripts/fleet/measure-nas-serving` (on
 the NAS).
 
 On Btrfs the Controller marks the model and image directories no-copy-on-write

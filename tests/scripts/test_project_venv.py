@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-HELPER = ROOT / "scripts/ensure-project-venv"
+HELPER = ROOT / "scripts/dev/ensure-project-venv"
 
 
 def run_helper(environment: Path) -> subprocess.CompletedProcess[str]:
@@ -97,7 +97,7 @@ def test_base_interpreter_directory_is_never_recreated(
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     monkeypatch.setenv("VONK_CLI_DEPENDENCY_ENV", sys.base_prefix)
     result = subprocess.run(
-        ["bash", str(ROOT / "scripts" / runner)]
+        ["bash", str(ROOT / "scripts/dev" / runner)]
         + ([sys.base_prefix] if runner == "ensure-project-venv" else []),
         capture_output=True,
         text=True,
@@ -139,14 +139,15 @@ def test_shared_check_refuses_ambiguous_relative_paths(tmp_path: Path, monkeypat
 
 def test_cli_sync_resolves_relative_override_from_project_not_caller(tmp_path: Path):
     root = tmp_path / "repo"
-    scripts = root / "scripts"
+    scripts = root / "scripts/dev"
     scripts.mkdir(parents=True)
     for name in ("sync-cli-dependencies", "ensure-project-venv"):
-        shutil.copy(ROOT / "scripts" / name, scripts)
+        shutil.copy(ROOT / "scripts/dev" / name, scripts)
     tools = root / "tools"
     tools.mkdir()
     shutil.copy(ROOT / "tools/cli_dependencies.py", tools)
-    retry = scripts / "retry-dependency-fetch"
+    (root / "scripts/ci").mkdir()
+    retry = root / "scripts/ci/retry-dependency-fetch"
     retry.write_text('#!/bin/sh\nexec "$@"\n')
     retry.chmod(0o755)
     binaries = tmp_path / "bin"
@@ -194,7 +195,7 @@ def test_every_project_environment_setter_uses_shared_check():
         source = script.read_text(errors="replace")
         if (
             re.search(r"\bUV_PROJECT_ENVIRONMENT\s*=", source)
-            and "scripts/ensure-project-venv" not in source
+            and "scripts/dev/ensure-project-venv" not in source
         ):
             unchecked.append(str(script.relative_to(ROOT)))
     assert unchecked == [], f"Project environments bypass the shared check: {unchecked}"

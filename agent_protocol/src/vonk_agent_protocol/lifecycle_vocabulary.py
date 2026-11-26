@@ -1,9 +1,9 @@
 """The lifecycle and outcome vocabulary shared by Python, Rust and TypeScript.
 
 This module is the one definition of the closed words the Controller's lifecycle
-core, the agent's results and the CI ratchets speak.  ``scripts/export-agent-wire-schema``
+core, the agent's results and the CI ratchets speak.  ``scripts/dev/export-agent-wire-schema``
 publishes it through :class:`LifecycleVocabulary` into ``wire.json``, and
-``scripts/generate-agent-wire`` turns that into Rust types, so no consumer
+``scripts/dev/generate-agent-wire`` turns that into Rust types, so no consumer
 spells one of these words by hand.
 
 The stored ``state`` of a lifecycle subject speaks :class:`LifecycleState` and

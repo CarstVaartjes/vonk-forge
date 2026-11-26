@@ -67,7 +67,7 @@ print(json.dumps({documents!r}))
         tool.chmod(0o755)
     result = subprocess.run(
         [
-            ROOT / "scripts/verify-published-image",
+            ROOT / "scripts/images/verify-published-image",
             "api",
             "ghcr.io/carstvaartjes/vonk-forge-api",
             digest,
