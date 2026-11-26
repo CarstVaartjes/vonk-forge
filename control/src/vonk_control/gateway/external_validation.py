@@ -129,7 +129,9 @@ _CONTROLLER_INFO_PREFIXES: Final = ("health_check_",)
 _VONK_FACTS: Final = {
     name: TypeAdapter(field.annotation)
     for name, field in LiteLlmModelInfo.model_fields.items()
-    if name.startswith("vonk_") and name not in _CONTROLLER_INFO
+    if name.startswith("vonk_")
+    and name not in _CONTROLLER_INFO
+    and field.annotation is not None
 }
 
 

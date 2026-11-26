@@ -15,7 +15,7 @@ import json
 import os
 from importlib import import_module
 from importlib.metadata import version
-from typing import get_type_hints
+from typing import Any, get_type_hints
 
 from pydantic import TypeAdapter
 
@@ -28,7 +28,7 @@ ModelInfoFields = import_module("litellm.types.utils").ModelInfo
 _NOT_JSON = {"not": {}}
 
 
-def _schema(annotation: object) -> object:
+def _schema(annotation: Any) -> object:
     try:
         return TypeAdapter(annotation).json_schema()
     except Exception:  # noqa: BLE001 -- any type pydantic cannot describe is not JSON

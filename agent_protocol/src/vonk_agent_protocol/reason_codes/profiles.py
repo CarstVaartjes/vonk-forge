@@ -58,6 +58,7 @@ class ProfileReasonCode(WireEnum):
 #: profile conflict is a wait, answered 503 with ``Retry-After``.
 PROFILE_REFUSAL_CODES = frozenset(
     {
+        ProfileReasonCode.ALIAS_TAKEN,
         ProfileReasonCode.ADMISSION_DEFECT,
         ProfileReasonCode.DEFINITION_UNAVAILABLE,
         ProfileReasonCode.REQUEST_INVALID,
