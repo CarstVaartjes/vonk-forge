@@ -13,7 +13,9 @@ for a slow or busy API: each request has its own timeout, and a timeout, 5xx,
 rate limit or connection error prints a notice, skips that work and exits 0, so
 the next weekly run continues. Everything else fails (a 4xx, a missing token, a
 usage error, an unexplained ``gh`` exit); a refused delete is reported and the
-others still run, and a delete of a version that is already gone counts as done.
+others still run, and a delete of a version that is already gone counts as done. Deletes stop
+starting after ``RUN_BUDGET_SECONDS`` with a notice of the remainder, so a large
+backlog ends green inside the job's timeout and the next run continues.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import math
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from typing import NotRequired, TypedDict
@@ -33,6 +36,9 @@ PACKAGE = "vonk-forge-api"
 PAGE_SIZE = 100
 PAGE_READERS = 4
 REQUEST_TIMEOUT_SECONDS = 60
+# The job's timeout-minutes is 10; no delete starts after 7 of them, leaving room
+# for one last request and the job's setup.
+RUN_BUDGET_SECONDS = 7 * 60
 # Only these may pass on the next run; any other failure is real and raises.
 _TRANSIENT = re.compile(
     r"\(HTTP (?:5\d\d|429)\)|rate limit|error connecting|dial tcp|"
@@ -108,7 +114,15 @@ def stale(
     return sorted(found.items())
 
 
-def prune(api: Api, owner: str, repository: str, *, dry_run: bool = False) -> int:
+def prune(
+    api: Api,
+    owner: str,
+    repository: str,
+    *,
+    dry_run: bool = False,
+    clock: Callable[[], float] = time.monotonic,
+) -> int:
+    started = clock()
     package = f"/users/{owner}/packages/container/{PACKAGE}"
     listed_open = call(
         api,
@@ -143,10 +157,18 @@ def prune(api: Api, owner: str, repository: str, *, dry_run: bool = False) -> in
     # Deletes run one at a time: GitHub limits mutating requests per minute, and
     # the first one it defers ends this run's deletes for the next run.
     failures = 0
-    for version_id, number in stale(versions, open_numbers):
+    doomed = stale(versions, open_numbers)
+    for position, (version_id, number) in enumerate(doomed):
         if dry_run:
             print(f"would delete buildcache-pr-{number} (version {version_id})")
             continue
+        # A large backlog must end green: the rest waits for the next weekly run.
+        if clock() - started >= RUN_BUDGET_SECONDS:
+            print(
+                f"::notice::time budget spent; {len(doomed) - position} closed "
+                "caches remain for the next weekly run"
+            )
+            break
         try:
             deleted = call(
                 api, "--method", "DELETE", f"{package}/versions/{version_id}"

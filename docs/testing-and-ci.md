@@ -961,7 +961,10 @@ pruner reads the package versions one page at a time, each request with its own
 timeout; a timeout, 5xx, rate limit or connection error skips only that work
 with a notice and the next weekly run continues, while any other failure fails.
 It reads every page on every run (newest first with no cursor, a page cap would
-strand the oldest caches), and a delete of an already-gone version counts as done. The mirror job copies with
+strand the oldest caches), and a delete of an already-gone version counts as done.
+Deletes run serially and stop starting after 7 of the job's 10 minutes
+(`RUN_BUDGET_SECONDS`) with a notice of how many closed caches remain, so a large
+backlog ends green and the next weekly run continues. The mirror job copies with
 the lock's pinned skopeo image (`build_bases.skopeo`), not the runner's apt skopeo,
 which cannot keep some OCI indexes digest-exact.
 
