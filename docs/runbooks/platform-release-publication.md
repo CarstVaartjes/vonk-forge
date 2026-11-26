@@ -34,7 +34,9 @@ through the existing agent relay without SSH. The default one-at-a-time
 strategy requires the exact new agent and helper activation evidence before it
 queues the next Spark. Rerunning the Spark installer remains the package repair,
 fresh-install, and explicit re-enrollment path; there is no A/B rollback slot or
-offline Spark rollback bundle.
+offline Spark rollback bundle. A fleet upgrade also moves a Spark between
+channels, with no installer rerun: it finds the installed package under either
+channel.
 
 ## CI authority boundary
 
