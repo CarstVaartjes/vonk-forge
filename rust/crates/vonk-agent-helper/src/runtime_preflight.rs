@@ -101,7 +101,13 @@ pub fn run(
         reason = "best-effort cleanup: the next reconciliation pass repeats it"
     )]
     let _ = docker(
-        &["container".into(), "rm".into(), "--force".into(), name],
+        &[
+            "container".into(),
+            "rm".into(),
+            "--force".into(),
+            "--volumes".into(),
+            name,
+        ],
         cleanup_budget(started, deadline),
     );
     let cleaned = docker(

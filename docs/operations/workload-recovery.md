@@ -178,7 +178,7 @@ reads the container's own managed labels from the root helper and asks the
 Controller for an orphan stop grant, which it issues only while it wants the
 run on no live claim (the same "wanted here" rule as the disposition, and no
 live operation owns the run). The helper still removes only a container that is
-exactly that identity's, of that generation or older. A refusal or a missing
+exactly that identity's, of that generation or older. Every removal passes `--volumes`, so a container's anonymous image volumes go with it; named volumes are never touched. A refusal or a missing
 answer changes nothing and the next cycle asks again. Artifact-job containers
 are not covered. A known running run comes back with its accepted
 generation; when the root helper proves the exact `vonk-<run_id>` container is

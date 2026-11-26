@@ -355,10 +355,12 @@ impl Host {
                 docker_output(true, "", 0)
             }
             // Docker never removes a running container without `--force`.
-            ["rm", _] if find(&name).is_some_and(|index| containers[index].state == "running") => {
+            ["rm", "--volumes", _]
+                if find(&name).is_some_and(|index| containers[index].state == "running") =>
+            {
                 docker_output(false, "", 1)
             }
-            ["rm", _] => {
+            ["rm", "--volumes", _] => {
                 if let Some(index) = find(&name) {
                     containers.remove(index);
                 }

@@ -273,7 +273,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
             );
         }
         let removed = self.run_docker_with_timeout(
-            &["rm".to_owned(), container.id.clone()],
+            &[
+                "rm".to_owned(),
+                "--volumes".to_owned(),
+                container.id.clone(),
+            ],
             Duration::from_secs(15),
         )?;
         if !removed.success {
