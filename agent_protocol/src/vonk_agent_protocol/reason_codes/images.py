@@ -25,8 +25,9 @@ class PrebuiltImageCode(WireEnum):
     """Why a prebuilt runtime image is, or is not, used."""
 
     # No longer produced: the Controller uses the pin for the content digest.
-    # Stored build policies and availability blockers written before that
-    # still carry it; delete it once a deploy cycle has passed.
+    # Stored build policies and availability job blockers written before that
+    # still carry it, and job rows are never pruned. Remove it only when a
+    # read-only production query shows no job payload or live build holds it.
     BUILD_KEY_MISMATCH = "prebuilt.build_key_mismatch"
     NOT_PINNED = "prebuilt.not_pinned"
     PULL_FAILED = "prebuilt_image_pull_failed"

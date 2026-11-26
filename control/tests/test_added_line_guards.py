@@ -4401,6 +4401,8 @@ def test_a_controller_prebuilt_key_read_is_flagged() -> None:
     for source in (
         "key = executable_build_key(identity)\n",
         "stale = image.build_key != expected\n",
+        "key = pinned['build_key']\n",
+        'key = projected["prebuilt_image"].get("build_key")\n',
     ):
         assert check_source(path, source, {1}, modes=("prebuilt-key",))
     assert not check_source(

@@ -197,7 +197,10 @@ RANK_INSTALLED_KIND = (
 # digest; a prebuilt image is identified by its manifest digest. The build key
 # is the recipes CI's handle: nothing in the Controller derives or reads it,
 # except catalog ingest, which stores the published field as it is.
-PREBUILT_KEY_READ = re.compile(r"\bexecutable_build_key\(|\.build_key\b")
+PREBUILT_KEY_READ = re.compile(
+    r"\bexecutable_build_key\(|\.build_key\b"
+    r"|\[\s*[\"']build_key[\"']\s*\]|\.get\(\s*[\"']build_key[\"']"
+)
 
 
 PREBUILT_KEY_INGEST = "control/src/vonk_control/catalog/"
