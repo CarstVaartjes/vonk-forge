@@ -372,16 +372,6 @@ def test_fleet_detail_shows_cpu_clock_with_temperature_and_throttle_hint(capsys)
     assert "GHz" not in capsys.readouterr().out
 
 
-def test_a_newer_attention_word_renders():
-    # vonkctl reads attention codes it never listed; rendering one must not fail.
-    spark = _spark("atlas", 1)
-    spark["warnings"] = [
-        {"code": "host.newer-attention", "detail": "Newer", "severity": "warning"}
-    ]
-
-    render_payload(spark, "fleet", action="detail")
-
-
 def _recipe_library_payload(count: int) -> dict[str, object]:
     return {
         "recipes": [

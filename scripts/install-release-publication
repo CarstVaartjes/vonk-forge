@@ -666,9 +666,10 @@ def assemble(arguments: argparse.Namespace) -> str:
         wire = runpy.run_path(str(ROOT / "scripts/export-agent-wire-schema"))[
             "export_schema"
         ]()
+        # The document vonkctl ships, which both build identities stamp.
         control_schema = runpy.run_path(str(ROOT / "scripts/generate-control-clients"))[
-            "_schema"
-        ](include_browser_auth=False)
+            "cli_schema"
+        ]()
         if build_identity.control_contract_sha256 != contract_fingerprint(
             control_schema
         ):
