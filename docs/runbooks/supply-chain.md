@@ -71,8 +71,11 @@ the only ingress of the wheel: it downloads it and checks its attestation with
 records its sha256. When the release's signed `recipe-library.tar` lists a
 `future-canary-index.json`, the tool streams the tar, verifies its `SHA256SUMS`
 the same way and copies the vector to
-`control/tests/fixtures/future-canary-index.json` only if its digest matches;
-a release without one leaves the fixture as it is. Nothing is written before
+`control/tests/fixtures/future-canary-index.json` only if its digest matches.
+It reads the vector only when the pinned version moves (or the fixture is
+missing): the tar is republished in place with every catalog publish, so the
+committed vector stays while the version stays. A release without one leaves
+the fixture as it is. Nothing is written before
 every download verified. It then writes exactly:
 `control/packaging/public-contracts.lock` (`package`, `release`, `wheel`,
 `sha256`, nothing else); the wheel in `inventory/wheels`; the wheel name in

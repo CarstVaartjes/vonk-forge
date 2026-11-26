@@ -153,20 +153,6 @@ class _Interface(Protocol):
     model_aliases: Sequence[str]
 
 
-class _RuntimeArgument(Protocol):
-    name: str
-    value: object
-    setting: str | None
-
-
-class _Runtime(Protocol):
-    arguments: Sequence[_RuntimeArgument]
-
-
-class _BoundSetting(Protocol):
-    value: object
-
-
 class _Recipe(Protocol):
     identity: _Identity
     models: Sequence[_ModelSelection]
@@ -174,7 +160,6 @@ class _Recipe(Protocol):
     validation: _Validation
     topology: _Topology
     interfaces: Sequence[_Interface]
-    runtime: _Runtime
     settings: object
 
     def with_option_choices(self, choices: Mapping[str, str]) -> _Recipe: ...
@@ -586,20 +571,23 @@ def _chat_api(recipe: _Recipe, library_root: Path) -> object | None:
 
 
 def _argument_value(recipe: _Recipe) -> Callable[[str], int | None]:
-    """The integer a runtime argument of the recipe carries as launched, a setting binding resolved."""
-    resolved = recipe.with_option_choices({})
-    settings = resolved.settings
+    """The integer a runtime argument carries as the platform compiles it, as the gateway reads it.
+
+    An argument bound to a setting the recipe lacks is refused, never sent unbounded.
+    """
+    from vonk_control.recipe_operations.runtime_specs import (  # noqa: PLC0415 - the platform checkout's compiler, on sys.path since _compile
+        _compiled_arguments,  # the one compiled reading the gateway also uses
+    )
 
     def value(name: str) -> int | None:
-        for argument in resolved.runtime.arguments:
-            if argument.name != name:
-                continue
-            raw = argument.value
-            if argument.setting is not None:
-                knobs: Mapping[str, _BoundSetting] = getattr(settings, "knobs", None) or {}
-                bound = knobs.get(argument.setting) or getattr(settings, argument.setting, None)
-                raw = getattr(bound, "value", None)
-            return raw if isinstance(raw, int) and not isinstance(raw, bool) else None
+        try:
+            arguments = _compiled_arguments(recipe.with_option_choices({}), None)  # pyright: ignore[reportArgumentType]  # the library's RecipeDefinition, read through _Recipe
+        except KeyError as error:
+            raise QualificationError("an argument names a setting the recipe lacks") from error
+        for argument in arguments:
+            if argument.name == name:
+                found = argument.value
+                return found if isinstance(found, int) and not isinstance(found, bool) else None
         return None
 
     return value

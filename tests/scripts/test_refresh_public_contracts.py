@@ -181,3 +181,22 @@ def test_a_release_without_a_future_vector_keeps_the_fixture(tmp_path: Path) -> 
     _refresh(repository, recipes)
 
     assert (repository / VECTOR).read_bytes() == b"kept"
+
+
+def test_the_vector_moves_only_with_the_version(tmp_path: Path) -> None:
+    """The tar is republished in place; an unchanged pin keeps the committed vector."""
+
+    repository = _repository(tmp_path)
+    _refresh(repository, _recipes(tmp_path))
+    shutil.rmtree(tmp_path / "release")
+    republished = _recipes(tmp_path)
+    republished.members["future-canary-index.json"] = b"republished"
+
+    _refresh(repository, republished)
+
+    assert (repository / VECTOR).read_bytes() == b"{}"
+
+
+def test_a_failed_gh_command_is_a_refresh_error() -> None:
+    with pytest.raises(tool.RefreshError):
+        tool._output("false")

@@ -323,15 +323,8 @@ def test_unrelated_damaged_head_does_not_gate_removal_before_sync(
         )
         assert old is not None
         # Match the production damage: a retained source identity is still a
-        # head, but its document predates a required canonical field.
-        document = old.document.copy()
-        del document["requires_token"]
-        session.execute(
-            update(CatalogDocumentRevision)
-            .where(CatalogDocumentRevision.id == old.id)
-            .values(document=document)
-            .execution_options(synchronize_session=False)
-        )
+        # head, but its document no longer reads under the canonical contract.
+        _damage(session, old.id, field="requires_token")
     cache = ModelCacheService(catalog._sessions, tmp_path / "nas", clock=lambda: NOW)
     try:
         digest = document_sha256(target.model_dump(mode="json"))

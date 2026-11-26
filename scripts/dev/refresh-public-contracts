@@ -14,7 +14,8 @@ wheel name, relocks (``uv lock``) and regenerates what the contract feeds: the
 generated clients, the vonkctl schemas and the Python vocabulary. When the
 release's signed ``recipe-library.tar`` lists a ``future-canary-index.json``,
 that vector is checked against the release's attested ``SHA256SUMS`` and copied
-to ``control/tests/fixtures``. Nothing is written until every download verified.
+to ``control/tests/fixtures``, only when the pinned version moves (the tar is
+republished in place with every catalog publish; the committed vector stays). Nothing is written until every download verified.
 
 The acceptance pin (``tests/acceptance/recipe-library-revision.txt``, the
 library the suites check out) is a separate input: ``--acceptance-revision``
@@ -112,13 +113,18 @@ class Recipes(Protocol):
 
 
 def _output(*command: str) -> str:
-    return subprocess.run(
-        command,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=COMMAND_TIMEOUT,
-    ).stdout
+    """The command's stdout; its stderr reaches the terminal, a failure is a RefreshError."""
+
+    try:
+        return subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+            timeout=COMMAND_TIMEOUT,
+        ).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        raise RefreshError(f"{' '.join(command[:3])} failed") from error
 
 
 class GitHub:
@@ -264,15 +270,20 @@ def _future_vector(recipes: Recipes, version: str, work: Path) -> bytes | None:
     return vector
 
 
-def fetch(recipes: Recipes, version: str, work: Path) -> Verified:
-    """Download and verify everything the refresh writes; raise before any write."""
+def fetch(recipes: Recipes, version: str, work: Path, *, vector: bool) -> Verified:
+    """Download and verify everything the refresh writes; raise before any write.
+
+    The tar is republished in place with every catalog publish, so its vector is
+    read only when asked (``vector``): when the pinned version moves.
+    """
 
     wheel = recipes.download(version, wheel_name(version), work)
     if not wheel.is_file():
         raise RefreshError(f"v{version} has no {wheel_name(version)} asset")
     recipes.verify(wheel)
     sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
-    return Verified(version, wheel, sha256, _future_vector(recipes, version, work))
+    future = _future_vector(recipes, version, work) if vector else None
+    return Verified(version, wheel, sha256, future)
 
 
 def relock(root: Path) -> None:
@@ -356,8 +367,10 @@ def refresh(
     if revision is not None and SHA.fullmatch(revision) is None:
         raise RefreshError(f"acceptance revision is not a 40-hex commit: {revision}")
     version = version or recipes.latest_version()
+    # The committed vector stays while the version stays; a missing one heals.
+    vector = version != locked_version(root) or not (root / FUTURE_FIXTURE).is_file()
     with tempfile.TemporaryDirectory() as work:
-        verified = fetch(recipes, version, Path(work))
+        verified = fetch(recipes, version, Path(work), vector=vector)
         apply_pin(root, verified, relock=relock, regenerate=regenerate)
     if revision is not None:
         (root / ACCEPTANCE_REVISION).write_text(f"{revision}\n")
@@ -396,7 +409,8 @@ def main(argv: list[str] | None = None) -> int:
             acceptance=args.acceptance_revision,
             acceptance_latest=args.acceptance_latest,
         )
-    except RefreshError as error:
+    except (RefreshError, subprocess.CalledProcessError) as error:
+        # A failed uv step has already printed its own error above.
         print(f"refresh-public-contracts: {error}", file=sys.stderr)
         return 1
     return 0
