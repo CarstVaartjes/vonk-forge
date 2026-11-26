@@ -104,7 +104,9 @@ def _steps(log: Path) -> list[str]:
     steps = []
     for line in log.read_text().splitlines():
         words = line.split()
-        if line.startswith("recipe-tools:"):
+        if line.startswith("recipe-tools:") and "--bundle-only" in words:
+            steps.append("recipe-tools-bundle")
+        elif line.startswith("recipe-tools:"):
             steps.append("recipe-tools:" + words[words.index("--ref") + 1])
         else:
             steps.append(line)
@@ -124,6 +126,7 @@ def test_dev_aliases_advance_after_preflight_and_before_pointer(tmp_path: Path) 
     assert result.returncode == 0, result.stderr
     assert _steps(log) == [
         "preflight",
+        "recipe-tools-bundle",
         "aliases:dev",
         "pointer",
         "recipe-tools:refs/heads/main",
@@ -145,6 +148,7 @@ def test_accepted_dev_source_promotes_after_main_advanced(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stderr
     assert _steps(log) == [
         "preflight",
+        "recipe-tools-bundle",
         "aliases:dev",
         "pointer",
         "recipe-tools:refs/heads/main",
@@ -199,6 +203,7 @@ def test_production_uses_latest_and_checks_release_authority_twice(
     assert _steps(log) == [
         "preflight",
         "stable-authority",
+        "recipe-tools-bundle",
         "aliases:latest",
         "stable-authority",
         "pointer",

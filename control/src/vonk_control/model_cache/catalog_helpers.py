@@ -31,9 +31,9 @@ from vonk_control.model_cache.input_contracts import (
     CatalogArtifactPart,
 )
 from vonk_control.model_cache.providers import (
-    HUGGINGFACE_SOURCE,
     PROVIDERS,
     model_source_kind,
+    source_provider_word,
 )
 from vonk_control.models.catalog import CatalogDocumentRevision
 
@@ -150,7 +150,7 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[CatalogArti
             "canonical model definition is invalid",
         ) from error
     source = definition.source
-    provider_kind = model_source_kind(getattr(source, "provider", HUGGINGFACE_SOURCE))
+    provider_kind = model_source_kind(source_provider_word(type(source)))
     if provider_kind is None:
         raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "model source provider is not supported"

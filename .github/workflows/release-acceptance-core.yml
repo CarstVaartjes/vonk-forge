@@ -903,7 +903,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/recipe-tools"
           uv run --project control --frozen scripts/recipes/platform-features \
             > "$RUNNER_TEMP/platform-features.json"
-          scripts/recipes/build-recipe-tools-bundle --source-root . \
+          uv run --project control --frozen scripts/recipes/build-recipe-tools-bundle --source-root . \
             --features "$RUNNER_TEMP/platform-features.json" \
             --out "$RUNNER_TEMP/recipe-tools/recipe-tools.tar.gz"
       - name: Validate the pinned library with the extracted bundle alone

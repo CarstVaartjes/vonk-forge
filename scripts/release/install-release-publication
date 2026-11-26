@@ -1979,9 +1979,13 @@ STABLE_REF = re.compile(
 def publish_recipe_tools(arguments: argparse.Namespace) -> None:
     """Publish one accepted recipe-tools bundle, then its channel pointer last.
 
-    Promotion calls this only after the installer pointer advanced, so the
-    pointer follows the same accepted, never-regressing source. The pointer
-    names the bundle by file name, relative to the pointer's own directory.
+    The bundle object is named by its own sha256 and written once, so any
+    rebuild with other bytes is another object. ``--bundle-only`` writes just
+    that object (promotion does it before the image aliases); otherwise the
+    pointer follows it. Promotion writes the pointer only after the installer
+    pointer advanced, so it follows the same accepted, never-regressing
+    source. The pointer names the bundle by file name, relative to the
+    pointer's own directory.
     """
     channel, source_sha, ref = arguments.channel, arguments.source_sha, arguments.ref
     if SOURCE_SHA.fullmatch(source_sha) is None:
@@ -1991,7 +1995,8 @@ def publish_recipe_tools(arguments: argparse.Namespace) -> None:
     ):
         raise PublicationError("recipe-tools ref does not match its channel")
     content = _safe_bytes(arguments.bundle_file, "recipe-tools bundle")
-    name = f"recipe-tools-{source_sha}.tar.gz"
+    sha256 = hashlib.sha256(content).hexdigest()
+    name = f"recipe-tools-{sha256}.tar.gz"
     # Any phase but endpoint or pointer is written once and never replaced.
     bundle = _object_entry(f"artifacts/{channel}/{name}", content, "bundle")
     pointer = (
@@ -1999,7 +2004,7 @@ def publish_recipe_tools(arguments: argparse.Namespace) -> None:
             {
                 "bundle": name,
                 "ref": ref,
-                "sha256": bundle["sha256"],
+                "sha256": sha256,
                 "source_sha": source_sha,
             },
             sort_keys=True,
@@ -2008,6 +2013,8 @@ def publish_recipe_tools(arguments: argparse.Namespace) -> None:
     ).encode()
     filesystem, remote = _destination(arguments)
     _copy_publication_entry(filesystem, remote, bundle, arguments.bundle_file)
+    if arguments.bundle_only:
+        return
     with tempfile.TemporaryDirectory(prefix="recipe-tools-pointer-") as directory:
         source = Path(directory) / "recipe-tools.json"
         source.write_bytes(pointer)
@@ -2261,6 +2268,7 @@ def parser() -> argparse.ArgumentParser:
     tools.add_argument("--channel", choices=("dev", "stable"), required=True)
     tools.add_argument("--source-sha", required=True)
     tools.add_argument("--ref", required=True)
+    tools.add_argument("--bundle-only", action="store_true")
     tools_destinations = tools.add_mutually_exclusive_group(required=True)
     tools_destinations.add_argument("--filesystem", type=Path)
     tools_destinations.add_argument("--rclone-remote")

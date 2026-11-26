@@ -96,7 +96,8 @@ Recipes CI validates its library with the platform of each channel through one
 signed file, not through a pinned forge commit. Each release generation
 publishes, beside its other artifacts:
 
-- `artifacts/<channel>/recipe-tools-<source_sha>.tar.gz`, written once;
+- `artifacts/<channel>/recipe-tools-<sha256>.tar.gz`, named by its own digest and
+  written once, so a rebuild with other bytes is another object, never a collision;
 - `artifacts/<channel>/recipe-tools.json`, the pointer
   `{"bundle", "ref", "sha256", "source_sha"}`. `bundle` is the file name,
   relative to the pointer's own directory. `ref` is `refs/heads/main` for dev
@@ -117,16 +118,17 @@ extracts the bundle into an empty directory and runs its entry point against the
 recipe library at `tests/acceptance/recipe-library-revision.txt`. The receipt is
 signed only when it passes, so a promoted validator always accepts the library
 it was accepted against. The promote job of `installer-publication.yml` then
-attests those exact bytes keylessly (`actions/attest`), and
-`scripts/images/promote-accepted-channel` publishes the bundle and its pointer
-only after the image aliases and the installer pointer have advanced. A failure
-there leaves the installer promoted; rerunning the job writes the same
-content-addressed bundle and the pointer again.
+revalidates the source authority and attests those exact bytes keylessly
+(`actions/attest`). `scripts/images/promote-accepted-channel` writes the bundle
+object before any mutable write, and the recipe-tools pointer only after the
+image aliases and the installer pointer have advanced. A failure there leaves
+the installer promoted; rerunning the job finds the same bundle object and
+writes the pointer again.
 
 A consumer verifies it the way `cross-repo-nightly.yml` does:
 
 ```sh
-gh attestation verify recipe-tools-<source_sha>.tar.gz \
+gh attestation verify recipe-tools-<sha256>.tar.gz \
   --repo CarstVaartjes/vonk-forge \
   --signer-workflow CarstVaartjes/vonk-forge/.github/workflows/installer-publication.yml \
   --source-digest <pointer.source_sha> --source-ref <pointer.ref>

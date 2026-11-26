@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Advance one fully accepted image set, then its signed installer pointer, then
-# the channel's accepted recipe-tools bundle and, last, its pointer.
+# Write the channel's accepted recipe-tools bundle object, advance one fully
+# accepted image set, then its signed installer pointer, then, last, the
+# recipe-tools pointer.
 set -euo pipefail
 umask 077
 
@@ -55,6 +56,11 @@ generation=$(jq -er '.generation' "$plan")
 [[ $generation =~ ^[a-zA-Z0-9.+-]+$ ]] || exit 64
 release="$bundle/objects/artifacts/$channel/releases/$generation/release.json"
 verify_authority
+tools=(scripts/release/install-release-publication publish-recipe-tools
+  --bundle-file "$recipe_tools" --channel "$channel" --source-sha "$source_sha"
+  --ref "$authority_ref" --rclone-remote "$remote")
+# The write-once object, named by its sha256, before any mutable write.
+"${tools[@]}" --bundle-only
 alias=latest
 [[ $channel != dev ]] || alias=dev
 roles=(api worker litellm)
@@ -73,12 +79,10 @@ scripts/images/promote-image-aliases \
   "${images[2]}" "${digests[2]}" \
   --commit "$0" commit "$@"
 
-# Only after the image set and the installer pointer stand: a failure here
-# leaves both promoted (no alias rollback) and a rerun of this job publishes
-# the same content-addressed bundle and pointer again.
-scripts/release/install-release-publication publish-recipe-tools \
-  --bundle-file "$recipe_tools" --channel "$channel" --source-sha "$source_sha" \
-  --ref "$authority_ref" --rclone-remote "$remote"
+# The pointer last, only after the image set and the installer pointer stand:
+# a failure here leaves both promoted (no alias rollback), and a rerun finds
+# the same bundle object and writes the pointer again.
+"${tools[@]}"
 
 # Keep a durable, human-readable record beside the pointer publication receipt.
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then

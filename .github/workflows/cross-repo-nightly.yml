@@ -47,8 +47,8 @@ jobs:
           pointer=$RUNNER_TEMP/recipe-tools.json
           source_sha=$(jq -er '.source_sha | select(test("^[0-9a-f]{40}$"))' "$pointer")
           jq -e '.ref == "refs/heads/main"' "$pointer" >/dev/null
-          bundle=$(jq -er '.bundle | select(test("^recipe-tools-[0-9a-f]{40}\\.tar\\.gz$"))' "$pointer")
           sha256=$(jq -er '.sha256 | select(test("^[0-9a-f]{64}$"))' "$pointer")
+          bundle=$(jq -er 'select(.bundle == "recipe-tools-\(.sha256).tar.gz") | .bundle' "$pointer")
           fetch "$bundle" "$RUNNER_TEMP/recipe-tools.tar.gz"
           printf '%s  %s\n' "$sha256" "$RUNNER_TEMP/recipe-tools.tar.gz" | sha256sum -c -
           gh attestation verify "$RUNNER_TEMP/recipe-tools.tar.gz" \

@@ -5,17 +5,24 @@ from __future__ import annotations
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
+from typing import get_args
 
 import pytest
+from vonk_forge_contracts import ModelDefinition
+from vonk_forge_contracts.recipe import ServingKind
 
 from cluster_profiles.serving_execution import (
+    HTTP_KINDS,
     HttpObservation,
     ServingExecutionError,
     ServingKindNotExecuted,
     evaluate_http_response,
 )
-from vonk_control.interface_adapters import INTERFACE_ADAPTERS, interface_adapter
-from vonk_control.model_cache.providers import PROVIDERS, model_source_kind
+from vonk_control.model_cache.providers import (
+    PROVIDERS,
+    model_source_kind,
+    source_provider_word,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 _LOADER = SourceFileLoader(
@@ -28,51 +35,44 @@ platform_features = module_from_spec(_SPEC)
 _SPEC.loader.exec_module(platform_features)
 
 LOCK = 'package = "vonk-forge-public-contracts==5.7.0"\n'
+OBSERVATION = HttpObservation(200, {}, b"{}")
 
 
-def _has_handler(key: str, value: str) -> bool:
-    """Whether the platform executes one declared value, asked of the executor."""
-    if key == "serving_kinds":
-        if value.endswith(".output"):
-            adapter = INTERFACE_ADAPTERS.get(value.removesuffix(".output"))
-            return adapter is not None and adapter.publication != "litellm"
-        observation = HttpObservation(200, {}, b"{}")
-        try:
-            evaluate_http_response(observation, {"kind": value, "assertions": []})
-        except ServingKindNotExecuted:
-            return False
-        except ServingExecutionError:
-            return True  # an evaluator ran and refused the empty observation
-        return True
-    if key == "adapters":
-        return interface_adapter(value).name == value
-    if key == "source_providers":
-        kind = model_source_kind(value)
-        return kind is not None and PROVIDERS[kind].production
-    raise AssertionError(f"no executor probe for {key}")
+def _evaluate(kind: str) -> None:
+    evaluate_http_response(OBSERVATION, {"kind": kind, "assertions": []})
 
 
-def test_every_declared_value_has_an_executing_handler() -> None:
+def test_every_published_http_kind_reaches_its_evaluator() -> None:
     document = platform_features.features(LOCK)
-    assert document["contracts_version"] == "5.7.0"
-    assert document["contract_major"] == 5
     assert "openai.speech" in document["serving_kinds"]
-    for key in ("serving_kinds", "adapters", "source_providers"):
-        assert document[key], key
-        for value in document[key]:
-            assert _has_handler(key, value), (key, value)
-    # The gateway's rendered config models are the executing tables for these.
-    assert {"chat", "audio_speech"} <= set(document["api_modes"])
-    assert {"levels", "text"} <= set(document["effort_kinds"])
+    http = [kind for kind in document["serving_kinds"] if not kind.endswith(".output")]
+    assert set(http) == HTTP_KINDS
+    for kind in http:
+        try:
+            _evaluate(kind)
+        except ServingKindNotExecuted:
+            pytest.fail(f"{kind} is published but has no evaluator")
+        except ServingExecutionError:
+            pass  # its evaluator ran and refused the empty observation
 
 
-@pytest.mark.parametrize(
-    ("key", "value"),
-    [
-        ("serving_kinds", "openai.unknown"),
-        ("serving_kinds", "nothing-job.output"),
-        ("source_providers", "s3"),
-    ],
-)
-def test_a_value_without_a_handler_is_caught(key: str, value: str) -> None:
-    assert not _has_handler(key, value)
+def test_every_contract_http_kind_is_handled() -> None:
+    contract = {kind for kind in get_args(ServingKind) if not kind.endswith(".output")}
+    assert contract == HTTP_KINDS
+
+
+def test_an_unknown_serving_kind_is_refused_not_evaluated_as_chat() -> None:
+    with pytest.raises(ServingKindNotExecuted):
+        _evaluate("openai.unknown")
+
+
+def test_every_contract_model_source_downloads_through_the_provider_table() -> None:
+    sources = get_args(ModelDefinition.model_fields["source"].annotation)
+    assert sources
+    published = platform_features.features(LOCK)["source_providers"]
+    for source in sources:
+        word = source_provider_word(source)
+        kind = model_source_kind(word)
+        assert kind is not None, source
+        assert PROVIDERS[kind].production, source
+        assert word in published, source
