@@ -40,7 +40,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_routes/candidate.py": {
         "_candidate_once": (
-            "cfd112104c61fcd7874464c2aad5a8a5aaac10a0ddd338ed17a1f4c25af17133",
+            "1c2189c77f96e8b344a120a35afd5c7ecbab47f1328cdeb7f34df95395e5f7f6",
             "caller-owned: lock=True bumps every candidate; publication transition fences it; reduce churn in follow-up",
         ),
     },
@@ -50,7 +50,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "callback: publication transition owns claim and run writes",
         ),
         "_complete_run_publication": (
-            "6c79b6f9a337295b9aba1562098614fc3ce2533542e0b5790f6c6f7fa3291efa",
+            "1cbd7c573d623e5a38eb972a09839afdc38761e50b01055b503fa5c4381d4466",
             "callback: publication transition owns completion",
         ),
         "_fail_run_publication": (
@@ -68,7 +68,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "caller-owned: publication transition binds withdrawal effects",
         ),
         "_record_withdrawal_in_session": (
-            "77faeea14defaa438bb4cdebe11617e0e8e573f3698fe75f7929ec85af82f3db",
+            "b0708ab461c1cd26e7c0101e061fe3a73ad2519d3697a73c485a2ff7f7f2ed58",
             "callback: publication transition owns run withdrawal",
         ),
         "_restore_abandoned_stop_withdrawals": (
@@ -76,15 +76,15 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "callback: publication transition reconciles abandoned intent",
         ),
         "_maintenance_step_in_session": (
-            "fca4aefc9e71112ada1a3329a9fcf0a7e87ba9bcabe3a0870f9a5b9e6d5206d6",
+            "377854ee31aab8ca0a7659106687a087a54346e884fc7d644512a1eed23d188b",
             "callback: publication transition owns maintenance projection",
         ),
         "_withdraw_runs_once.decide.record_reason": (
             "c930dff5ca3030d5dd95e86fc9b152319fd52129fa661bb8015cad3206827ede",
             "callback: publication decision owns failure evidence",
         ),
-        "_maintenance_step_in_session.complete": (
-            "c28636563e3402c50902415508d8097a2b88f60afd769cf7e4942da9622be471",
+        "_publish_if_changed.complete": (
+            "7e3634fb28f70d16482f0a09f8374494b11da592a7a3762224b2d0a3bad4a9bf",
             "callback: publication completion transition owns generation projection",
         ),
         "_maintenance_step_in_session.record_reason": (

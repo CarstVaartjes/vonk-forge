@@ -21,6 +21,7 @@ from vonk_agent_protocol.state_machines import (
 from vonk_control.gateway.external_contract import (
     ApprovedDestination,
     BindingName,
+    ExternalDeploymentSpec,
     ExternalDestination,
     ExternalEntryProblem,
     ExternalModelInput,
@@ -174,3 +175,23 @@ class ExternalBindingAccepted(StrictModel):
     request_id: UuidId
     action: ExternalBindingAction
     revision: int | None = Field(default=None, ge=1)
+
+
+class ModelReviewed(StrictModel):
+    """What a model review read: its digest names exactly this."""
+
+    alias: str
+    action: ExternalModelAction
+    spec: ExternalDeploymentSpec | None
+    expected_revision: int | None
+    binding_revisions: dict[str, int]
+
+
+class BindingReviewed(StrictModel):
+    """What a binding review read: its digest names exactly this."""
+
+    name: str
+    action: ExternalBindingAction
+    destinations: list[ApprovedDestination]
+    expected_revision: int | None
+    dependents: list[ExternalBindingDependent]

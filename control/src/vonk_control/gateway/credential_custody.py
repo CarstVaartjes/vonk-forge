@@ -15,8 +15,8 @@ from typing import Final, Literal
 
 from pydantic import Field, ValidationError
 
-from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-from vonk_agent_protocol.outcome import ErrorCategory, UnknownError
+from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
+from vonk_agent_protocol.outcome import UnknownError
 from vonk_control.gateway.external_contract import BindingName
 from vonk_control.strict_json import StrictModel
 

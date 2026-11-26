@@ -34,6 +34,7 @@ from vonk_control.gateway.alias_namespace import (
     claim_external_alias,
 )
 from vonk_control.gateway.external_api_contract import (
+    BindingReviewed,
     ExternalBindingAccepted,
     ExternalBindingAcceptRequest,
     ExternalBindingAction,
@@ -51,6 +52,7 @@ from vonk_control.gateway.external_api_contract import (
     ExternalModelReview,
     ExternalModelView,
     ExternalValidation,
+    ModelReviewed,
 )
 from vonk_control.gateway.external_contract import (
     ApprovedDestination,
@@ -72,7 +74,6 @@ from vonk_control.models.gateway import (
     GatewayExternalDeployment,
 )
 from vonk_control.stored.rows import read_row_column
-from vonk_control.strict_json import StrictModel
 from vonk_control.waits.persisted import schedule_wait
 
 
@@ -110,27 +111,7 @@ class _ModelChange:
     row: GatewayExternalDeployment | None
 
 
-class _ModelReviewed(StrictModel):
-    """What a model review read: its digest names exactly this."""
-
-    alias: str
-    action: ExternalModelAction
-    spec: ExternalDeploymentSpec | None
-    expected_revision: int | None
-    binding_revisions: dict[str, int]
-
-
-class _BindingReviewed(StrictModel):
-    """What a binding review read: its digest names exactly this."""
-
-    name: str
-    action: ExternalBindingAction
-    destinations: list[ApprovedDestination]
-    expected_revision: int | None
-    dependents: list[ExternalBindingDependent]
-
-
-def _digest(document: StrictModel) -> str:
+def _digest(document: ModelReviewed | BindingReviewed) -> str:
     return hashlib.sha256(
         document.model_dump_json(exclude_none=True).encode()
     ).hexdigest()
@@ -302,7 +283,7 @@ class ExternalModelService:
             effect_digest="0" * 64,
         )
         digest = _digest(
-            _ModelReviewed(
+            ModelReviewed(
                 alias=alias,
                 action=action,
                 spec=spec,
@@ -491,7 +472,7 @@ class ExternalModelService:
         dependents = _dependents(session, name, bindings)
         loaded = self._credentials()
         digest = _digest(
-            _BindingReviewed(
+            BindingReviewed(
                 name=name,
                 action=action,
                 destinations=wanted,
