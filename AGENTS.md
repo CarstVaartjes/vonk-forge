@@ -259,11 +259,19 @@ text of this section:
 
 ## Current contracts only: no legacy compatibility
 
-This is a first internal release, not a migration. Keep one current definition
-and one current execution path for each document and operation, and remove
-retired parsers, DTOs, tables, endpoints, CLI aliases, fixtures and callers
-together; keep no deprecated constructors, old field names, dual readers/writers
-or fallback shapes. Active installer, release-publication, catalog, recovery
+The dev channel keeps one current contract with no compatibility; transitions
+happen by deploy order. From 1.0.0 the stable channel answers the previous
+stable vonkctl and agent (N-1 minor) for one minor release: a breaking response
+shape ships only in a minor release, consumer first (the vonkctl that tolerates
+it is in a published stable release before the Controller change lands, and the
+`client-compatibility-report` CI job enforces it), and a deprecated API field or
+CLI flag keeps working for one minor and is announced in the release notes. An
+added optional response field is not a break: the shipped OpenAPI copy opens
+response objects (`open_shown_words`, run by `scripts/dev/generate-control-clients`).
+The stable carry proves the N-1 agent. Still keep one current definition and one
+current execution path for each document and operation, and remove retired
+parsers, DTOs, tables, endpoints, CLI aliases, fixtures and callers together;
+keep no dual readers/writers or fallback shapes. Active installer, release-publication, catalog, recovery
 and authority paths use schema 2. The current parser and
 [operator runbook](docs/runbooks/vonkctl.md) own command vocabulary. The full
 rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only-no-legacy-compatibility).

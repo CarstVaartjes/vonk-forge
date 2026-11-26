@@ -4,18 +4,27 @@ vonkctl validates every Controller response strictly against the OpenAPI it
 was built with. A response shape that this Controller may send and that a
 published vonkctl's contract rejects is a break that the installed CLI meets
 after the deploy (incident 2026-11-08). This tool compares the two contracts
-operation by operation and lists every such shape. It is a report, never a
-gate: a deliberate break is legitimate. A released vonkctl answers such a
-break with ``controller.protocol_invalid``; a vonkctl that carries the
+operation by operation and lists every such shape. A released vonkctl answers
+such a break with ``controller.protocol_invalid``; a vonkctl that carries the
 contract-mismatch check answers ``client.contract_mismatch`` with
 ``vonkctl update --apply``.
 
+A channel named by ``--gate-channel`` is a gate from its 1.0 release on: the
+stable channel supports the previous stable vonkctl for one minor, so a break
+against a published release of major 1 or later exits 1. A 0.x release is only
+reported, and so is every channel not named. Only a signature or digest that
+does not verify (``CliUpdateIngressError``) fails closed, as in
+``run_update``. Any other update error (a channel not published yet, whose
+signed pointer answers 404; an outage after the bounded retries of the
+download; an expired manifest; a release not yet observable) is a
+``::warning::`` and does not fail: an outage waits, it does not fail.
+
     python tools/client_compatibility_report.py \\
         --candidate src/cluster_profiles/schemas/control-openapi.json \\
-        --channel stable --channel dev
+        --channel stable --channel dev --gate-channel stable
 
 ``--prior PATH`` compares against a local contract instead of a published
-channel. The exit status is 0 whatever the report says.
+channel and is never a gate.
 
 Limits: the comparison reads a hand-written subset of JSON Schema: ``$ref``
 to ``#/components/schemas``, ``type``, ``const``, ``enum``, ``properties``,
@@ -47,6 +56,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from cluster_profiles.cli_update import (
     _NOTICE_ORIGIN,
     INSTALLER_PUBLIC_KEY,
+    CliUpdateError,
     CliUpdateIngressError,
     _download,
     _signed_release,
@@ -363,8 +373,8 @@ def breaks(prior: JsonValue, candidate: JsonValue) -> list[str]:
     return list(dict.fromkeys(found))
 
 
-def _published_contract(channel: str) -> tuple[str, JsonValue]:
-    """The OpenAPI inside the accepted signed CLI wheel of ``channel``."""
+def _published_contract(channel: str) -> tuple[str, str, JsonValue]:
+    """The label, release version and OpenAPI of the signed CLI wheel of ``channel``."""
 
     release, base = _signed_release(
         channel=channel,
@@ -378,7 +388,12 @@ def _published_contract(channel: str) -> tuple[str, JsonValue]:
         raise CliUpdateIngressError("CLI wheel digest is invalid")
     with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
         document = json.loads(archive.read(_OPENAPI_MEMBER))
-    return f"{channel} {release['version']} ({release['source_sha']})", document
+    label = f"{channel} {release['version']} ({release['source_sha']})"
+    return label, str(release["version"]), document
+
+
+def _major(version: str) -> int:
+    return int(version.split(".", 1)[0])
 
 
 def _report(label: str, found: list[str]) -> str:
@@ -401,20 +416,37 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--channel", action="append", default=[])
     parser.add_argument("--prior", type=Path, action="append", default=[])
+    parser.add_argument("--gate-channel", action="append", default=[])
     args = parser.parse_args(argv)
     candidate = json.loads(args.candidate.read_text())
     print("## Published vonkctl against this Controller's responses\n")
-    priors: list[tuple[str, JsonValue]] = [
-        (str(path), json.loads(path.read_text())) for path in args.prior
-    ]
+    for path in args.prior:
+        print(_report(str(path), breaks(json.loads(path.read_text()), candidate)))
+    failed = False
     for channel in args.channel:
+        gated = channel in args.gate_channel
         try:
-            priors.append(_published_contract(channel))
-        except Exception as error:  # noqa: BLE001 - a report never fails its job
+            label, version, prior = _published_contract(channel)
+        except Exception as error:
+            # Only an unverified signature or digest fails closed; any other
+            # update error is an outage that waits.
+            waits = isinstance(error, CliUpdateError) and not isinstance(
+                error, CliUpdateIngressError
+            )
+            if gated and not waits:
+                raise
+            if waits:
+                print(f"::warning::{channel} contract unavailable: {error}")
             print(f"### {channel}\n\nPublished contract unavailable: {error}\n")
-    for label, prior in priors:
-        print(_report(label, breaks(prior, candidate)))
-    return 0
+            continue
+        found = breaks(prior, candidate)
+        print(_report(label, found))
+        if gated and found:
+            if _major(version) >= 1:
+                failed = True
+            else:
+                print(f"{channel} {version} is before 1.0: reported, not gated.\n")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

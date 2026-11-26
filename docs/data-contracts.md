@@ -277,7 +277,7 @@ module defines its own.
 | `control/src/vonk_control/operator_acceptance/receipt_contract.py` | controller-contract | 4 | Canonical public operator acceptance references and existing-Job decisions. |
 | `control/src/vonk_control/model_cache/fleet_removal_contract.py` | controller-contract | 6 | Reviewed, content-addressed effects of a request to remove a fleet model. |
 | `control/src/vonk_control/failures/coordinator_contract.py` | controller-contract | 2 | Failures of worker coordinators that have not claimed an operation. |
-| `tools/client_compatibility_report.py` | declared | 8 | Report what a published vonkctl would refuse from this Controller. |
+| `tools/client_compatibility_report.py` | declared | 8 | Report what a published vonkctl would refuse from this Controller, and gate against stable 1.0 or later. |
 | `tools/contract_scans.py` | declared | 3 | Static scans that keep every data class defined once, in its Pydantic contract. |
 | `tools/single_source_values.py` | declared | 3 | Owner-adjacent registrations for handwritten literal families, without debt allowances. |
 | `control/src/vonk_control/inventory/items_contract.py` | controller-contract | 2 | Typed current agent facts retained as inventory items, never command history. |

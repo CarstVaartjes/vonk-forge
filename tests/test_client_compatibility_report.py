@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import copy
-from typing import Any
+import json
+import urllib.error
+from pathlib import Path
+from typing import Any, cast
 
-from tools.client_compatibility_report import breaks
+import pytest
+
+from cluster_profiles import cli_update
+from tools import client_compatibility_report
+from tools.client_compatibility_report import breaks, main
 
 _LEVELS = {
     "type": "object",
@@ -120,3 +127,64 @@ def test_a_word_set_the_prior_ships_open_reads_new_words() -> None:
     assert [line.split(":")[0] for line in found] == [
         "GET /api/recipe/library 200.state"
     ]
+
+
+def _run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str], published: object
+) -> int:
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps(_contract({"type": "string"}, extra_route=False)))
+
+    def fetch(_channel: str) -> tuple[str, str, object]:
+        return cast("tuple[str, str, object]", published)
+
+    monkeypatch.setattr(client_compatibility_report, "_published_contract", fetch)
+    return main(["--candidate", str(candidate), *argv])
+
+
+_BREAKING = _contract({"type": "integer"})
+
+
+@pytest.mark.parametrize(
+    ("channel", "version", "gate", "code"),
+    [
+        ("stable", "1.0.0", "stable", 1),
+        ("stable", "0.1.1", "stable", 0),
+        ("dev", "1.0.1~dev.1", "stable", 0),
+    ],
+)
+def test_only_a_stable_1_0_break_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    channel: str,
+    version: str,
+    gate: str,
+    code: int,
+) -> None:
+    published = (f"{channel} {version}", version, _BREAKING)
+
+    assert (
+        _run(
+            monkeypatch,
+            tmp_path,
+            ["--channel", channel, "--gate-channel", gate],
+            published,
+        )
+        == code
+    )
+
+
+def test_an_unpublished_stable_pointer_does_not_fail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def not_found(request: Any, *, timeout: float) -> Any:
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cli_update, "open_https", not_found)
+    monkeypatch.setattr(cli_update.time, "sleep", lambda _: None)
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps(_BREAKING))
+
+    argv = ["--candidate", str(candidate), "--channel", "stable"]
+
+    assert main([*argv, "--gate-channel", "stable"]) == 0

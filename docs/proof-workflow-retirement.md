@@ -81,7 +81,7 @@ the pre-merge candidate acceptance (`release-acceptance.yml`):
 `ci-scope.yml` is deleted. Jobs: `oci-link-fallback` (a bind-mounted cross-device
 store), `privileged-helper-oci-process` (the signed helper on ARM64 systemd),
 `model-cache-unknown-expiry`, `profile-effect-consumer`, `installed-cli-proof`
-and the non-gating `client-compatibility-report`.
+and `client-compatibility-report`, which gates only against a stable release of 1.0 or later.
 
 The `agent-repair-recovery` job and its repair matrix were deleted with the node-bound
 repair capsule.

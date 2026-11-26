@@ -314,12 +314,24 @@ fixture tests for the detectors; retain the contract and type registries.
 
 ## Current contracts only: no legacy compatibility
 
-This is a first internal release, not a migration. Keep one current definition
+The dev channel keeps one current contract with no compatibility; transitions
+happen by deploy order. From 1.0.0 the stable channel answers the previous
+stable vonkctl and agent (N-1 minor) for one minor release. A breaking response
+shape ships only in a minor release, consumer first: the vonkctl that tolerates
+it is in a published stable release before the Controller change lands, and the
+`client-compatibility-report` CI job fails against a stable release of 1.0 or
+later. A deprecated API field or CLI flag keeps working for one minor and is
+announced in the release notes. The stable carry proves the N-1 agent. An
+added optional response field is not a break: vonkctl's shipped OpenAPI copy
+drops `additionalProperties: false` on every response object, including
+one a request also carries (`open_shown_words`, run by `scripts/dev/generate-control-clients`), so the gate
+fires only on real breaks. Even during that window, keep one current definition
 and one current execution path for each document and operation. Remove retired
 parsers, DTOs, database models/tables, endpoints, CLI compatibility aliases,
 fixtures, packaged assets, and callers together. Do not retain deprecated
 constructors, old field names, dual readers/writers, or fallback shapes merely
-to keep old tests or old worktrees working. The current parser and
+to keep old tests or old worktrees working; the one-minor window above is
+carried by the release process, not by a second reader. The current parser and
 [operator runbook](runbooks/vonkctl.md) own command vocabulary; do not
 restore the obsolete `fleet profile` alias from a historical guide.
 

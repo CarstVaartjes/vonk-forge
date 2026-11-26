@@ -90,6 +90,15 @@ def test_control_openapi_documents_are_current() -> None:
     assert stale == [], "run scripts/dev/generate-control-clients"
 
 
+def test_shipped_copy_opens_a_component_both_sent_and_received() -> None:
+    module = _script("generate-control-clients")
+    exact = module._schema(include_browser_auth=False)["components"]["schemas"]
+    shipped = module.cli_schema()["components"]["schemas"]
+
+    assert exact["FleetProfileDefinition"]["additionalProperties"] is False
+    assert "additionalProperties" not in shipped["FleetProfileDefinition"]
+
+
 def test_typescript_vocabulary_is_current() -> None:
     module = _script("generate-control-clients")
     target = module.TYPESCRIPT_VOCABULARY
@@ -193,16 +202,23 @@ def test_only_shown_response_words_open() -> None:
             "schemas": {
                 "Thing": {
                     "type": "object",
+                    "additionalProperties": False,
                     "properties": {
                         "reason": reference("ShownCode"),
                         "state": reference("LifecycleState"),
                         "mode": reference("OrderMode"),
+                        "shared": reference("Shared"),
                     },
                 },
                 "Order": {
                     "type": "object",
-                    "properties": {"mode": reference("OrderMode")},
+                    "additionalProperties": False,
+                    "properties": {
+                        "mode": reference("OrderMode"),
+                        "shared": reference("Shared"),
+                    },
                 },
+                "Shared": {"type": "object", "additionalProperties": False},
                 "ShownCode": {"enum": ["a.b"], "title": "ShownCode", "type": "string"},
                 "LifecycleState": {"enum": ["queued"], "type": "string"},
                 "OrderMode": {"enum": ["fast"], "type": "string"},
@@ -218,6 +234,11 @@ def test_only_shown_response_words_open() -> None:
         "type": "string",
         "minLength": 1,
     }
+    # Every response object is open, even one a request also carries; a
+    # request-only object stays closed.
+    assert "additionalProperties" not in schemas["Thing"]
+    assert "additionalProperties" not in schemas["Shared"]
+    assert schemas["Order"]["additionalProperties"] is False
     # Decided by vonkctl, and authored by it in a request: both stay closed.
     assert schemas["LifecycleState"]["enum"] == ["queued"]
     assert schemas["OrderMode"]["enum"] == ["fast"]
