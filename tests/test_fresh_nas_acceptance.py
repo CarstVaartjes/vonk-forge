@@ -624,7 +624,11 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
         stdout=f"authentication failed for {secret}\n",
         stderr="",
     )
-    outputs = iter((status, logs))
+    container = subprocess.CompletedProcess([], 0, stdout="0123456789ab\n", stderr="")
+    probes = subprocess.CompletedProcess(
+        [], 0, stdout='[{"ExitCode":-1,"Output":"Health check exceeded timeout"}]'
+    )
+    outputs = iter((status, logs, container, probes))
     commands: list[list[str]] = []
 
     def run(_bundle: Path, command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -633,12 +637,17 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
 
     monkeypatch.setattr(acceptance, "_diagnostic_command", run)
     monkeypatch.setattr(acceptance, "reference_compose", lambda: ["docker", "compose"])
+    monkeypatch.setattr(acceptance.shutil, "which", lambda _name: "docker")
 
     diagnostics = acceptance.compose_startup_diagnostics(tmp_path)
 
-    assert commands[-1][-1] == "tailscale-configurator"
+    assert commands[1][-1] == "tailscale-configurator"
     assert secret not in diagnostics
     assert "authentication failed for <redacted>" in diagnostics
+    # A service with logs still reports its probe records: only they tell a
+    # slow probe from a refused one.
+    assert commands[-1][-1] == "0123456789ab"
+    assert "Health check exceeded timeout" in diagnostics
     assert "postgres=running/healthy/exit-0" in diagnostics
     assert "tailscale-configurator=running/unhealthy/exit-1" in diagnostics
 
