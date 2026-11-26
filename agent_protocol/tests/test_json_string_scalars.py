@@ -169,9 +169,12 @@ def _strict_models() -> list[type[BaseModel]]:
         model = pending.pop()
         for subclass in model.__subclasses__():
             pending.append(subclass)
-            if subclass.__module__.startswith(
-                vonk_agent_protocol.__name__
-            ) and subclass.model_config.get("strict"):
+            parametrized = subclass.__pydantic_generic_metadata__["origin"] is not None
+            if (
+                not parametrized
+                and subclass.__module__.startswith(vonk_agent_protocol.__name__)
+                and subclass.model_config.get("strict")
+            ):
                 found.append(subclass)
     return found
 
