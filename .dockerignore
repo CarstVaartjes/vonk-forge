@@ -83,7 +83,6 @@ deploy/compose/step-ca/**
 !deploy/compose/step-ca/upstream/context-signing.patch
 !deploy/compose/step-ca/upstream/manifest.json
 !deploy/compose/step-ca/source.lock.json
-!scripts/prepare-journal-ca.py
 
 # Build-time Pydantic contract generation.
 !nas_setup/

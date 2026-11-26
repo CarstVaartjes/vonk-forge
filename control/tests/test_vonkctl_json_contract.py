@@ -350,6 +350,7 @@ def test_incompatible_schema_edits_are_detected() -> None:
         base, {"properties": {"a": {"type": "string"}}, "required": ["a"]}
     )
     assert incompatibilities(base, {**base, "required": ["a", "b"]})
+    assert incompatibilities(base, {**base, "required": []})
     # A union that drops an alternative nobody emits any more keeps the version.
     union = {"anyOf": [{"$ref": "#/A"}, {"$ref": "#/B"}, {"$ref": "#/C"}]}
     assert incompatibilities(union, {"anyOf": [{"$ref": "#/A"}, {"$ref": "#/C"}]}) == []

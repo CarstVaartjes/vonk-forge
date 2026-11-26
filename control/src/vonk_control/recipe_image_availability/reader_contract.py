@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated
+from functools import cache
+from typing import Annotated, Any
 
 from pydantic import (
     BaseModel,
@@ -55,6 +56,13 @@ class StoredAvailabilityIdentity(BaseModel):
     ] = None
 
 
+@cache
+def _observation_adapter(field_name: str) -> TypeAdapter[Any]:
+    annotation = AvailabilityJobPayload.model_fields[field_name].annotation
+    assert annotation is not None
+    return TypeAdapter(annotation)
+
+
 class RecoveredAvailabilityPayload(AvailabilityJobPayload):
     """Adopt readable current fields after recording damage with the column reader.
 
@@ -78,9 +86,7 @@ class RecoveredAvailabilityPayload(AvailabilityJobPayload):
     @classmethod
     def observation_or_none(cls, value: object, info: ValidationInfo) -> object:
         assert info.field_name is not None
-        field = AvailabilityJobPayload.model_fields[info.field_name]
-        assert field.annotation is not None
-        adapter = TypeAdapter(field.annotation)
+        adapter = _observation_adapter(info.field_name)
         try:
             return read_stored_document(
                 lambda document: adapter.validate_json(

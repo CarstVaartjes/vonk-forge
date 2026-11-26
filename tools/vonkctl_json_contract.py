@@ -472,7 +472,7 @@ def incompatibilities(
 ) -> list[str]:
     """What a client of ``old`` can no longer rely on in ``new``.
 
-    A removed property, a ``required`` list that grew or a changed ``type`` needs
+    A removed property, a ``required`` list that grew or shrank or a changed ``type`` needs
     a new ``schema_version``; added properties and added or removed
     alternatives do not. A ``$ref`` that now names another definition is
     compatible when that definition is the old one plus compatible additions
@@ -489,11 +489,16 @@ def incompatibilities(
                     problems.append(f"{where}: property removed")
                 elif key in ("type", "const", "$ref"):
                     problems.append(f"{where}: removed")
+                elif key == "required" and value:
+                    problems.append(f"{where}: no longer required {sorted(value)}")
                 continue
             if key == "required":
                 grown = sorted(set(new[key]) - set(value))
                 if grown:
                     problems.append(f"{where}: now required {grown}")
+                shrunk = sorted(set(value) - set(new[key]))
+                if shrunk:
+                    problems.append(f"{where}: no longer required {shrunk}")
             elif key in ("type", "const", "$ref"):
                 if value == new[key]:
                     continue
