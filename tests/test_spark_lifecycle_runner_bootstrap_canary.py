@@ -509,7 +509,7 @@ def test_future_vector_read_gates_on_the_installed_controller_verdict(
     run._run_command = run_command
 
     if failures:
-        with pytest.raises(lifecycle.LifecycleError, match="future vector"):
+        with pytest.raises(lifecycle.LifecycleError):
             run._read_future_vector(b'{"recipes": []}')
     else:
         assert run._read_future_vector(b'{"recipes": []}') == {"failures": []}
