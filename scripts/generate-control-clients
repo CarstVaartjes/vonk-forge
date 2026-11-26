@@ -31,6 +31,9 @@ if __name__ == "__main__":
     run_in_control(ROOT)
 
 import nodejs_wheel  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+from fastapi import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    FastAPI,
+)
 from sqlalchemy.orm import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     sessionmaker,
 )
@@ -136,15 +139,21 @@ def _schema(*, include_browser_auth: bool) -> dict[str, object]:
     return admin_openapi_schema(app)
 
 
-def cli_schema() -> ExternalSchemaDocument:
+def cli_schema(app: FastAPI | None = None) -> ExternalSchemaDocument:
     """The document vonkctl ships and its Python client is generated from.
 
     It is the admin contract with the word sets vonkctl only shows opened
     (``cluster_profiles.control_client.shown_words``); the Controller and the
-    browser keep the exact document.
+    browser keep the exact document. ``app`` is a running Controller's
+    application, whose served contract a test fingerprints; without it the
+    schema-only application is used.
     """
 
-    schema = _schema(include_browser_auth=False)
+    schema = (
+        _schema(include_browser_auth=False)
+        if app is None
+        else admin_openapi_schema(app)
+    )
     open_shown_words(schema)
     return schema
 
