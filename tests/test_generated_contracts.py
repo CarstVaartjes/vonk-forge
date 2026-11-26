@@ -1,7 +1,7 @@
 """Generated consumer inputs match their canonical Pydantic producers.
 
 Test setup generates the inputs before collection. Determinism is checked by
-scripts/check-generated-determinism; producer/consumer contracts stay covered
+scripts/dev/check-generated-determinism; producer/consumer contracts stay covered
 here and in the Python, browser, and Rust round-trip suites.
 """
 
@@ -28,7 +28,7 @@ CLI = ROOT / "src/cluster_profiles"
 
 
 def _script(name: str) -> ModuleType:
-    path = ROOT / "scripts" / name
+    path = ROOT / "scripts/dev" / name
     loader = importlib.machinery.SourceFileLoader(name.replace("-", "_"), str(path))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
@@ -45,14 +45,14 @@ def test_agent_wire_schema_is_current() -> None:
     rendered = _script("export-agent-wire-schema").rendered()
     wire = ROOT / "rust/crates/vonk-agent-protocol/schema/wire.json"
     assert not _stale(wire, rendered), (
-        "stale wire.json; run scripts/generate-agent-wire"
+        "stale wire.json; run scripts/dev/generate-agent-wire"
     )
 
 
 def test_installer_release_schema_is_current() -> None:
     module = _script("export-installer-release-schema")
     assert not _stale(module.OUTPUT, module.rendered()), (
-        "stale installer release schema; run scripts/generate-agent-wire"
+        "stale installer release schema; run scripts/dev/generate-agent-wire"
     )
 
 
@@ -69,7 +69,7 @@ def test_qualification_campaign_schemas_are_current() -> None:
         .items()
         if _stale(path, content)
     ]
-    assert stale == [], "run scripts/export-qualification-campaign-schemas"
+    assert stale == [], "run scripts/dev/export-qualification-campaign-schemas"
 
 
 def test_control_openapi_documents_are_current() -> None:
@@ -87,14 +87,14 @@ def test_control_openapi_documents_are_current() -> None:
         for path, content in expected.items()
         if _stale(path, content)
     ]
-    assert stale == [], "run scripts/generate-control-clients"
+    assert stale == [], "run scripts/dev/generate-control-clients"
 
 
 def test_typescript_vocabulary_is_current() -> None:
     module = _script("generate-control-clients")
     target = module.TYPESCRIPT_VOCABULARY
     assert not _stale(target, module.typescript_vocabulary()), (
-        "stale vocabulary.generated.ts; run scripts/generate-control-clients"
+        "stale vocabulary.generated.ts; run scripts/dev/generate-control-clients"
     )
 
 
@@ -104,7 +104,7 @@ def test_python_vocabulary_modules_are_current() -> None:
         for path, content in _script("generate-python-vocabulary").rendered().items()
         if _stale(path, content)
     ]
-    assert stale == [], "run scripts/generate-python-vocabulary"
+    assert stale == [], "run scripts/dev/generate-python-vocabulary"
 
 
 def _held_alone(node: object) -> Iterator[str]:

@@ -21,7 +21,7 @@ import hashlib
 import time
 from collections.abc import Callable, Mapping
 
-from scripts.development_slice_client import Client, require_object
+from scripts.fleet.development_slice_client import Client, require_object
 
 #: The stub job is installed where the job harness executes its launcher.
 JOB_EXECUTABLE = "/opt/vonk/bin/diffusers-job"

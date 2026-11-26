@@ -98,6 +98,16 @@ schema reconciliation drops every table in the Controller's `public` schema that
 `Base.metadata` does not declare, so never keep another tool's table there. See
 [Fleet words, vonkctl tests and schema reconciliation](docs/agent-rules.md#fleet-words-vonkctl-tests-and-schema-reconciliation).
 
+Model names clients call are one namespace shared by local runs and external
+models (`gateway/alias_namespace.py`). Nothing locks: a producer of a name reads
+`alias_owner` and writes; a local producer is refused only by an external owner,
+and a race is settled by the unique alias and the renderer (a local route wins). An
+external entry is admitted only by `validate_external_entry` against the pinned
+LiteLLM surface (`deploy/compose/litellm/surface.json`, regenerated with every
+LiteLLM bump, see [image pin refresh](docs/image-pin-refresh.md)); a credential is
+a binding name, never a value. See
+[External models](docs/architecture-overview.md#external-models-and-the-alias-namespace).
+
 Persist request identity before effects and reconcile a lost response before
 retrying. Reconnect to the original operation. A client timeout, disconnect, or
 Ctrl-C stops observation; remote cancellation is explicit and retains its own
@@ -200,15 +210,15 @@ the added-line principle guards; use them from the active task worktree. Full
 text of this section:
 [Verification and completion](docs/agent-rules.md#verification-and-completion).
 
-- The pre-commit hook (`scripts/check-staged-code`) runs the CI added-line
+- The pre-commit hook (`scripts/dev/check-staged-code`) runs the CI added-line
   guards on the staged diff. A plain path literal in a guard module,
-  `scripts/select-ci-areas` or a `tools/*.json` allowlist must name a path or a
+  `scripts/ci/select-ci-areas` or a `tools/*.json` allowlist must name a path or a
   path prefix (`tests/test_guard_paths_exist.py`); write guard scopes as plain
   full-path literals and move or delete the literal with the code.
 - One uv workspace owns every Python package, with the single root `uv.lock`
   and one environment. Never exact-sync a subset (`uv sync --package X`); use
   `uv sync --inexact --package X`, `uv run --package X` or
-  `scripts/ensure-project-venv`. After changing any member's dependencies run
+  `scripts/dev/ensure-project-venv`. After changing any member's dependencies run
   `uv lock`.
 - Every change lands through an integration PR. A member PR runs only the quick
   tier and a gate that cannot merge itself; check member work locally with
@@ -219,8 +229,20 @@ text of this section:
 - Before pushing, run `scripts/test changed`: the fast guards plus only the
   tests your diff edits or that import a touched module (`-n 2`). It is THE
   local check; full suites run in batch CI, not on the laptop.
-- Use `scripts/test-local` for the Controller pytest suites. CI runs the
+- Use `scripts/dev/test-local` for the Controller pytest suites. CI runs the
   required Linux lane and fails when its prerequisites are absent.
+- `scripts/` holds one entry point, `scripts/test`, and groups by purpose:
+  `dev/` (environment, local checks, contract generation, local test lanes),
+  `ci/` (CI selection, reuse, retry and gates), `images/` (image build,
+  acceptance, promotion and verification), `agent/` (agent package build, seal,
+  verify and apt), `release/` (installer publication, Compose rendering, supply
+  chain, wheels), `fleet/` (fabric validation, lifecycle canary, NAS and Spark
+  measurement) and `recipes/` (recipe-library build and validation). Scripts
+  that import a sibling module stay in the same group; scripts addressed by
+  path from other commits or repos stay at the scripts root
+  (`render-accepted-compose-overlay`, `build-recipe-library`,
+  `recipe-image-plan`, `build-control-wheel`); a script's repository
+  root is `parents[2]`.
 - Every test names a wrong implementation it catches; prefer behavioural
   boundaries and real producer/store/consumer seams. A bug fix ships with a
   regression shown to fail before the fix. See
@@ -272,13 +294,18 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
   `# pyright: ignore[rule]  # reason`. Never add a `# type: ignore`, a
   file-level `# ruff: noqa`, or a per-file ignore; the per-file entries that
   exist are guard-blocked sites awaiting their class follow-up.
-- Python code targets 3.14. A file another interpreter runs (a container
-  image's Python, a runner's or host's `python3`), and every repository module
-  such a file imports, sits under a py313/py312 `per-file-target-version` entry
-  in `pyproject.toml` (`deploy/`, `scripts/`, `tests/nodes/`, `agent_protocol/`,
-  `tools/generated_contracts.py`, and `tests/acceptance/`, whose sources the
-  Spark lane parses with the runner's 3.12); it imports the 3.14 packages only
-  when uv runs it.
+- Python code runs on 3.15 (`.python-version` is the single owner; a guard
+  checks the spellings in `.github/`, `install/`, `scripts/`, `src/` and the
+  Controller/LiteLLM images against it, allowing 3.12 only at the adapter-venv
+  sites). Ruff stays at py314 on purpose: py314 rejects PEP 810 `lazy import` as
+  invalid syntax, enforcing the
+  no-lazy-imports rule. A file another interpreter runs (a container image's
+  Python, a runner's or host's `python3`), and every repository module such a
+  file imports, sits under a py313/py312 `per-file-target-version` entry in
+  `pyproject.toml` (`deploy/` 3.13; `scripts/`, `tests/nodes/`,
+  `tests/acceptance/` and `tools/generated_contracts.py` 3.12, the ubuntu-24.04
+  runner's python3; `agent_protocol/` 3.12, the recipe adapter images' system
+  python); it imports the 3.15 packages only when uv runs it.
 - Every application route appears in the full OpenAPI schema; never use
   `include_in_schema=False` in production routes.
 - Consume wire and persisted JSON with the canonical model's JSON validation

@@ -19,8 +19,8 @@ from vonk_nas_setup.prompts import PromptIo
 from vonk_nas_setup.setup import prepare
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/build-nas-compose-bundle"
-RENDERER = ROOT / "scripts/render-production-compose"
+SCRIPT = ROOT / "scripts/release/build-nas-compose-bundle"
+RENDERER = ROOT / "scripts/release/render-production-compose"
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 DIGEST = "a" * 64
 IMAGES = {
@@ -315,7 +315,9 @@ def test_capability_free_services_read_secrets_through_the_installer_group(
 
 
 def test_ci_secret_group_helper_uses_the_compose_gid() -> None:
-    helper = (ROOT / "scripts/run-with-nas-secret-group").read_text(encoding="utf-8")
+    helper = (ROOT / "scripts/fleet/run-with-nas-secret-group").read_text(
+        encoding="utf-8"
+    )
     tailscale = yaml.safe_load(
         (ROOT / "deploy/compose/tailscale/compose.yaml").read_text(encoding="utf-8")
     )

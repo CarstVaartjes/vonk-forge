@@ -75,6 +75,7 @@ from vonk_control.fleet_profiles.projection_support import (
     _review_effects_digest,
 )
 from vonk_control.fleet_profiles.read_observation import profile_read
+from vonk_control.gateway.alias_namespace import external_aliases
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode, FleetProfile, FleetProfileApplication
@@ -639,6 +640,20 @@ class FleetProfileService:
             # fit beside each other, or the last one can never start.
             reasons.extend(
                 colocated_memory_overcommit(assignment_previews, assignment_assessments)
+            )
+            # A name an external model serves is a blocker of the review, not a refusal.
+            reasons.extend(
+                FleetProfileReason(
+                    code=ProfileReasonCode.ALIAS_TAKEN,
+                    detail=f"Model name {alias} is served by an external model.",
+                    severity=ProfileReasonSeverity.ERROR.value,
+                )
+                for alias in sorted(
+                    external_aliases(
+                        session,
+                        {item.alias for item in resolved_assignments if item.alias},
+                    )
+                )
             )
             # The planner owns named admission blockers, including preparation
             # failures. Its canonical assessment rejects hidden preparation

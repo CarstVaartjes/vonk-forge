@@ -43,7 +43,7 @@ fn generation_is_deterministic() {
     let schema = std::env::temp_dir().join(format!("vonk-wire-{}.json", std::process::id()));
     assert!(
         std::process::Command::new("python3")
-            .arg(protocol.join("../../../scripts/export-agent-wire-schema"))
+            .arg(protocol.join("../../../scripts/dev/export-agent-wire-schema"))
             .arg("--output")
             .arg(&schema)
             .status()

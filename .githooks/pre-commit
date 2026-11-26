@@ -2,4 +2,4 @@
 set -eu
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-exec python3 scripts/check-staged-code
+exec python3 scripts/dev/check-staged-code

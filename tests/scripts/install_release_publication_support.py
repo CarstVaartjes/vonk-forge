@@ -21,7 +21,7 @@ from cluster_profiles.runtime_identity import contract_fingerprint
 ROOT = Path(__file__).resolve().parents[2]
 
 
-SCRIPT = ROOT / "scripts/install-release-publication"
+SCRIPT = ROOT / "scripts/release/install-release-publication"
 
 
 DIGEST = "a" * 64

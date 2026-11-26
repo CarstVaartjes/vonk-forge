@@ -1,7 +1,7 @@
 [project]
 name = "vonk-control"
 version = "0.1.1"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 dependencies = [
   "alembic>=1.20.0",
   "argon2-cffi>=25.1.0",
@@ -68,9 +68,9 @@ artifacts = ["src/vonk_control/resources/**", "src/vonk_control/web/**", "src/vo
 "migrations" = "vonk_control/migrations"
 
 [tool.pytest.ini_options]
-# ../scripts and ../tests/scripts: the package-source publication test imports the
+# ../scripts/release and ../tests/scripts: the package-source publication test imports the
 # DEB producer script and its fixture module.
-pythonpath = ["src", "../scripts", "../tests/scripts"]
+pythonpath = ["src", "../scripts/release", "../tests/scripts"]
 # Hang guard only. Per-test timing (10 s, or @pytest.mark.slow up to 60 s)
 # lives in tools/pytest_budget.py: reported for every test, enforced only on
 # the tests a change adds or touches (--test-budget-enforce).

@@ -40,7 +40,7 @@ def _environment(tmp_path: Path, fault: str) -> dict[str, str]:
 
 def _run(env: dict[str, str], *arguments: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
-        [str(ROOT / "scripts/pull-test-images"), *arguments],
+        [str(ROOT / "scripts/ci/pull-test-images"), *arguments],
         env=env,
         capture_output=True,
         timeout=10,

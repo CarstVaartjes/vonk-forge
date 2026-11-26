@@ -88,7 +88,7 @@ assignment, never whether a test is selected.
 ## Local verification
 
 ```sh
-scripts/verify-supply-chain --json
+scripts/release/verify-supply-chain --json
 uv run --project control --frozen \
   pytest -q 'tests/scripts/test_install_release_publication_*.py'
 ```
@@ -107,7 +107,7 @@ require operator migration, particularly PostgreSQL data directories.
 The public NAS channel wrapper verifies the signed manifest and release, then
 verifies the selected bootstrap digest. That bootstrap verifies the exact NAS
 wheel and payload against their release-bound digests before installed `uv`
-runs the Python setup in an isolated Python 3.14 environment. Both fresh installs
+runs the Python setup in an isolated Python 3.15 environment. Both fresh installs
 and reruns replace `docker-compose.yaml` with this channel policy while
 preserving operator configuration, secrets, and named volumes.
 Immutable image records and `docker-compose.pinned.yml` are publication evidence

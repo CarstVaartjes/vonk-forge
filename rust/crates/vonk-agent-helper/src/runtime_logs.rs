@@ -817,22 +817,37 @@ pub struct ContainerExit {
     /// The runtime's own start/exit error (`exec format error`, a missing
     /// executable, a refused device), empty when it recorded none.
     pub error: String,
+    /// When Docker started and finished the container; `None` while unfinished.
+    pub started_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The first NVIDIA Xid code the kernel journal showed during the
+    /// container's lifetime; evidence only, never a cause.
+    pub gpu_xid: Option<u32>,
     pub host_memory: Option<vonk_agent_protocol::failure_evidence::FailureDiagnostics>,
 }
 
 /// Format for `docker container inspect --format`, read back by `parse_exit`.
-pub const EXIT_FORMAT: &str = "{{.State.ExitCode}}\t{{.State.OOMKilled}}\t{{.State.Error}}";
+pub const EXIT_FORMAT: &str = "{{.State.ExitCode}}\t{{.State.OOMKilled}}\t{{.State.StartedAt}}\t{{.State.FinishedAt}}\t{{.State.Error}}";
 
-/// Read the three fields of `EXIT_FORMAT`; the error text may hold tabs.
+/// Read the five fields of `EXIT_FORMAT`; the error text, last, may hold tabs.
+/// Docker's zero time (`0001-01-01T00:00:00Z`, "never") reads as `None`.
 pub fn parse_exit(output: &[u8]) -> Option<ContainerExit> {
     let text = std::str::from_utf8(output).ok()?.trim_end_matches('\n');
-    let mut fields = text.splitn(3, '\t');
+    let mut fields = text.splitn(5, '\t');
     let exit_code = fields.next()?.trim().parse::<i32>().ok()?;
     let oom_killed = match fields.next()?.trim() {
         "true" => Some(true),
         "false" => Some(false),
         _ => None,
     };
+    let mut time = || {
+        chrono::DateTime::parse_from_rfc3339(fields.next()?.trim())
+            .ok()
+            .map(|at| at.with_timezone(&chrono::Utc))
+            .filter(|at| at.timestamp() > 0)
+    };
+    let started_at = time();
+    let finished_at = time();
     let error: String = fields
         .next()
         .unwrap_or("")
@@ -844,6 +859,9 @@ pub fn parse_exit(output: &[u8]) -> Option<ContainerExit> {
         exit_code: Some(exit_code),
         oom_killed,
         error,
+        started_at,
+        finished_at,
+        gpu_xid: None,
         host_memory: None,
     })
 }
@@ -1073,6 +1091,9 @@ pub fn exit_summary(
             }
             if !state.error.is_empty() {
                 parts.push(format!("runtime_error={:?}", state.error));
+            }
+            if let Some(code) = state.gpu_xid {
+                parts.push(format!("gpu_xid={code}"));
             }
         }
         Err(reason) => parts.push(format!("exit_state_unavailable={reason:?}")),

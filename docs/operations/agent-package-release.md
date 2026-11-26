@@ -48,7 +48,7 @@ release for the current tip. Each run is one fan-in:
 
 A development producer is skipped when the newest release run that completed
 it, on an ancestor of the source, saw the same producer inputs and its
-artifacts are still available. `scripts/resolve-publication-producer` owns the
+artifacts are still available. `scripts/ci/resolve-publication-producer` owns the
 input paths of each producer. Every release records the producers it completed
 as `release-producer-<name>` marker artifacts, so the lookup needs no walk over
 runs that reused. An agent package counts only after apt dev published it; a
@@ -58,7 +58,7 @@ days, the repository maximum, which bounds how long evidence can be reused.
 
 Development agent packages are versioned `X.Y.Z~dev.<seconds>+g<sha>`, where
 `<seconds>` is the source commit's committer time
-(`scripts/dev-publication-sequence`): the same scheme as a pull request
+(`scripts/images/dev-publication-sequence`): the same scheme as a pull request
 candidate, whose `<seconds>` is its build time. Main commits are committed in
 merge order and a pull request whose tree main reuses was built after the
 previous merge, so every development version is above the one before it, and
@@ -66,20 +66,20 @@ far above the `~dev.<run_number>` versions apt dev published earlier. A rerun
 of the same commit builds the same version.
 
 An agent package is built without trust material and sealed with a release key.
-`scripts/build-agent-deb --unsealed` writes `<package>.unsealed.deb`, which has
-no release keyring and no agent artifact signature; `scripts/seal-agent-deb`
+`scripts/agent/build-agent-deb --unsealed` writes `<package>.unsealed.deb`, which has
+no release keyring and no agent artifact signature; `scripts/agent/seal-agent-deb`
 adds `/usr/share/keyrings/vonk-forge-release.pub`,
 `/usr/lib/vonk-forge/release/artifact.sig` and the detached `.host.sig`, and
 nothing else. Sealing one unsealed package with one key always yields the same
 sealed package, byte for byte, so publication can seal exactly the package an
 earlier run accepted. A keyed build is the unsealed build sealed in one step.
-`scripts/verify-agent-deb` and the package helper refuse a package without the
+`scripts/agent/verify-agent-deb` and the package helper refuse a package without the
 keyring, and the seal refuses a package that already carries trust material.
 
 Releases on `main` are newest-only without starvation. A running release job
 finishes and a newer push queues behind it in each job's concurrency group,
 where GitHub keeps only the newest pending job. In addition, the `supersede`
-job of a newer `main` release (`scripts/supersede-release-runs`) cancels an
+job of a newer `main` release (`scripts/ci/supersede-release-runs`) cancels an
 older in-flight `main` release whose source it contains, unless that release
 is the oldest in flight (it always finishes) or has committed to publication
 (its apt dev publication or source acceptance job exists). Candidate
@@ -168,7 +168,7 @@ first stale child (one per run) and continues.
 Remove that residual with the sanctioned cleanup rather than by hand. Dispatch
 `.github/workflows/installer-maintenance.yml` on `main`, optionally passing the
 exact child id in `child_id`; the job runs
-`scripts/tailscale-acceptance-tailnet cleanup` under the `installer-canary-dev`
+`scripts/ci/tailscale-acceptance-tailnet cleanup` under the `installer-canary-dev`
 environment, which is the only place the factory credential exists. Cleanup
 deletes only children whose display name matches the CI pattern, whose id and
 timestamp validate, and that are older than the stale threshold; it refuses
@@ -275,13 +275,13 @@ Operators use the signed `/nas` endpoint, which verifies the wheel and payload
 before executing the equivalent of:
 
 ```sh
-uv run --isolated --no-project --python 3.14 --with "$wheel" \
+uv run --isolated --no-project --python 3.15 --with "$wheel" \
   vonk-nas-setup --template "$payload"
 ```
 
 Here `$wheel` and `$payload` are the exact files already verified by the
 bootstrap, not independently chosen downloads. `uv` must already be installed;
-it manages the Python 3.14 runtime. Upgrade switch, private answers,
+it manages the Python 3.15 runtime. Upgrade switch, private answers,
 Lab mode, local secrets and PKI retain the same command workflow.
 
 Release JSON is signed, and one signed, expiring `current.manifest` atomically

@@ -76,7 +76,7 @@ from .vocabulary_literals import CODE_POSITION_ROOT, PYTHON_ROOTS, REPO_ROOT
 install_write_guard(strict=True)
 install_seeded_heads()
 
-# The same pinned PostgreSQL the Compose deployment runs; scripts/pull-test-images
+# The same pinned PostgreSQL the Compose deployment runs; scripts/ci/pull-test-images
 # pulls it before the suite, so starting the server never downloads.
 POSTGRES_IMAGE = json.loads(
     (Path(__file__).resolve().parents[2] / "deploy/compose/images.lock.json").read_text(
@@ -509,7 +509,7 @@ def _built_image(variable: str) -> str:
     reason = None
     if not image:
         reason = (
-            f"{variable} names no prebuilt image; run scripts/test-local "
+            f"{variable} names no prebuilt image; run scripts/dev/test-local "
             "--with-image-build or build control/Dockerfile and set it"
         )
     elif shutil.which("docker") is None:

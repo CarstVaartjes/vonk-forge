@@ -84,6 +84,9 @@ fn stop_path_records_hardware_failure_and_leaves_fresh_attempt_admissible() {
         exit_code: Some(137),
         oom_killed: Some(false),
         error: String::new(),
+        started_at: None,
+        finished_at: None,
+        gpu_xid: None,
         host_memory: Some(recorded),
     };
     assert_eq!(

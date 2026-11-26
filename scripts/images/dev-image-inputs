@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Bind reusable images to their complete, isolated Git build inputs."""
+
+from __future__ import annotations
+
+import hashlib
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+CONTEXTS = {
+    "litellm": (
+        "deploy/compose/litellm",
+        "deploy/compose/python-bootstrap.lock",
+        "agent_protocol/src/vonk_agent_protocol/route_activation.py",
+        "agent_protocol/src/vonk_agent_protocol/route_activation_words.py",
+    ),
+}
+# Include the complete build/acceptance policy, including this input definition.
+# A policy change deliberately invalidates both caches.
+POLICY = (
+    ".github/workflows/dev-images.yml",
+    "scripts/images/dev-image-inputs",
+    "scripts/images/reuse-development-image",
+    ".dockerignore",
+    "scripts/images/accept-development-image-archive",
+    "scripts/images/dev-image-acceptance-receipt",
+    "scripts/images/verify-published-image",
+    "scripts/images/verify-multiarch-image-manifest",
+    "scripts/images/verify-public-image-inputs",
+    "scripts/ci/retry-dependency-fetch",
+    "scripts/ci/retry_dependency_fetch.py",
+)
+
+
+def git(*args: str) -> bytes:
+    return subprocess.check_output(["git", *args], timeout=30)
+
+
+def entries(role: str, commit: str, *, policy: bool = True) -> bytes:
+    # ``commit`` is any tree-ish: a commit, or the tree an image label names.
+    if role not in CONTEXTS or re.fullmatch(r"[a-f0-9]{40}", commit) is None:
+        raise ValueError("invalid reusable image identity")
+    paths = (*CONTEXTS[role], *(POLICY if policy else ()))
+    for path in paths:
+        git("cat-file", "-e", f"{commit}:{path}")
+    return git("ls-tree", "-r", "-z", commit, "--", *paths)
+
+
+def key(role: str, commit: str) -> str:
+    # Git records include path, file mode, and blob identity, with NUL framing.
+    return hashlib.sha256(role.encode() + b"\0" + entries(role, commit)).hexdigest()
+
+
+def same_inputs(role: str, built: str, accepted: str) -> None:
+    """Identical isolated inputs: ``built`` and ``accepted`` are tree-ish."""
+    if key(role, built) != key(role, accepted):
+        raise ValueError("reusable image build or acceptance inputs changed")
+
+
+def matches(role: str, built: str, accepted: str) -> None:
+    """A main build commit whose isolated inputs ``accepted`` still has."""
+    git("merge-base", "--is-ancestor", built, accepted)
+    same_inputs(role, built, accepted)
+
+
+def prepare(role: str, commit: str, destination: Path) -> None:
+    fingerprint = key(role, commit)
+    destination.mkdir(parents=True, exist_ok=False)
+    # BuildKit sees only these tracked files. Adding a COPY outside the declared
+    # context fails the build instead of creating an untracked cache dependency.
+    for entry in entries(role, commit, policy=False).split(b"\0"):
+        if not entry:
+            continue
+        metadata, raw_path = entry.split(b"\t", 1)
+        mode, kind, blob = metadata.decode().split()
+        if kind != "blob" or mode not in {"100644", "100755"}:
+            raise ValueError("image context must contain regular tracked files")
+        relative = Path(raw_path.decode())
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(git("cat-file", "blob", blob))
+        target.chmod(int(mode, 8) & 0o777)
+    print(f"{role}_key={fingerprint}")
+
+
+def main() -> int:
+    try:
+        match sys.argv[1:]:
+            case ["key", role, commit]:
+                print(key(role, commit))
+            case ["matches", role, built, accepted]:
+                matches(role, built, accepted)
+            case ["same-inputs", role, built, accepted]:
+                same_inputs(role, built, accepted)
+            case ["prepare", role, commit, destination]:
+                prepare(role, commit, Path(destination))
+            case _:
+                raise ValueError(
+                    "usage: dev-image-inputs key ROLE COMMIT | matches ROLE BUILT ACCEPTED"
+                    " | same-inputs ROLE BUILT_TREE ACCEPTED_TREE"
+                    " | prepare ROLE COMMIT DESTINATION"
+                )
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f"dev-image-inputs: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

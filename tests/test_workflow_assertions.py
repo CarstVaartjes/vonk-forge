@@ -251,7 +251,7 @@ def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> No
     ):
         steps = workflow["jobs"][job]["steps"]
         [listing] = [
-            step for step in steps if "scripts/changed-tests" in step.get("run", "")
+            step for step in steps if "scripts/dev/changed-tests" in step.get("run", "")
         ]
         assert "pull_request" in listing["if"]
         assert "merge_group" in listing["if"]
@@ -376,7 +376,7 @@ def test_pre_commit_added_line_paths_match_ci() -> None:
     match = re.search(r"--unified=0 \"\$BASE_SHA\" -- \\\n\s+([^|\n]+?)\s*\|", ci)
     assert match
     loader = importlib.machinery.SourceFileLoader(
-        "check_staged_code", str(ROOT / "scripts/check-staged-code")
+        "check_staged_code", str(ROOT / "scripts/dev/check-staged-code")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec

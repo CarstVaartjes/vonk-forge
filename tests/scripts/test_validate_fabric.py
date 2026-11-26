@@ -12,7 +12,7 @@ import pytest
 from control.tests.insert_collision_support import Rendezvous
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "validate_fabric.py"
+SCRIPT = ROOT / "scripts" / "fleet" / "validate_fabric.py"
 
 
 @pytest.fixture

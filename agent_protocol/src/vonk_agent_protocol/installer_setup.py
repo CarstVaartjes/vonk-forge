@@ -1,6 +1,6 @@
 """Documents the NAS and Spark setup programs read and exchange.
 
-``NasInstallTemplate`` is what ``scripts/build-nas-compose-bundle`` writes and
+``NasInstallTemplate`` is what ``scripts/release/build-nas-compose-bundle`` writes and
 ``vonk-nas-setup`` reads.  ``SitePorts`` is the one port list the Spark firewall
 and the Controller share.  ``SparkApplyEnvelope`` is the frame the unprivileged
 phase of ``vonk-spark-setup`` hands its privileged phase.  Each model here is

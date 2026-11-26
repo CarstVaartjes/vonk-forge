@@ -302,7 +302,8 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
             "-c",
             (
                 "import importlib.util; "
-                "from cluster_profiles import cli_artifact_jobs; "
+                "import cluster_profiles.cli_artifact_jobs.parser, "
+                "cluster_profiles.cli_artifact_jobs.run; "
                 "assert importlib.util.find_spec('vonk_control') is None"
             ),
         ],

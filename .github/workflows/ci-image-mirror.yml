@@ -18,7 +18,7 @@ jobs:
         with:
           persist-credentials: false
       - id: inputs
-        run: echo "images=$(python3 scripts/ci-image-mirror-inputs)" >> "$GITHUB_OUTPUT"
+        run: echo "images=$(python3 scripts/ci/ci-image-mirror-inputs)" >> "$GITHUB_OUTPUT"
 
   mirror:
     needs: inputs
@@ -54,7 +54,7 @@ jobs:
           name=${name%%:*}
           digest=${source##*@}
           owner=${OWNER,,}
-          scripts/retry-dependency-fetch skopeo copy --all --preserve-digests \
+          scripts/ci/retry-dependency-fetch skopeo copy --all --preserve-digests \
             "docker://${name}@${digest}" \
             "docker://ghcr.io/${owner}/ci-mirror/${name}:${digest#sha256:}"
 
@@ -71,4 +71,4 @@ jobs:
       - name: Delete the build caches of closed pull requests
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/prune-pr-build-caches --owner "$GITHUB_REPOSITORY_OWNER" --repository "$GITHUB_REPOSITORY"
+        run: scripts/ci/prune-pr-build-caches --owner "$GITHUB_REPOSITORY_OWNER" --repository "$GITHUB_REPOSITORY"
