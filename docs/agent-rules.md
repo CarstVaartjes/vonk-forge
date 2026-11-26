@@ -240,8 +240,11 @@ The pre-commit hook (`scripts/dev/check-staged-code`) also runs the CI added-lin
 guards on the staged diff, so a violation fails before push; it skips with a
 message only when a staged file also has unstaged edits.
 A plain path literal in a guard module, `scripts/ci/select-ci-areas` or a `tools/*.json` allowlist must name a path or the prefix of one (`tests/test_guard_paths_exist.py`); write guard scopes as plain full-path literals (composed or regex scopes are invisible to it), and move or delete the literal with the code.
-`cross-repo-nightly.yml` validates the recipes `main` library with the platform `main` validator every
-night; a red run is the drift alarm.
+`cross-repo-nightly.yml` validates the recipes `main` library with the published dev recipe-tools
+bundle every night, verified and run as recipes CI runs it; a red run is the drift alarm.
+Recipes CI validates with that signed per-channel bundle; its `platform-features.json` comes only
+from the tables the platform executes (`scripts/recipes/platform-features`), never typed by hand
+(docs/runbooks/platform-release-publication.md, Recipe-tools bundle).
 `fuzz.yml` (daily, dispatch only otherwise) fuzzes the parsers in `rust/fuzz` (outside the Cargo workspace); a red run is a crash, and the fix adds one case to the parser's existing test (docs/testing-and-ci.md, Fuzzing).
 
 One uv workspace owns every Python package: the root `vonk-cluster-profiles`

@@ -873,6 +873,53 @@ jobs:
       scenario: recipe-refresh
     secrets: inherit
 
+  recipe-tools-acceptance:
+    name: Validate the pinned recipe library with the recipe-tools bundle
+    # The bundle recipes CI validates with (scripts/recipes/build-recipe-tools-bundle)
+    # is a pure function of this source. Its own entry point, run from an empty
+    # directory with nothing else of this checkout, must accept the recipe
+    # library this source pins, or nothing is signed and promotion never
+    # publishes a validator that refuses that library.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact acceptance authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+        with:
+          contracts: python
+          cli-dependencies: "false"
+      - name: Provide the pinned recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Build the recipe-tools bundle
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/recipe-tools"
+          uv run --project control --frozen scripts/recipes/platform-features \
+            > "$RUNNER_TEMP/platform-features.json"
+          uv run --project control --frozen scripts/recipes/build-recipe-tools-bundle --source-root . \
+            --features "$RUNNER_TEMP/platform-features.json" \
+            --out "$RUNNER_TEMP/recipe-tools/recipe-tools.tar.gz"
+      - name: Validate the pinned library with the extracted bundle alone
+        run: |
+          set -euo pipefail
+          extracted=$(mktemp -d)
+          tar -xzf "$RUNNER_TEMP/recipe-tools/recipe-tools.tar.gz" -C "$extracted"
+          "$extracted/scripts/recipes/validate-recipe-checkout" "$GITHUB_WORKSPACE/.recipe-library"
+      - name: Upload the accepted recipe-tools bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: recipe-tools-${{ inputs.channel }}-${{ inputs.generation }}
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/recipe-tools/recipe-tools.tar.gz
+
   acceptance:
     name: Sign complete candidate acceptance
     needs:
@@ -881,6 +928,7 @@ jobs:
       - spark-upgrade-acceptance
       - spark-recipe-refresh
       - match-pr-acceptance
+      - recipe-tools-acceptance
     # A carry or recipe refresh that was not requested is skipped, never
     # failed; one that was requested must have succeeded. The Spark lane and
     # recipe refresh have independent decisions: the signer validates reused
@@ -888,6 +936,7 @@ jobs:
     if: >-
       always() &&
       needs['nas-acceptance'].result == 'success' &&
+      needs['recipe-tools-acceptance'].result == 'success' &&
       (needs['spark-acceptance'].result == 'success' ||
        (needs['match-pr-acceptance'].outputs.reuse == 'true' &&
         needs['spark-acceptance'].result == 'skipped')) &&

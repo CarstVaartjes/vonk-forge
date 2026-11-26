@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Build the recipe-tools bundle: the platform files recipes CI validates with.
+
+The bundle is a pure function of the source tree and the features document:
+files only, sorted by path, owner 0:0 with no names, mtime 0, mode 0755 for an
+executable and 0644 otherwise, in a gzip stream with no name and mtime 0. Two
+builds of one tree give the same bytes, so a reused pull request candidate
+yields the bundle its acceptance validated.
+
+It holds the locked workspace the validator runs in (``uv run --project control
+--frozen --no-dev``), the validator and its entry point
+``scripts/recipes/validate-recipe-checkout``, and ``platform-features.json``
+(``scripts/recipes/platform-features``) at its root. It runs no git: the source
+root and the features document are arguments.
+"""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import io
+import os
+import stat
+import sys
+import tarfile
+from pathlib import Path, PurePosixPath
+
+FEATURES = "platform-features.json"
+# Files and directories (taken whole) relative to the source root. The
+# workspace root, uv.lock and every member's pyproject.toml let uv resolve the
+# locked environment; control needs alembic.ini and migrations to build.
+PATHS = (
+    ".python-version",
+    ".tool-versions",
+    "LICENSE",
+    "pyproject.toml",
+    "uv.lock",
+    "agent_protocol/pyproject.toml",
+    "agent_protocol/src",
+    "nas_setup/pyproject.toml",
+    "control/pyproject.toml",
+    "control/alembic.ini",
+    "control/migrations",
+    "control/src",
+    "scripts/build-recipe-library",
+    "scripts/recipes/validate-recipe-library",
+    "scripts/recipes/validate-recipe-checkout",
+)
+_SKIPPED_DIRECTORIES = frozenset({"__pycache__"})
+_SKIPPED_SUFFIXES = (".pyc",)
+
+
+class BundleError(ValueError):
+    pass
+
+
+def _files(source_root: Path) -> list[tuple[str, Path]]:
+    found: dict[str, Path] = {}
+    for relative in PATHS:
+        path = source_root / relative
+        if path.is_symlink() or not path.exists():
+            raise BundleError(f"bundle path is missing or a symlink: {relative}")
+        if path.is_file():
+            found[relative] = path
+            continue
+        for directory, names, files in os.walk(path):
+            names[:] = [name for name in names if name not in _SKIPPED_DIRECTORIES]
+            for name in files:
+                if name.endswith(_SKIPPED_SUFFIXES):
+                    continue
+                file = Path(directory) / name
+                if file.is_symlink() or not file.is_file():
+                    raise BundleError(f"bundle file is not a regular file: {file}")
+                found[PurePosixPath(file.relative_to(source_root)).as_posix()] = file
+    if FEATURES in found:
+        raise BundleError(f"{FEATURES} must come from the features argument")
+    return sorted(found.items())
+
+
+def _member(name: str, size: int, *, executable: bool) -> tarfile.TarInfo:
+    info = tarfile.TarInfo(name)
+    info.size = size
+    info.mtime = 0
+    info.mode = 0o755 if executable else 0o644
+    info.uid = info.gid = 0
+    info.uname = info.gname = ""
+    return info
+
+
+def build(source_root: Path, features: bytes) -> bytes:
+    """The bundle bytes for one source tree and features document."""
+
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w", format=tarfile.PAX_FORMAT) as tar:
+        tar.addfile(
+            _member(FEATURES, len(features), executable=False), io.BytesIO(features)
+        )
+        for name, path in _files(source_root):
+            content = path.read_bytes()
+            executable = bool(path.stat().st_mode & stat.S_IXUSR)
+            tar.addfile(
+                _member(name, len(content), executable=executable), io.BytesIO(content)
+            )
+    compressed = io.BytesIO()
+    with gzip.GzipFile(
+        filename="", mode="wb", fileobj=compressed, compresslevel=9, mtime=0
+    ) as stream:
+        stream.write(archive.getvalue())
+    return compressed.getvalue()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-root", type=Path, required=True)
+    parser.add_argument("--features", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    arguments = parser.parse_args()
+    try:
+        content = build(
+            arguments.source_root.resolve(), arguments.features.read_bytes()
+        )
+    except (BundleError, OSError) as error:
+        print(f"build-recipe-tools-bundle: {error}", file=sys.stderr)
+        return 1
+    arguments.out.write_bytes(content)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

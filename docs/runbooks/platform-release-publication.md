@@ -59,7 +59,8 @@ The release path:
 4. verifies the complete signed acceptance receipt, published candidate objects,
    current source authority, and the existing channel pointer;
 5. advances all four Vonk image aliases, rechecks authority, then publishes the
-   signed installer pointer last.
+   signed installer pointer, and after it the channel's recipe-tools bundle and
+   its pointer last (see [Recipe-tools bundle](#recipe-tools-bundle)).
 
 The `Release` workflow is the only image-channel promotion workflow. Its promotion
 job records the channel, source commit, generation, and four image digests in the
@@ -88,6 +89,54 @@ including selector failures. Deleted files participate in area selection.
 Repository and control shards use recent successful CI timing artifacts; missing,
 stale, or invalid timings fall back to collection counts. Timing data affects only
 assignment, never whether a test is selected.
+
+## Recipe-tools bundle
+
+Recipes CI validates its library with the platform of each channel through one
+signed file, not through a pinned forge commit. Each release generation
+publishes, beside its other artifacts:
+
+- `artifacts/<channel>/recipe-tools-<sha256>.tar.gz`, named by its own digest and
+  written once, so a rebuild with other bytes is another object, never a collision;
+- `artifacts/<channel>/recipe-tools.json`, the pointer
+  `{"bundle", "ref", "sha256", "source_sha"}`. `bundle` is the file name,
+  relative to the pointer's own directory. `ref` is `refs/heads/main` for dev
+  and the exact `refs/tags/vX.Y.Z` for stable.
+
+`scripts/recipes/build-recipe-tools-bundle` builds the bundle deterministically
+(sorted, owner 0:0, mtime 0, gzip without name or time), so it is a pure function
+of the tree. It holds the locked workspace the validator runs in, the validator,
+the entry point `scripts/recipes/validate-recipe-checkout LIBRARY_ROOT` (build
+the library in place, then validate it) and `platform-features.json`.
+`scripts/recipes/platform-features` writes that document from the tables the
+platform executes: serving check kinds, reasoning-effort kinds, gateway API
+modes, interface adapters and Model source providers, plus the locked
+contracts version and major.
+
+Release acceptance (`recipe-tools-acceptance` in `release-acceptance-core.yml`)
+extracts the bundle into an empty directory and runs its entry point against the
+recipe library at `tests/acceptance/recipe-library-revision.txt`. The receipt is
+signed only when it passes, so a promoted validator always accepts the library
+it was accepted against. The promote job of `installer-publication.yml` then
+revalidates the source authority and attests those exact bytes keylessly
+(`actions/attest`). `scripts/images/promote-accepted-channel` writes the bundle
+object before any mutable write, and the recipe-tools pointer only after the
+image aliases and the installer pointer have advanced. A failure there leaves
+the installer promoted; rerunning the job finds the same bundle object and
+writes the pointer again.
+
+A consumer verifies it the way `cross-repo-nightly.yml` does:
+
+```sh
+gh attestation verify recipe-tools-<sha256>.tar.gz \
+  --repo CarstVaartjes/vonk-forge \
+  --signer-workflow CarstVaartjes/vonk-forge/.github/workflows/installer-publication.yml \
+  --source-digest <pointer.source_sha> --source-ref <pointer.ref>
+```
+
+and checks the pointer's `sha256`. The pointer itself is unsigned: a tampered
+pointer can at most name an older attested bundle of the same channel, which is
+visible in the consumer's summary.
 
 ## Stable preflight
 

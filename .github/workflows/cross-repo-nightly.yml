@@ -1,9 +1,10 @@
 name: Cross-repo nightly
 
-# Everything else here pins the sibling repositories to reviewed revisions. This
-# run takes origin/main of vonk-forge and vonk-forge-recipes together every
-# night and runs the platform's recipe validator against them, so a drift
-# surfaces the next morning, not at the next pin move.
+# Every night recipes main is validated with the published dev recipe-tools
+# bundle, exactly as recipes CI does it: fetch the channel pointer, check the
+# bundle's digest and its keyless attestation from the release workflow, then
+# run the bundle's own entry point. A drift between the two mains, or a bundle
+# that no longer verifies or runs, surfaces the next morning.
 # It only reads; a red job is the alarm.
 
 on:
@@ -16,19 +17,15 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  attestations: read
   contents: read
 
 jobs:
   recipes-validate:
-    name: Recipes main against platform main
+    name: Recipes main against the dev recipe-tools bundle
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - name: Check out vonk-forge main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          persist-credentials: false
       - name: Check out vonk-forge-recipes main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,19 +33,38 @@ jobs:
           ref: main
           path: .recipe-library
           persist-credentials: false
-      - name: Prepare locked Python environment
-        uses: ./.github/actions/python-env
-        with:
-          contracts: none
-          cli-dependencies: "false"
-      - name: Build recipe library index and packages
-        run: scripts/build-recipe-library "$GITHUB_WORKSPACE/.recipe-library"
-      # The command validate-recipe-library.yml runs for recipes pull requests.
-      - name: Validate recipe library with the platform validator
+      - name: Fetch and verify the dev recipe-tools bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          uv run --project control --frozen \
-            --with-editable "$GITHUB_WORKSPACE/.recipe-library/contracts" \
-            scripts/recipes/validate-recipe-library \
-            --library-root "$GITHUB_WORKSPACE/.recipe-library" \
-            --platform-root "$GITHUB_WORKSPACE" \
-            --json
+          set -euo pipefail
+          base=https://install.vonkforge.ai/artifacts/dev
+          fetch() {
+            curl -fsS --retry 3 --connect-timeout 10 --max-time 300 -o "$2" "$base/$1"
+          }
+          fetch recipe-tools.json "$RUNNER_TEMP/recipe-tools.json"
+          pointer=$RUNNER_TEMP/recipe-tools.json
+          source_sha=$(jq -er '.source_sha | select(test("^[0-9a-f]{40}$"))' "$pointer")
+          jq -e '.ref == "refs/heads/main"' "$pointer" >/dev/null
+          sha256=$(jq -er '.sha256 | select(test("^[0-9a-f]{64}$"))' "$pointer")
+          bundle=$(jq -er 'select(.bundle == "recipe-tools-\(.sha256).tar.gz") | .bundle' "$pointer")
+          fetch "$bundle" "$RUNNER_TEMP/recipe-tools.tar.gz"
+          printf '%s  %s\n' "$sha256" "$RUNNER_TEMP/recipe-tools.tar.gz" | sha256sum -c -
+          gh attestation verify "$RUNNER_TEMP/recipe-tools.tar.gz" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/installer-publication.yml" \
+            --source-digest "$source_sha" \
+            --source-ref refs/heads/main
+          mkdir .vonk-forge
+          tar -xzf "$RUNNER_TEMP/recipe-tools.tar.gz" -C .vonk-forge
+          printf 'Validated with the dev recipe-tools bundle of `%s`.\n' "$source_sha" >> "$GITHUB_STEP_SUMMARY"
+      - name: Set up uv as the bundle pins it
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          version-file: .vonk-forge/.tool-versions
+          python-version: "3.15"
+          enable-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Validate recipes main with the bundle's entry point
+        run: .vonk-forge/scripts/recipes/validate-recipe-checkout "$GITHUB_WORKSPACE/.recipe-library"

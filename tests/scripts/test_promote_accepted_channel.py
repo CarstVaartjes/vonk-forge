@@ -24,7 +24,9 @@ def _fixture(tmp_path: Path) -> tuple[list[str], dict[str, str], Path]:
     # These stand-ins record boundaries; image copy/rollback has its own tests.
     helpers = {
         tmp_path / "scripts/release/install-release-publication": """#!/usr/bin/env bash
-if [[ " $* " == *" --preflight-only "* ]]; then
+if [[ $1 == publish-recipe-tools ]]; then
+  echo "recipe-tools:$*" >> "$LOG"
+elif [[ " $* " == *" --preflight-only "* ]]; then
   echo preflight >> "$LOG"
   [[ ${FAIL_PREFLIGHT:-0} != 1 ]]
 else
@@ -85,6 +87,7 @@ if [[ $1 == merge-base ]]; then [[ ${ON_MAIN:-1} == 1 ]]; fi
         "refs/heads/main",
         SOURCE,
         "",
+        str(tmp_path / "recipe-tools.tar.gz"),
     ]
     environment = {
         **os.environ,
@@ -94,6 +97,20 @@ if [[ $1 == merge-base ]]; then [[ ${ON_MAIN:-1} == 1 ]]; fi
         "EXPECTED_ALIAS": "dev",
     }
     return command, environment, log
+
+
+def _steps(log: Path) -> list[str]:
+    """Each promotion boundary in order; recipe-tools keeps its channel and ref."""
+    steps = []
+    for line in log.read_text().splitlines():
+        words = line.split()
+        if line.startswith("recipe-tools:") and "--bundle-only" in words:
+            steps.append("recipe-tools-bundle")
+        elif line.startswith("recipe-tools:"):
+            steps.append("recipe-tools:" + words[words.index("--ref") + 1])
+        else:
+            steps.append(line)
+    return steps
 
 
 def test_dev_aliases_advance_after_preflight_and_before_pointer(tmp_path: Path) -> None:
@@ -107,7 +124,13 @@ def test_dev_aliases_advance_after_preflight_and_before_pointer(tmp_path: Path) 
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert log.read_text().splitlines() == ["preflight", "aliases:dev", "pointer"]
+    assert _steps(log) == [
+        "preflight",
+        "recipe-tools-bundle",
+        "aliases:dev",
+        "pointer",
+        "recipe-tools:refs/heads/main",
+    ]
 
 
 def test_accepted_dev_source_promotes_after_main_advanced(tmp_path: Path) -> None:
@@ -123,7 +146,13 @@ def test_accepted_dev_source_promotes_after_main_advanced(tmp_path: Path) -> Non
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert log.read_text().splitlines() == ["preflight", "aliases:dev", "pointer"]
+    assert _steps(log) == [
+        "preflight",
+        "recipe-tools-bundle",
+        "aliases:dev",
+        "pointer",
+        "recipe-tools:refs/heads/main",
+    ]
 
 
 @pytest.mark.parametrize("failure", ["preflight", "source_off_main"])
@@ -171,10 +200,12 @@ def test_production_uses_latest_and_checks_release_authority_twice(
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert log.read_text().splitlines() == [
+    assert _steps(log) == [
         "preflight",
         "stable-authority",
+        "recipe-tools-bundle",
         "aliases:latest",
         "stable-authority",
         "pointer",
+        "recipe-tools:refs/tags/v1.2.3",
     ]

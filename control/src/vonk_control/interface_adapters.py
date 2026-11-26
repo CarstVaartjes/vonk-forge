@@ -15,7 +15,9 @@ class InterfaceAdapter:
     publication: str
 
 
-_ADAPTERS = {
+# The interface adapters this platform executes; scripts/recipes/platform-features
+# publishes these keys to recipes CI.
+INTERFACE_ADAPTERS: dict[str, InterfaceAdapter] = {
     "openai": InterfaceAdapter("openai", "litellm"),
     "image-job": InterfaceAdapter("image-job", "artifact"),
     "audio-job": InterfaceAdapter("audio-job", "artifact"),
@@ -28,7 +30,7 @@ _ADAPTERS = {
 def interface_adapter(name: str) -> InterfaceAdapter:
     if type(name) is not str:
         raise InterfaceAdapterError("unknown interface adapter")
-    adapter = _ADAPTERS.get(name)
+    adapter = INTERFACE_ADAPTERS.get(name)
     if adapter is None:
         raise InterfaceAdapterError("unknown interface adapter")
     return adapter

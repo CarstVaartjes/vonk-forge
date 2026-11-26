@@ -46,6 +46,25 @@ class ServingObservationUnknown(ServingExecutionError):
     """An unreadable peer observation, retried only by the bounded executor."""
 
 
+class ServingKindNotExecuted(ServingExecutionError):
+    """A declared check kind this platform has no evaluator for."""
+
+
+# The chat-shaped kinds the final branch of ``evaluate_http_response`` evaluates.
+CHAT_KINDS = frozenset({"openai.chat", "openai.vision", "openai.tools"})
+# Every HTTP check kind ``evaluate_http_response`` has a branch for; a kind
+# outside it is refused, never evaluated as chat. scripts/recipes/platform-features
+# publishes these to recipes CI.
+HTTP_KINDS = CHAT_KINDS | {
+    "openai.speech",
+    "openai.health",
+    "openai.systemone",
+    "openai.transcription",
+    "openai.embedding",
+    "openai.completion",
+}
+
+
 MAX_HTTP_RESPONSE_BYTES = 16 * 1024 * 1024
 
 
@@ -207,6 +226,10 @@ def evaluate_http_response(
         if "completion.output-cap" in assertions:
             _assert_output_cap(response, check, "completion.output-cap")
         return {"response_shape": "text_completion", "choices": 1}
+    if kind not in CHAT_KINDS:
+        raise ServingKindNotExecuted(
+            f"serving check kind {kind!r} is not executed here"
+        )
     choice = _choices(response)[0]
     message = choice.get("message")
     if not isinstance(message, Mapping):
@@ -399,9 +422,12 @@ def execute_http_check(
 
 
 __all__ = [
+    "CHAT_KINDS",
+    "HTTP_KINDS",
     "MAX_HTTP_RESPONSE_BYTES",
     "HttpObservation",
     "ServingExecutionError",
+    "ServingKindNotExecuted",
     "evaluate_http_response",
     "evaluate_job_result",
     "execute_http_check",
