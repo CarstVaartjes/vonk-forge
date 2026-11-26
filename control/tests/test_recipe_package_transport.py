@@ -841,6 +841,10 @@ def test_an_unknown_served_capability_is_left_out_not_fatal(
         assert tuple(snapshot.items[0].served_capabilities or ()) == (
             "text-generation",
         )
+        assert any(
+            "'teleportation' is unknown to this Controller" in problem.detail
+            for problem in snapshot.display_notes
+        )
     finally:
         client.close()
 

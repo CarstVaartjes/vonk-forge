@@ -75,6 +75,8 @@ def known_field[V: BaseModel | tuple[str, ...]](value: V) -> V:
 
     if isinstance(value, BaseModel):
         return known_block(value)
+    if not isinstance(value, tuple | list):  # pyright: ignore[reportUnnecessaryIsInstance]  # a field the types do not promise: withhold it, never split it
+        raise BlockWithheld
     return tuple(  # pyright: ignore[reportReturnType]  # the same tuple type, fewer items
         item for item in value if not isinstance(item, UnrecognisedWord)
     )
