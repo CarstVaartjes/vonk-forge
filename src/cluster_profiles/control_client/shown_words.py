@@ -10,8 +10,10 @@ there is a contract mismatch, answered by ``vonkctl update --apply``.
 Likewise a response object is open there: the Controller's strict response
 models carry ``additionalProperties: false``, which would refuse every optional
 field a newer Controller adds, so the shipped copy drops it on every component
-a response carries (as ``tools/vonkctl_json_contract.py`` does for the
-``--json`` contract). A request component stays closed. This keeps the
+a response carries, including one a request also carries (as
+``tools/vonkctl_json_contract.py`` does for the ``--json`` contract). The
+Controller still validates requests strictly, and the CLI builds them from its
+attrs models. A word set a request also carries stays closed. This keeps the
 stable-channel compatibility gate (``tools/client_compatibility_report.py``)
 firing only on real breaks.
 
@@ -84,12 +86,7 @@ def _reachable(schemas: dict[str, _Json], roots: Iterable[str]) -> set[str]:
     return seen
 
 
-def received_schemas(document: object) -> frozenset[str]:
-    """Components a response can carry and no request or parameter can.
-
-    A component a request also carries is authored by the CLI and stays closed.
-    """
-
+def _roots(document: object) -> tuple[list[str], list[str]]:
     sent: list[str] = []
     received: list[str] = []
     paths = document.get("paths") if isinstance(document, dict) else None
@@ -102,6 +99,22 @@ def received_schemas(document: object) -> frozenset[str]:
                 )
                 sent.extend(_references(operation.get("requestBody")))
                 sent.extend(_references(operation.get("parameters")))
+    return received, sent
+
+
+def response_schemas(document: object) -> frozenset[str]:
+    """Every component a response can carry, including one a request also carries."""
+
+    return frozenset(_reachable(_schemas(document), _roots(document)[0]))
+
+
+def received_schemas(document: object) -> frozenset[str]:
+    """Components a response can carry and no request or parameter can.
+
+    A word set a request also carries is authored by the CLI and stays closed.
+    """
+
+    received, sent = _roots(document)
     schemas = _schemas(document)
     return frozenset(_reachable(schemas, received) - _reachable(schemas, sent))
 
@@ -136,7 +149,7 @@ def open_shown_words(document: object) -> None:
     """
 
     schemas = _schemas(document)
-    for name in received_schemas(document):
+    for name in response_schemas(document):
         _drop_closed_objects(schemas.get(name))
     for name in response_word_sets(document) - DECIDED_BY:
         shown = schemas[name]
