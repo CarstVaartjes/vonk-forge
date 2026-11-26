@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = "scripts/reuse-pr-candidate-images"
+SCRIPT = "scripts/images/reuse-pr-candidate-images"
 ROLES = ("api", "worker", "litellm")
 DIGESTS = {
     role: "sha256:" + hex_digit * 64
@@ -29,11 +29,11 @@ def _executable(path: Path, body: str) -> None:
 def _workspace(tmp_path: Path, *, unverified: str = "") -> Path:
     """The real script beside a recording verifier."""
     root = tmp_path / "repo"
-    (root / "scripts").mkdir(parents=True)
+    (root / "scripts/images").mkdir(parents=True)
     shutil.copy2(ROOT / SCRIPT, root / SCRIPT)
     log = tmp_path / "calls"
     _executable(
-        root / "scripts/verify-published-image",
+        root / "scripts/images/verify-published-image",
         f'echo "verify $*" >> {log}\n[[ "$1" != "{unverified}" ]]\n',
     )
     return root

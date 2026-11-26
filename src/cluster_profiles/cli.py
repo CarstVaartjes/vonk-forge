@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, NoReturn, cast, overload
 
 from cluster_profiles.build_identity import current_build
-from cluster_profiles.cli_artifact_jobs import _may_have_completed
+from cluster_profiles.cli_artifact_jobs.client import _may_have_completed
 from cluster_profiles.cli_auth import AuthAction, run_auth
 from cluster_profiles.cli_auth import render as render_auth
 from cluster_profiles.cli_completion import completion_script
@@ -113,7 +113,10 @@ class _CliParser(argparse.ArgumentParser):
         text, usage, next_step = usage_error(self, message)
         raise _UsageError(text, usage=usage, next_step=next_step)
 
-    def format_help(self) -> str:
+    def format_help(self, formatter: argparse.HelpFormatter | None = None) -> str:
+        del (
+            formatter
+        )  # 3.15 passes the formatter; help text is built by group_help/command_help
         if subcommands(self) is not None:
             return group_help(self)
         return command_help(self)

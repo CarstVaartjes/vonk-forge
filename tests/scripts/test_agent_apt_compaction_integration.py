@@ -19,7 +19,7 @@ pytestmark = [
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/agent-apt-state"
+SCRIPT = ROOT / "scripts/agent/agent-apt-state"
 SOURCE_SHA = "0123456789abcdef0123456789abcdef01234567"
 REPOSITORIES = {"dev": "vonk-forge-dev", "stable": "vonk-forge"}
 

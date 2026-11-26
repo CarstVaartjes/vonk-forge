@@ -61,6 +61,17 @@ token, time per output token, prefill, decode and end to end. The Controller
 stores them in `node_engine_samples` (one row per sample and run, removed with
 the sample after 24 h) and never puts them on the Fleet point.
 
+The Controller also reads these rows to derive `run.not-progressing`
+(`fleet_projection/engine_progress.py`): a warning on the node when a ready run
+had requests running or waiting in every reading of the last 15 minutes, the
+readings cover that whole window, and none of `prompt_tokens`,
+`generation_tokens`, `e2e_seconds_count` or `kv_cache_usage_ratio` changed. It is
+a change test, not a threshold. TensorFold and SGLang count tokens of finished
+requests only, so a long generation keeps the counters flat; the KV ratio moves
+per token (measured on TensorFold: 0.000198 to 0.000935 during one request).
+vLLM's KV gauge is the signal there and is not yet verified on hardware. A format
+without a parser gives no verdict. It is advice: nothing restarts the run.
+
 Prometheus exports them from control-api `/metrics` as `vonk_node_*` (host) and
 `vonk_engine_*` series with labels `{node_id, alias}`. The alias is the run's
 published route name, joined once from the Controller's run table; a run with

@@ -41,7 +41,7 @@ from tests.acceptance.runtime import (
 #: The bounded retry of pinned dependency fetches, and how long it may take
 #: (its own 15-minute deadline, then the last attempt's teardown).
 DEPENDENCY_FETCH = (
-    Path(__file__).resolve().parents[2] / "scripts" / "retry_dependency_fetch.py"
+    Path(__file__).resolve().parents[2] / "scripts" / "ci" / "retry_dependency_fetch.py"
 )
 DEPENDENCY_FETCH_TIMEOUT_SECONDS = 16 * 60
 
@@ -339,7 +339,7 @@ def local_installer_command(root: Path, answers: Path) -> list[str] | None:
         "--isolated",
         "--no-project",
         "--python",
-        "3.14",
+        (Path(__file__).resolve().parents[2] / ".python-version").read_text().strip(),
         "--with",
         setup,
         "vonk-nas-setup",

@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "vonk-cluster-profiles"
 version = "0.1.1"
 description = "Vonk Forge cluster workload-profile contracts"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 dependencies = [
   "argon2-cffi>=25.1.0",
   "attrs>=26.1.0",
@@ -55,55 +55,59 @@ path = "tools/hatch_build.py"
 # The formatter writes PEP 758's `except A, B:`; the added-line guards read a
 # respelled header as the handler it replaces.
 target-version = "py314"
-# agent_protocol runs on the Sparks, which have Python 3.12. Files another
-# interpreter runs stay at 3.13 syntax: container scripts under deploy/ (the
-# LiteLLM image's Python), scripts and tests/nodes that a runner's or host's
-# system python3 starts, the stdlib-only tools module such scripts import, and
+# Py314 also makes Ruff reject PEP 810 `lazy import` as invalid syntax, which
+# enforces the no-lazy-imports rule; do not raise it to py315.
+# agent_protocol is pip-installed into the recipe adapter images (Ubuntu 24.04
+# system python3, 3.12; the Spark agent itself is Rust). Files another
+# interpreter runs stay at that interpreter's syntax: container scripts under
+# deploy/ (the LiteLLM image's Python, 3.13 syntax), and at 3.12 the scripts and
+# tests/nodes that a runner's or host's system python3 starts (ubuntu-24.04
+# python3 is 3.12), the stdlib-only tools module such scripts import, and
 # tests/acceptance, whose sources the Spark lane parses with the runner's 3.12.
-per-file-target-version = { "agent_protocol/**" = "py312", "deploy/**" = "py313", "scripts/**" = "py313", "tests/nodes/**" = "py313", "tests/acceptance/**" = "py313", "tools/generated_contracts.py" = "py313" }
+per-file-target-version = { "agent_protocol/**" = "py312", "deploy/**" = "py313", "scripts/**" = "py312", "tests/nodes/**" = "py312", "tests/acceptance/**" = "py312", "tools/generated_contracts.py" = "py312", "tools/litellm_surface.py" = "py313" }
 # Every extensionless executable in scripts/ and bin/ is Python unless excluded
 # here by name: a new shell script that is not listed fails Ruff loudly (a parse
 # error) instead of a new Python script being skipped silently.
-extend-include = ["scripts/*", "bin/*", "rust/fuzz/seed-corpus"]
+extend-include = ["scripts/**/*", "bin/*", "rust/fuzz/seed-corpus"]
 extend-exclude = [
     "src/cluster_profiles/generated_control",
-    "scripts/*.Dockerfile",
-    "scripts/*.toml",
+    "scripts/**/*.Dockerfile",
+    "scripts/**/*.toml",
     "scripts/**/*.sh",
     # Shell scripts.
-    "scripts/accept-development-image-archive",
+    "scripts/images/accept-development-image-archive",
     "scripts/build-control-wheel",
     "scripts/build-recipe-library",
-    "scripts/check-added-lines",
-    "scripts/check-fresh-contract-build",
-    "scripts/ci-apt-install",
-    "scripts/dev-agent-wire-linux",
-    "scripts/dev-publication-sequence",
-    "scripts/ensure-project-venv",
-    "scripts/install-git-hooks",
-    "scripts/measure-nas-serving",
-    "scripts/measure-transfer",
-    "scripts/promote-accepted-channel",
-    "scripts/promote-image-aliases",
-    "scripts/publish-immutable-image",
-    "scripts/pull-test-images",
-    "scripts/reconcile-github-release",
-    "scripts/reuse-pr-candidate-images",
-    "scripts/reuse-pr-image-security",
-    "scripts/run-with-nas-secret-group",
-    "scripts/sync-cli-dependencies",
+    "scripts/dev/check-added-lines",
+    "scripts/dev/check-fresh-contract-build",
+    "scripts/ci/ci-apt-install",
+    "scripts/dev/dev-agent-wire-linux",
+    "scripts/images/dev-publication-sequence",
+    "scripts/dev/ensure-project-venv",
+    "scripts/dev/install-git-hooks",
+    "scripts/fleet/measure-nas-serving",
+    "scripts/fleet/measure-transfer",
+    "scripts/images/promote-accepted-channel",
+    "scripts/images/promote-image-aliases",
+    "scripts/images/publish-immutable-image",
+    "scripts/ci/pull-test-images",
+    "scripts/release/reconcile-github-release",
+    "scripts/images/reuse-pr-candidate-images",
+    "scripts/images/reuse-pr-image-security",
+    "scripts/fleet/run-with-nas-secret-group",
+    "scripts/dev/sync-cli-dependencies",
     "scripts/test",
-    "scripts/test-agent-package-native-lifecycle",
-    "scripts/test-changed",
-    "scripts/test-local",
-    "scripts/test-vm-lane",
-    "scripts/validate-fabric",
-    "scripts/verify-controller-skopeo",
-    "scripts/verify-litellm-base-signature",
-    "scripts/verify-multiarch-image-manifest",
-    "scripts/verify-production-alias-postconditions",
-    "scripts/verify-published-image",
-    "scripts/verify-release-tag-authority",
+    "scripts/agent/test-agent-package-native-lifecycle",
+    "scripts/dev/test-changed",
+    "scripts/dev/test-local",
+    "scripts/dev/test-vm-lane",
+    "scripts/fleet/validate-fabric",
+    "scripts/images/verify-controller-skopeo",
+    "scripts/images/verify-litellm-base-signature",
+    "scripts/images/verify-multiarch-image-manifest",
+    "scripts/images/verify-production-alias-postconditions",
+    "scripts/images/verify-published-image",
+    "scripts/release/verify-release-tag-authority",
 ]
 
 [tool.ruff.lint]
@@ -165,21 +169,21 @@ ban-relative-imports = "all"
 # attestation verify`, `docker info`) read as contract words need a vocabulary
 # guard exemption, and qualify-recipe re-implements recipe-package ingress
 # (manifest, document digests) instead of reusing vonk_control.recipe_packages.
-exclude = ["scripts/qualify-recipe", "scripts/reuse-development-image"]
+exclude = ["scripts/dev/qualify-recipe", "scripts/images/reuse-development-image"]
 
 [tool.pyright]
-# One checker for the whole repository. scripts/check-python-types runs it from
+# One checker for the whole repository. scripts/dev/check-python-types runs it from
 # the control environment, which carries the union of both projects'
 # dependencies, so import resolution is complete.
-pythonVersion = "3.14"
+pythonVersion = "3.15"
 # The Controller and CI run Linux: a Mac hook checks the same platform.
 pythonPlatform = "Linux"
 typeCheckingMode = "standard"
 # Mirror the import roots the test suites add to sys.path, so static analysis
 # resolves the same modules the runtime does.
-extraPaths = ["src", "scripts", "agent_protocol/src", "control/src", "tests/scripts", "nas_setup/src"]
+extraPaths = ["src", "scripts/ci", "scripts/dev", "scripts/fleet", "scripts/release", "agent_protocol/src", "control/src", "tests/scripts", "nas_setup/src"]
 # The extensionless scripts are not globbed (pyright reads *.py only);
-# scripts/check-python-types passes them, from Ruff's file selection.
+# scripts/dev/check-python-types passes them, from Ruff's file selection.
 include = [
     "control/src",
     "src",
@@ -198,7 +202,7 @@ exclude = [
     "**/.venv/**",
     "**/__pycache__/**",
 ]
-# The agent protocol runs on the Sparks, which have Python 3.12.
+# The agent protocol wheel runs on the recipe adapter images (system python3 3.12).
 executionEnvironments = [
     { root = "agent_protocol/src", pythonVersion = "3.12", extraPaths = ["agent_protocol/src"] },
     { root = "." },
@@ -216,8 +220,8 @@ reportMissingTypeArgument = "error"
 reportSelfClsParameterName = "error"
 
 [tool.pytest.ini_options]
-# scripts/: the sibling modules the repository scripts import by bare name.
-pythonpath = ["src", ".", "scripts"]
+# scripts/<group>/: the sibling modules the repository scripts import by bare name.
+pythonpath = ["src", ".", "scripts/ci", "scripts/dev", "scripts/fleet", "scripts/release"]
 testpaths = ["tests"]
 # Hang guard only. Per-test timing (10 s, or @pytest.mark.slow up to 60 s)
 # lives in tools/pytest_budget.py: reported for every test, enforced only on

@@ -16,11 +16,14 @@ vonkctl update --apply
 The command verifies the unexpired signed channel pointer, immutable signed
 release and exact CLI wheel digest. `--apply` installs only when the accepted
 source commit differs from the currently installed CLI. It reinstalls the
-verified wheel with `uv tool install --force --python 3.14`, the same command the
-installer uses, so dependencies a release adds or raises are resolved from the
+verified wheel with `uv tool install --force --python <floor>`, where `<floor>` is the
+wheel's own `Requires-Python` floor (the installer uses the same form), so dependencies a release adds or raises are resolved from the
 package index; `uv` must be available. The command neither edits
 Controller credentials nor changes the chosen channel or installer signing key.
-It does not update the Controller or Sparks. A failed verification leaves the
+It does not update the Controller or Sparks. A CLI installed before the Python
+3.15 release passes `--python 3.14` and cannot update across that floor: after
+deploying it, reinstall vonkctl once through `install/channel`. Later floor bumps
+update normally. A failed verification leaves the
 installed CLI intact.
 
 CLI updates default to the `stable` channel. Set

@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def hook(script: str = "check-staged-code") -> ModuleType:
     loader = importlib.machinery.SourceFileLoader(
-        "vm_cargo_hook", str(ROOT / "scripts" / script)
+        "vm_cargo_hook", str(ROOT / "scripts/dev" / script)
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
@@ -39,9 +39,11 @@ def test_vm_shell_bounds_contention_and_preserves_caller_arguments(
 
     module = hook()
     root = tmp_path / "worktree with spaces"
-    (root / "scripts").mkdir(parents=True)
-    shutil.copy2(ROOT / "scripts/vm-cargo-cache", root / "scripts/vm-cargo-cache")
-    venv_check = root / "scripts/ensure-project-venv"
+    (root / "scripts/dev").mkdir(parents=True)
+    shutil.copy2(
+        ROOT / "scripts/dev/vm-cargo-cache", root / "scripts/dev/vm-cargo-cache"
+    )
+    venv_check = root / "scripts/dev/ensure-project-venv"
     venv_check.write_text("#!/bin/sh\nexit 0\n")
     venv_check.chmod(0o755)
     lock = tmp_path / "cargo.lock"
@@ -279,7 +281,7 @@ def test_every_vm_cargo_entry_point_ignores_the_host_rustc_wrapper() -> None:
     markers = ("orb -m vonk-ci bash -lc", '"orb", "-m", "vonk-ci"')
     texts = {
         path.name: path.read_text(errors="ignore")
-        for path in (ROOT / "scripts").iterdir()
+        for path in (ROOT / "scripts").rglob("*")
         if path.is_file()
     }
     entry_points = [n for n, t in texts.items() if any(m in t for m in markers)]

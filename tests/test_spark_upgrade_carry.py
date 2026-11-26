@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from scripts.development_slice_client import SliceError
+from scripts.fleet.development_slice_client import SliceError
 from tests.acceptance import spark_upgrade_carry as carry
 from tests.acceptance import test_spark_lifecycle as lifecycle
 from tests.acceptance.test_spark_lifecycle import LifecycleError

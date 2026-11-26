@@ -6,6 +6,8 @@ from vonk_agent_protocol.wire_model import WireEnum
 class ProfileReasonCode(WireEnum):
     """Reasons a fleet profile cannot be applied or is waiting."""
 
+    #: A model name an external model serves; the profile cannot take it.
+    ALIAS_TAKEN = "profile.alias_taken"
     ADMISSION_BUSY = "profile.admission_busy"
     ADMISSION_DEFECT = "profile.admission_defect"
     ADMISSION_EFFECT_BUSY = "profile.admission_effect_busy"
@@ -56,6 +58,7 @@ class ProfileReasonCode(WireEnum):
 #: profile conflict is a wait, answered 503 with ``Retry-After``.
 PROFILE_REFUSAL_CODES = frozenset(
     {
+        ProfileReasonCode.ALIAS_TAKEN,
         ProfileReasonCode.ADMISSION_DEFECT,
         ProfileReasonCode.DEFINITION_UNAVAILABLE,
         ProfileReasonCode.REQUEST_INVALID,
@@ -119,6 +122,9 @@ class ProjectionCode(WireEnum):
     PROFILE_RETRYING = "profile.retrying"
     RECIPE_UPDATE_AVAILABLE = "recipe.update_available"
     RUN_DEGRADED = "run.degraded"
+    #: Requests are pending on a ready run, yet no engine progress reading changed over the window.
+    #: Advice, never a restart.
+    RUN_NOT_PROGRESSING = "run.not-progressing"
     TELEMETRY_DELAYED = "telemetry.delayed"
     TELEMETRY_MISSING = "telemetry.missing"
     TELEMETRY_STALE = "telemetry.stale"

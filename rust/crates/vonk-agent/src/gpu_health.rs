@@ -40,23 +40,7 @@ fn reset_action(value: &str) -> bool {
 }
 
 fn reset_xid(line: &str) -> bool {
-    let Some((_, value)) = line.split_once("xid") else {
-        return false;
-    };
-    let value = value.trim_start();
-    let value = if value.starts_with('(') {
-        let Some((_, suffix)) = value.split_once(')') else {
-            return false;
-        };
-        suffix
-    } else {
-        value
-    };
-    let code = value
-        .trim_start_matches(|c: char| c.is_whitespace() || c == ':')
-        .split(|c: char| !c.is_ascii_digit())
-        .next()
-        .and_then(|code| code.parse::<u32>().ok());
+    let code = vonk_agent_protocol::gpu_xid::xid_code(line);
     // NVIDIA's immediate RESET_GPU/RESTART_BM and required-reset workflows:
     // https://docs.nvidia.com/deploy/xid-errors/analyzing-xid-catalog.html
     // Application Xids (for example 13/31/43/94) do not prove a reset is needed.

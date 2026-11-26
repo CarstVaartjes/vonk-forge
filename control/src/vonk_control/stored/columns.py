@@ -81,6 +81,10 @@ from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignme
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profile_contract.vocabulary import LabelName, LabelValue
 from vonk_control.fleet_profiles.stop_contract import ProfileJobRunStopJob
+from vonk_control.gateway.external_contract import (
+    ApprovedDestination,
+    ExternalDeploymentSpec,
+)
 from vonk_control.inventory.items_contract import AgentInventoryItems
 from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
@@ -389,6 +393,15 @@ for _table in (
 
 
 bind("coordinator_failures", "failure", CoordinatorFailureEvidence)
+
+bind("gateway_external_deployments", "desired_spec", ExternalDeploymentSpec)
+bind(
+    "gateway_external_deployments",
+    "applied_spec",
+    ExternalDeploymentSpec,
+    nullable=True,
+)
+bind("gateway_credential_bindings", "destinations", list[ApprovedDestination])
 
 
 bind("node_inventory_snapshots", "agent_items", AgentInventoryItems, nullable=True)

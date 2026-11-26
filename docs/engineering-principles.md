@@ -33,7 +33,7 @@ they are where shortcuts become incidents.
 
 NAS/project setup, administration and the Controller use Python. The standalone
 NAS setup wheel shares the canonical Python contracts and runs through installed
-`uv` with Python 3.14 on Intel or ARM Linux and macOS. The existing Python
+`uv` with Python 3.15 on Intel or ARM Linux and macOS. The existing Python
 `vonkctl` remains the admin CLI. Portable scripts and one wheel keep packaging,
 CI and operator maintenance simple.
 

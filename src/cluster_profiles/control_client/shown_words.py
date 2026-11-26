@@ -20,7 +20,7 @@ firing only on real breaks.
 This is forward tolerance in the reader, not a shim for an older Controller:
 the CLI keeps one contract and one reading path.
 
-``scripts/generate-control-clients`` opens the shipped copy and the client's
+``scripts/dev/generate-control-clients`` opens the shipped copy and the client's
 input with :func:`open_shown_words`; the Controller's own document stays exact.
 ``tests/test_generated_contracts.py`` keeps :data:`DECIDED_BY` equal to the
 sets vonkctl compares outside its renderers.

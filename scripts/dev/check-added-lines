@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Scanners consume an externally supplied patch; Git belongs to the caller.
+set -euo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+cd "$root"
+if [[ $# -gt 1 ]]; then
+    echo 'Usage: scripts/dev/check-added-lines [PATCH_FILE|-]' >&2
+    exit 2
+fi
+if [[ ${1:--} == - ]]; then
+    uv run --project control --frozen python -m control.tests.added_line_guards
+else
+    uv run --project control --frozen python -m control.tests.added_line_guards < "$1"
+fi

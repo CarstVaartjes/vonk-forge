@@ -4,7 +4,7 @@
 	dh $@
 
 override_dh_auto_build:
-	./scripts/build-agent-deb \
+	./scripts/agent/build-agent-deb \
 		--version "$${DEB_VERSION}" \
 		--architecture "$$(case "$${DEB_HOST_ARCH}" in arm64) echo linux-arm64 ;; amd64) echo linux-amd64 ;; *) exit 2 ;; esac)" \
 		--build-digest "$${VONK_AGENT_BUILD_DIGEST:?}" \

@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
-from cluster_profiles.cli_artifact_jobs import ArtifactJobClient, run_artifact_job
+from cluster_profiles.cli_artifact_jobs.client import ArtifactJobClient
+from cluster_profiles.cli_artifact_jobs.run import run_artifact_job
 from cluster_profiles.cli_render.vocabulary import use_vocabulary
 from cluster_profiles.control_client.errors import (
     ControlClientError,

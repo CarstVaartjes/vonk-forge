@@ -16,7 +16,7 @@ def run_metadata(
     *arguments: str, root: Path = ROOT
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, root / "scripts/agent-package-metadata", *arguments],
+        [sys.executable, root / "scripts/agent/agent-package-metadata", *arguments],
         cwd=root,
         check=False,
         capture_output=True,
@@ -31,7 +31,7 @@ def metadata_workspace(tmp_path: Path) -> Path:
         "Cargo.toml",
         "pyproject.toml",
         "control/pyproject.toml",
-        "scripts/agent-package-metadata",
+        "scripts/agent/agent-package-metadata",
     ):
         source = ROOT / relative
         target = workspace / relative

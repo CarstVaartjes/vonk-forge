@@ -395,6 +395,7 @@ pub struct OperationExecutor<R> {
     image_pulls: std::sync::RwLock<()>,
     runtime_stores: std::sync::RwLock<()>,
     job_cancellation: JobCancellationFence,
+    xids: crate::host_memory_guard::XidLog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

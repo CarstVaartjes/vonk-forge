@@ -1,0 +1,4744 @@
+{
+ "image_digest": "sha256:be24d7da11f4063ca23fbff6689bac5ded14fe4fc645e07f36588636969f1c27",
+ "litellm_params": {
+  "adaptive_router_config": {
+   "anyOf": [
+    {
+     "additionalProperties": true,
+     "type": "object"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "adaptive_router_default_model": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "allow_client_keepalive_override": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "annotation_cost_per_page": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "annotation_cost_per_page_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_disable_workload_identity_federation": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_federation_rule_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_federation_workspace_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_identity_source": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_identity_token": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_identity_token_file": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_issuer_audience": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_issuer_signing_key_ref": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_issuer_subject": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_issuer_ttl_seconds": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_issuer_url": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_keycloak_auth_method": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_keycloak_client_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_keycloak_client_secret_ref": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_keycloak_scope": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_keycloak_token_url": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_organization_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "anthropic_service_account_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "api_base": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "api_key": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "api_version": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "auto_router_config": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "auto_router_config_path": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "auto_router_default_model": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "auto_router_embedding_model": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "auto_router_max_input_chars": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "auto_router_model_compression": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "auto_router_routing_compression": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_access_key_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_batch_role_arn": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_bedrock_project_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_bedrock_runtime_endpoint": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_external_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_profile_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_region_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_role_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_secret_access_key": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_session_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_session_tags": {
+   "$defs": {
+    "AwsSessionTag": {
+     "properties": {
+      "Key": {
+       "title": "Key",
+       "type": "string"
+      },
+      "Value": {
+       "title": "Value",
+       "type": "string"
+      }
+     },
+     "required": [
+      "Key",
+      "Value"
+     ],
+     "title": "AwsSessionTag",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "items": {
+      "$ref": "#/$defs/AwsSessionTag"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_session_token": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_sts_endpoint": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "aws_web_identity_token": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "azure_ad_token": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "azure_password": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "azure_scope": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "azure_username": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "bedrock_tags": {
+   "anyOf": [
+    {
+     "items": {},
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "bucket_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "budget_duration": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_audio_token_cost": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_100k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_100k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_1hr": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_1hr_above_100k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_200k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_200k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_272k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_272k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_272k_tokens_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_272k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_272k_tokens_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_audio_token_cost": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_image_token_cost": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_100k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_100k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_200k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_200k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_200k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_272k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_272k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_272k_tokens_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_272k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_272k_tokens_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_512k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_balanced": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "citation_cost_per_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "client_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "client_secret": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "complexity_router_config": {
+   "anyOf": [
+    {
+     "additionalProperties": true,
+     "type": "object"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "complexity_router_default_model": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "configurable_clientside_auth_params": {
+   "$defs": {
+    "ConfigurableClientsideParamsCustomAuth": {
+     "properties": {
+      "api_base": {
+       "title": "Api Base",
+       "type": "string"
+      }
+     },
+     "required": [
+      "api_base"
+     ],
+     "title": "ConfigurableClientsideParamsCustomAuth",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "items": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "$ref": "#/$defs/ConfigurableClientsideParamsCustomAuth"
+       }
+      ]
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cost_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "custom_llm_provider": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "default_api_key_rpm_limit": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "default_api_key_tpm_limit": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "drop_params": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "fireworks_forward_user_id": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "gcs_bucket_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "google_maps_grounding_cost_per_query": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_audio_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_audio_per_second_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_audio_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_audio_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_character": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_character_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_image": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_image_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_image_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_image_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_pixel": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_query": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_100k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_100k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_200k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_200k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_200k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_272k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_272k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_272k_tokens_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_272k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_272k_tokens_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_512k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_balanced": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_cache_hit": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_video_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_video_per_second_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_video_per_second_above_15s_interval": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_video_per_second_above_8s_interval": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_video_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_video_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "itpm": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "keepalive_seconds": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "litellm_credential_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "litellm_trace_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "max_budget": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "max_file_size_mb": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "max_retries": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "merge_reasoning_content_in_choices": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "milvus_db_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "milvus_partition_names": {
+   "anyOf": [
+    {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "milvus_text_field": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "mock_response": {
+   "not": {}
+  },
+  "model": {
+   "type": "string"
+  },
+  "model_info": {
+   "anyOf": [
+    {
+     "additionalProperties": true,
+     "type": "object"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "ocr_cost_per_credit": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "ocr_cost_per_page": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "ocr_cost_per_page_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "openai_identity_provider_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "openai_identity_token_file": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "openai_service_account_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "organization": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "otpm": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_audio_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_audio_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_character": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_character_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image_1024": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image_1536": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image_512": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_pixel": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_reasoning_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_reasoning_token_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_reasoning_token_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_1080p": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_2k": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_480p": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_4k": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_720p": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_768p": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_100k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_100k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_200k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_200k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_200k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_272k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_272k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_272k_tokens_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_272k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_272k_tokens_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_512k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_balanced": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_video_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_video_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_vector_size": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "provider_affinity_header": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "quality_router_config": {
+   "anyOf": [
+    {
+     "additionalProperties": true,
+     "type": "object"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "quality_router_default_model": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "region_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "regional_endpoint_uplift_multiplier": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "regional_processing_uplift_multiplier_eu": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "regional_processing_uplift_multiplier_us": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "rpm": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "s3_access_key_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "s3_bucket_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "s3_bucket_owner": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "s3_encryption_key_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "s3_endpoint_url": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "s3_output_bucket_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "s3_region_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "s3_secret_access_key": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "search_context_cost_per_query": {
+   "anyOf": [
+    {
+     "additionalProperties": true,
+     "type": "object"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "stream_timeout": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "stream_timeout_by_service_tier": {
+   "anyOf": [
+    {
+     "additionalProperties": {
+      "type": "number"
+     },
+     "type": "object"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "tag_regex": {
+   "anyOf": [
+    {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "tags": {
+   "anyOf": [
+    {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "tenant_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "tiered_pricing": {
+   "anyOf": [
+    {
+     "items": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "timeout": {
+   "not": {}
+  },
+  "timeout_by_service_tier": {
+   "anyOf": [
+    {
+     "additionalProperties": {
+      "type": "number"
+     },
+     "type": "object"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "tpm": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "use_chat_completions_api": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "use_in_pass_through": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "use_litellm_proxy": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "use_xai_oauth": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "valkey_embedding_field": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "valkey_host": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "valkey_password": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "valkey_port": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "valkey_ssl": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "valkey_text_field": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "vector_store_id": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "vertex_credentials": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "additionalProperties": true,
+     "type": "object"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "vertex_location": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "vertex_project": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "watsonx_region_name": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  }
+ },
+ "litellm_version": "1.106.7",
+ "model_info": {
+  "annotation_cost_per_page": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "annotation_cost_per_page_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "bedrock_converse_supports_strict_tools": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "bedrock_output_config_effort_ceiling": {
+   "anyOf": [
+    {
+     "enum": [
+      "low",
+      "medium",
+      "high",
+      "max",
+      "xhigh"
+     ],
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_100k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_100k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_1hr": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_1hr_above_100k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_200k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_200k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_272k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_272k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_272k_tokens_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_272k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_above_272k_tokens_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_creation_input_token_cost_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_audio_token_cost": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_image_token_cost": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_100k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_100k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_200k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_200k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_200k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_272k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_272k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_272k_tokens_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_272k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_272k_tokens_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_above_512k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_balanced": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cache_read_input_token_cost_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "citation_cost_per_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "cost_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "default_reasoning_effort": {
+   "anyOf": [
+    {
+     "enum": [
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+     ],
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "google_maps_grounding_cost_per_query": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_audio_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_audio_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_audio_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_character": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_character_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_image": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_image_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_image_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_query": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_100k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_100k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_200k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_200k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_200k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_272k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_272k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_272k_tokens_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_272k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_272k_tokens_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_above_512k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_balanced": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_token_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_video_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_video_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "input_cost_per_video_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "key": {
+   "type": "string"
+  },
+  "litellm_provider": {
+   "type": "string"
+  },
+  "max_input_tokens": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "max_output_tokens": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "max_tokens": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "mode": {
+   "enum": [
+    "completion",
+    "embedding",
+    "image_generation",
+    "chat",
+    "audio_transcription",
+    "audio_speech",
+    "responses",
+    "decisions",
+    "evaluation",
+    "ocr",
+    "realtime"
+   ],
+   "type": "string"
+  },
+  "ocr_cost_per_credit": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "ocr_cost_per_page": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "ocr_cost_per_page_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "off_peak_pricing": {
+   "$defs": {
+    "OffPeakPricing": {
+     "description": "Time-windowed off-peak rates for providers that discount by time of day (e.g. DeepSeek).\n\nhours_utc is a \"HH:MM-HH:MM\" string in UTC, or a list of them for multiple daily windows,\napplying on every day of the week; a window may wrap past midnight. windows adds\nday-of-week-qualified rules (e.g. weekend-only whole-day off-peak), matched as a union\nwith hours_utc. weekday_timezone names the IANA calendar weekdays are read on, defaulting\nto UTC. Any rate left unset falls back to the standard rate.",
+     "properties": {
+      "cache_creation_input_token_cost": {
+       "title": "Cache Creation Input Token Cost",
+       "type": "number"
+      },
+      "cache_read_input_token_cost": {
+       "title": "Cache Read Input Token Cost",
+       "type": "number"
+      },
+      "hours_utc": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        }
+       ],
+       "title": "Hours Utc"
+      },
+      "input_cost_per_token": {
+       "title": "Input Cost Per Token",
+       "type": "number"
+      },
+      "output_cost_per_reasoning_token": {
+       "title": "Output Cost Per Reasoning Token",
+       "type": "number"
+      },
+      "output_cost_per_token": {
+       "title": "Output Cost Per Token",
+       "type": "number"
+      },
+      "weekday_timezone": {
+       "title": "Weekday Timezone",
+       "type": "string"
+      },
+      "windows": {
+       "items": {
+        "$ref": "#/$defs/OffPeakWindow"
+       },
+       "title": "Windows",
+       "type": "array"
+      }
+     },
+     "title": "OffPeakPricing",
+     "type": "object"
+    },
+    "OffPeakWindow": {
+     "description": "One off-peak rule: UTC time-of-day windows, optionally restricted to weekdays.\n\nhours_utc is a \"HH:MM-HH:MM\" string in UTC, or a list of them; a window may wrap past\nmidnight and an equal-ended window covers the whole day. weekdays is a list of days the\nrule applies on, as ISO-8601 numbers (1 = Monday .. 7 = Sunday) or English day names;\nomitted means every day. The weekday is read on the calendar named by the block's\nweekday_timezone.",
+     "properties": {
+      "hours_utc": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        }
+       ],
+       "title": "Hours Utc"
+      },
+      "weekdays": {
+       "items": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "string"
+         }
+        ]
+       },
+       "title": "Weekdays",
+       "type": "array"
+      }
+     },
+     "title": "OffPeakWindow",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "$ref": "#/$defs/OffPeakPricing"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_audio_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_audio_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_character": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_character_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image_1024": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image_1536": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image_512": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_image_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_pixel": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_reasoning_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_reasoning_token_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_reasoning_token_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_1080p": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_2k": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_480p": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_4k": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_720p": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_second_768p": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_100k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_100k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_128k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_200k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_200k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_200k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_272k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_272k_tokens_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_272k_tokens_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_272k_tokens_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_272k_tokens_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_above_512k_tokens": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_balanced": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_batches": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_flex": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_priority": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_token_ultrafast": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_video_per_second": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_cost_per_video_token": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "output_vector_size": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "prompt_cache_min_tokens": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "provider_specific_entry": {
+   "anyOf": [
+    {
+     "additionalProperties": {
+      "type": "number"
+     },
+     "type": "object"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "reasoning_effort_levels": {
+   "anyOf": [
+    {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "regional_endpoint_uplift_multiplier": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "regional_processing_uplift_multiplier_eu": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "regional_processing_uplift_multiplier_us": {
+   "anyOf": [
+    {
+     "type": "number"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "rpm": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "search_context_cost_per_query": {
+   "$defs": {
+    "SearchContextCostPerQuery": {
+     "properties": {
+      "search_context_size_high": {
+       "title": "Search Context Size High",
+       "type": "number"
+      },
+      "search_context_size_low": {
+       "title": "Search Context Size Low",
+       "type": "number"
+      },
+      "search_context_size_medium": {
+       "title": "Search Context Size Medium",
+       "type": "number"
+      }
+     },
+     "title": "SearchContextCostPerQuery",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "$ref": "#/$defs/SearchContextCostPerQuery"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "search_free_requests": {
+   "$defs": {
+    "SearchFreeRequests": {
+     "properties": {
+      "count": {
+       "title": "Count",
+       "type": "integer"
+      },
+      "period": {
+       "enum": [
+        "day",
+        "month"
+       ],
+       "title": "Period",
+       "type": "string"
+      },
+      "shared_group": {
+       "title": "Shared Group",
+       "type": "string"
+      }
+     },
+     "required": [
+      "count",
+      "period",
+      "shared_group"
+     ],
+     "title": "SearchFreeRequests",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "$ref": "#/$defs/SearchFreeRequests"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supported_audio_formats": {
+   "anyOf": [
+    {
+     "items": {
+      "enum": [
+       "mp3",
+       "wav"
+      ],
+      "type": "string"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supported_endpoints": {
+   "anyOf": [
+    {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supported_openai_params": {
+   "anyOf": [
+    {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_adaptive_thinking": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_anthropic_compaction": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_anthropic_thinking_payload": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_assistant_prefill": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_audio_input": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_audio_output": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_box_questions": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_computer_use": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_embedding_image_input": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_function_calling": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_image_size": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_legacy_thinking": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_low_reasoning_effort": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_max_reasoning_effort": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_mid_conversation_system": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_minimal_reasoning_effort": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_native_streaming": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_native_structured_output": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_none_reasoning_effort": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_output_config": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_parallel_function_calling": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_pdf_input": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_prompt_cache_breakpoint": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_prompt_caching": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_reasoning": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_regex_lookaround": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_response_schema": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_system_messages": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_thinking_cache_preservation": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_tool_choice": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_tool_search": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_url_context": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_video_input": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_vision": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_web_search": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "supports_xhigh_reasoning_effort": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "thinking_always_on": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "tiered_pricing": {
+   "anyOf": [
+    {
+     "items": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "type": "array"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "token_count_framing": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "token_count_model": {
+   "$defs": {
+    "TokenCountModelInfo": {
+     "properties": {
+      "model": {
+       "title": "Model",
+       "type": "string"
+      },
+      "region": {
+       "title": "Region",
+       "type": "string"
+      }
+     },
+     "required": [
+      "model"
+     ],
+     "title": "TokenCountModelInfo",
+     "type": "object"
+    }
+   },
+   "anyOf": [
+    {
+     "$ref": "#/$defs/TokenCountModelInfo"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "token_count_tokenizer": {
+   "anyOf": [
+    {
+     "const": "kimi_k3",
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "tpm": {
+   "anyOf": [
+    {
+     "type": "integer"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "use_openai_responses_path": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "uses_embed_content": {
+   "anyOf": [
+    {
+     "type": "boolean"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "vertex_ai_audio_api": {
+   "anyOf": [
+    {
+     "enum": [
+      "lyria_predict",
+      "lyria_interactions"
+     ],
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  },
+  "web_search_billing_unit": {
+   "anyOf": [
+    {
+     "enum": [
+      "per_query",
+      "per_prompt"
+     ],
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ]
+  }
+ },
+ "providers": [
+  "a2a",
+  "a2a_agent",
+  "ai21",
+  "ai21_chat",
+  "aiml",
+  "aiohttp_openai",
+  "amazon_nova",
+  "anthropic",
+  "anthropic_text",
+  "apertis",
+  "assemblyai",
+  "auto_router",
+  "aws_polly",
+  "aws_textract",
+  "azure",
+  "azure_ai",
+  "azure_speech",
+  "azure_text",
+  "baseten",
+  "bedrock",
+  "bedrock_mantle",
+  "black_forest_labs",
+  "bytez",
+  "cerebras",
+  "charity_engine",
+  "chatgpt",
+  "chutes",
+  "clarifai",
+  "cloudflare",
+  "codestral",
+  "cognition",
+  "cohere",
+  "cohere_chat",
+  "cometapi",
+  "compactifai",
+  "cortecs",
+  "cursor",
+  "custom",
+  "custom_openai",
+  "darkbloom",
+  "dashscope",
+  "databricks",
+  "datarobot",
+  "deepgram",
+  "deepinfra",
+  "deepseek",
+  "docker_model_runner",
+  "dotprompt",
+  "edenai",
+  "elevenlabs",
+  "empower",
+  "fal_ai",
+  "featherless_ai",
+  "fireworks_ai",
+  "friendliai",
+  "galadriel",
+  "gdc",
+  "gemini",
+  "gigachat",
+  "github",
+  "github_copilot",
+  "gradient_ai",
+  "groq",
+  "helicone",
+  "heroku",
+  "hosted_vllm",
+  "huggingface",
+  "humanloop",
+  "hyperbolic",
+  "inception",
+  "infinity",
+  "jina_ai",
+  "lambda_ai",
+  "langflow",
+  "langfuse",
+  "langgraph",
+  "lemonade",
+  "libertai",
+  "litellm_agent",
+  "litellm_proxy",
+  "llamafile",
+  "lm_studio",
+  "manus",
+  "maritalk",
+  "meta",
+  "meta_llama",
+  "milvus",
+  "minimax",
+  "mistral",
+  "modelscope",
+  "mongodb",
+  "moonshot",
+  "morph",
+  "nadir",
+  "nano-gpt",
+  "nebius",
+  "neosantara",
+  "nlp_cloud",
+  "novita",
+  "nscale",
+  "nvidia_nim",
+  "nvidia_riva",
+  "oci",
+  "ollama",
+  "ollama_chat",
+  "oobabooga",
+  "openai",
+  "openai_like",
+  "openrouter",
+  "ovhcloud",
+  "parasail",
+  "perplexity",
+  "petals",
+  "pg_vector",
+  "pinstripes",
+  "poe",
+  "predibase",
+  "prism",
+  "publicai",
+  "qwen_ai_platform",
+  "qwencloud",
+  "ragflow",
+  "recraft",
+  "reducto",
+  "reka",
+  "replicate",
+  "runwayml",
+  "s3_vectors",
+  "sagemaker",
+  "sagemaker_chat",
+  "sagemaker_nova",
+  "sail",
+  "sambanova",
+  "sap",
+  "scaleway",
+  "scx-ai",
+  "snowflake",
+  "soniox",
+  "stability",
+  "strands_decider",
+  "synthetic",
+  "tencent",
+  "tensormesh",
+  "text-completion-codestral",
+  "text-completion-inception",
+  "text-completion-openai",
+  "together_ai",
+  "topaz",
+  "transcribe",
+  "triton",
+  "typesafe",
+  "v0",
+  "valkey",
+  "vercel_ai_gateway",
+  "vertex_ai",
+  "vertex_ai_beta",
+  "vllm",
+  "volcengine",
+  "voyage",
+  "wandb",
+  "watsonx",
+  "watsonx_text",
+  "xai",
+  "xiaomi_mimo",
+  "xinference",
+  "zai"
+ ]
+}
