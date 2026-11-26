@@ -441,13 +441,27 @@ def test_rust_toolchain_has_one_owner() -> None:
     manifest = tomllib.loads((ROOT / "Cargo.toml").read_text())
     assert manifest["workspace"]["package"]["rust-version"] == channel
     versioned_install = re.compile(r"rustup toolchain install[ \t]+(?![-\"$])\S")
+    # A digit-bounded match: 1.100.0 must not hide inside 11.100.04 or 1.100.0.1.
+    named = re.compile(rf"(?<![\d.]){re.escape(channel)}(?!\d)")
+    skipped = {"node_modules", "target", ".venv", ".git"}
+    candidates = [
+        *(ROOT / ".github").rglob("*"),
+        *(ROOT / "scripts").rglob("*"),
+        *(ROOT / "rust").rglob("*.sh"),
+        *(
+            path
+            for top in ROOT.iterdir()
+            if top.is_dir() and not top.name.startswith(".")
+            for path in top.rglob("Dockerfile*")
+        ),
+    ]
     copies = []
-    for file in tracked_files(ROOT):
-        if not file.startswith((".github/", "scripts/")):
+    for path in sorted(set(candidates)):
+        if skipped & set(path.relative_to(ROOT).parts) or not path.is_file():
             continue
-        text = (ROOT / file).read_text(errors="ignore")
-        if channel in text or versioned_install.search(text):
-            copies.append(file)
+        text = path.read_text(errors="ignore")
+        if named.search(text) or versioned_install.search(text):
+            copies.append(str(path.relative_to(ROOT)))
     assert copies == [], "name the toolchain only in rust-toolchain.toml"
 
 
