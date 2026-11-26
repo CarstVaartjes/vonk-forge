@@ -323,6 +323,13 @@ to keep old tests or old worktrees working. The current parser and
 [operator runbook](runbooks/vonkctl.md) own command vocabulary; do not
 restore the obsolete `fleet profile` alias from a historical guide.
 
+Forward tolerance in a reader is not legacy compatibility. vonkctl reads the
+closed response word sets it only shows as open, so an installed vonkctl keeps
+reading a newer Controller that adds a word there; it keeps one contract and one
+reading path, and nothing is kept for an older Controller. The sets it decides
+by stay closed (`cluster_profiles.control_client.shown_words.DECIDED_BY`,
+guarded by `tests/test_generated_contracts.py`).
+
 Published Model and Recipe structures are defined by the canonical Pydantic
 package in vonk-forge-recipes. The Controller reads the signed catalog index
 only through its `catalog_reader.read_catalog` and uses the contract's entry

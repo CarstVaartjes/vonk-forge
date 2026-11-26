@@ -51,7 +51,6 @@ from cluster_profiles.cli_update import (
     _download,
     _signed_release,
 )
-from cluster_profiles.control_client.schema import _open_shown_only_words
 
 _REFERENCE = "#/components/schemas/"
 _OPENAPI_MEMBER = "cluster_profiles/schemas/control-openapi.json"
@@ -345,11 +344,10 @@ def breaks(prior: JsonValue, candidate: JsonValue) -> list[str]:
     route it does not have.
     """
 
-    # The prior client opens the words it only shows when it loads its schema.
-    opened = json.loads(json.dumps(prior))
-    _open_shown_only_words(opened)
+    # A published client reads its bundled contract as shipped: the word sets
+    # it only shows are already open there (control_client.shown_words).
     comparison = _Comparison(
-        OpenApiDocument.model_validate(opened),
+        OpenApiDocument.model_validate(prior),
         OpenApiDocument.model_validate(candidate),
     )
     found: list[str] = []

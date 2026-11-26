@@ -274,6 +274,13 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
   use their authoritative nested Pydantic models, validated on every persisted
   read and write; generate OpenAPI and the Python/TypeScript clients, and
   generate Rust wire structures with typify from the Pydantic JSON Schemas.
+- vonkctl ships the admin OpenAPI with the closed response word sets it only
+  shows opened, so an older vonkctl reads a newer Controller's new reason or
+  wait-owner word. Sets it decides by stay closed: a new `cli_states_generated`
+  import outside `cli_render/` of a set a response field holds goes into
+  `DECIDED_BY` in `control_client/shown_words.py` (the guard in
+  `tests/test_generated_contracts.py` says so). This is forward tolerance, not
+  a legacy shim; see [error reporting](docs/error-reporting.md).
 - The Rust toolchain version lives only in `rust-toolchain.toml` (plus `rust-version` in the
   root `Cargo.toml`). Workflows run bare `rustup toolchain install`; scripts read the file.
   Agent builds stay on `ubuntu-24.04` (Spark glibc baseline).

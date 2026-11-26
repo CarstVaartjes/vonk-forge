@@ -28,9 +28,11 @@ from cluster_profiles.cli_json_contract import DocumentKind
 from cluster_profiles.cli_states_generated import SUCCEEDED
 from cluster_profiles.control_client import client as client_module
 from cluster_profiles.control_client.errors import (
+    ControlClientError,
     ControlContractMismatch,
     ControlSchemaRejected,
 )
+from cluster_profiles.control_client.schema import validate_control_document
 from cluster_profiles.control_client.transfers import ControlClient
 from cluster_profiles.generated_control.models.job_detail_response import (
     JobDetailResponse,
@@ -393,3 +395,68 @@ def test_a_refusal_with_an_unknown_reason_keeps_waiting_and_heals(
 
     assert result.state == SUCCEEDED
     assert requested == [job, job]
+
+
+def test_a_newer_controllers_shown_words_read_as_sent(tmp_path: Path) -> None:
+    job_id = "12345678-1234-4123-8123-123456789abc"
+    job = f"/api/jobs/{job_id}"
+    # Words this CLI's contract has never listed, in sets it only shows: a
+    # reason, a wait reason and a recovery action.
+    operation = {
+        "id": "operation-1",
+        "node_id": "spk_" + "0" * 32,
+        "kind": "run",
+        "state": "waiting",
+        "summary": "Waiting",
+        "attempt": 1,
+        "blockers": [
+            {"code": "run-switch.newer_reason", "detail": "x", "severity": "info"}
+        ],
+        "wait_reason": "queue.newer_wait",
+        "recovery": {"actions": ["newer-action"]},
+    }
+    detail = JobDetailResponse(
+        authority_revision="a" * 64,
+        current_attempt=1,
+        id=job_id,
+        kind="run",
+        summary="Run waiting",
+        operation_total=1,
+        operations=[],
+        progress=None,
+        state="queued",
+        target_total=0,
+        targets=[],
+        status_reason=None,
+    ).to_dict()
+    detail["operations"] = [operation]
+    client, requested = _controller(
+        tmp_path,
+        {job: lambda: _Response(200, detail), "/api/cli/contract": _compatibility},
+    )
+
+    read = client.job(job_id).to_dict()
+
+    assert read["operations"][0]["blockers"][0]["code"] == "run-switch.newer_reason"
+    assert read["operations"][0]["wait_reason"] == "queue.newer_wait"
+    assert read["operations"][0]["recovery"]["actions"] == ["newer-action"]
+    assert requested == [job]
+
+
+def test_a_word_the_cli_decides_by_stays_closed() -> None:
+    grant = {
+        "id": "12345678-1234-4123-8123-123456789abc",
+        "state": "pending",
+        "purpose": "newer-purpose",
+        "node_id": None,
+        "display_name": None,
+        "expires_at": "2026-11-26T00:00:00Z",
+        "consumed_at": None,
+        "revoked_at": None,
+    }
+
+    assert validate_control_document("EnrollmentGrantStatus", grant) == grant
+    with pytest.raises(ControlClientError):
+        validate_control_document(
+            "EnrollmentGrantStatus", {**grant, "state": "newer-state"}
+        )
