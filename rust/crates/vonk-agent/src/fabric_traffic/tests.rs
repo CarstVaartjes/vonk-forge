@@ -131,3 +131,23 @@ fn an_error_counter_that_went_backwards_is_unknown_but_the_bytes_stay() {
     let device = observed.iter().find(|d| d.bytes == 3_200_000_000).unwrap();
     assert_eq!(device.errors, None);
 }
+
+#[tokio::test]
+async fn a_hung_observation_reports_no_devices_and_spawns_no_second_worker() {
+    static SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    let vector: serde_json::Value = serde_json::from_str(VECTOR).unwrap();
+    let root = sysfs(&vector["agent_sample"]["devices"], "first");
+    // Hold the permit as a hung read would; the pass must not spawn a worker.
+    let _held = SLOT.try_acquire().unwrap();
+    let meter = std::sync::Arc::new(Meter::default());
+    let devices = observe_with_slot(
+        meter.clone(),
+        root.path().to_path_buf(),
+        Duration::from_millis(10),
+        &SLOT,
+    )
+    .await;
+    assert_eq!(devices.len(), 0);
+    // A spawned worker would have recorded a reading.
+    assert!(meter.previous.lock().unwrap().is_none());
+}
