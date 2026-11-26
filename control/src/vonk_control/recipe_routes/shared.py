@@ -9,7 +9,7 @@ import threading
 import uuid
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from pydantic import TypeAdapter
@@ -29,6 +29,7 @@ from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_control.admission_locking import ConstraintReplay, admitting
 from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
 from vonk_control.failures.classification import disposition
+from vonk_control.gateway.external_publication import ExternalPlan
 from vonk_control.gateway.litellm import LiteLlmGeneration, LiteLlmPolicy, RouteState
 from vonk_control.gateway.route_bundle_contract import RouteEndpointDocument
 from vonk_control.models.jobs import Job
@@ -41,6 +42,8 @@ _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 # A serving route is kept while its Sparks keep talking to the Controller,
 # even when their rank reports are missing; a Spark silent this long is gone.
 _LOGGER = logging.getLogger(__name__)
+#: How often the API reconciles the gateway: the next pass after a failed start.
+ROUTE_RECONCILE_SECONDS = 5.0
 _WITHDRAWAL_ATTEMPTS = 5
 _WITHDRAWAL_BACKOFF_SECONDS = 0.05
 #: Why a running run's route is withdrawn: a Stop claimed it and has not been
@@ -197,6 +200,8 @@ class _RecipeCandidate:
     included: frozenset[str]
     policy: LiteLlmPolicy
     endpoints: dict[str, _RecipeEndpoint]
+    #: The external models the generation serves beside the local routes.
+    externals: ExternalPlan = field(default_factory=ExternalPlan)
 
 
 @dataclass(frozen=True)
@@ -241,6 +246,9 @@ class _Publication:
     # A recovering run's failure is committed on the run; it must not stop the
     # maintenance pass that found it from being reported as progress.
     contained: bool = False
+    # The failure hook settles an unacknowledged generation (it blocks the entries
+    # that generation introduced).
+    settles_failure: bool = False
 
 
 def route_publication_owner_lock_statement():

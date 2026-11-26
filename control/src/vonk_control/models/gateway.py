@@ -16,14 +16,20 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
-from vonk_agent_protocol.state_machines import ExternalPublicationState, machine_check
+from vonk_agent_protocol.state_machines import (
+    ExternalBlockReason,
+    ExternalPublicationState,
+    machine_check,
+)
 from vonk_control.gateway.external_contract import (
     ApprovedDestination,
     ExternalDeploymentSpec,
 )
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_primitives import Base
+from vonk_control.models.waits import wait_due_column, wait_evidence_column
 from vonk_control.stored.json_values import ContractJSON
+from vonk_control.waits.contract import WaitEvidence
 
 
 class GatewayExternalDeployment(Base):
@@ -42,6 +48,10 @@ class GatewayExternalDeployment(Base):
         CheckConstraint(
             machine_check(ExternalPublicationState),
             name="ck_gateway_external_deployments_state",
+        ),
+        CheckConstraint(
+            machine_check(ExternalBlockReason, column="reason"),
+            name="ck_gateway_external_deployments_reason",
         ),
         CheckConstraint(
             "desired_revision >= 1 AND (applied_revision IS NULL OR applied_revision >= 1)",
@@ -82,8 +92,19 @@ class GatewayExternalDeployment(Base):
         default=ExternalPublicationState.PENDING.value,
         server_default=ExternalPublicationState.PENDING.value,
     )
-    #: The typed reason of ``blocked`` (the publisher owns its vocabulary).
-    reason: Mapped[str | None] = mapped_column(String(64))
+    #: Consecutive failed starts of the desired content; an edit, an enable or an
+    #: acknowledged generation resets it.
+    start_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    #: Why the deployment is not serving (set with ``blocked``, kept while it is
+    #: withdrawn because of it).
+    reason: Mapped[str | None] = mapped_column(String(32))
+    #: A blocked deployment is re-planned when ``next_action_at`` falls due.
+    wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
+        __tablename__
+    )
+    next_action_at: Mapped[datetime | None] = wait_due_column("next_action_at")
     request_id: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -100,6 +121,8 @@ class GatewayCredentialBinding(Base):
     """
 
     __tablename__ = "gateway_credential_bindings"
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    __mapper_args__: ClassVar = {"version_id_col": version}
     __table_args__ = (
         CheckConstraint(
             "revision >= 1", name="ck_gateway_credential_bindings_revision"

@@ -89,6 +89,18 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "An external row reads back and owns its name; run creation and rename_run are refused a name an external model owns; a local run owns its name against an external claim.",
     ),
     (
+        "control/tests/test_gateway_external_publication.py",
+        "External models publish with no local route, block with a typed reason and a wait when the generation does not start while the local route stays published, withdraw when a binding is narrowed, and follow their declared state edges; no whole-tree scan.",
+    ),
+    (
+        "control/tests/test_gateway_external_postgres.py",
+        "Real PostgreSQL crash points of external model publication: after the accept, after the publish before the ack, after the ack before the record; no repeated effect, nothing lost, a removed entry stays gone.",
+    ),
+    (
+        "control/tests/test_gateway_external_service.py",
+        "An external model or credential binding is accepted exactly as reviewed, replays by request id, keeps its own alias on an edit and is administrator-only; no whole-tree scan.",
+    ),
+    (
         "control/tests/test_identity_creation_postgres.py",
         "Concurrent PostgreSQL insert, replay and row-lock fault injection at content and request boundaries.",
     ),

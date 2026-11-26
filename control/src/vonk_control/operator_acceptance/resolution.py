@@ -36,6 +36,12 @@ from vonk_control.enrollment.contract import EnrollmentGrantStatus
 from vonk_control.fleet_profile_contract.definitions import FleetProfileView
 from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 from vonk_control.fleet_projection.common import FleetNodeIdentity
+from vonk_control.gateway.external_api_contract import (
+    ExternalBindingAccepted,
+    ExternalBindingAction,
+    ExternalModelAccepted,
+    ExternalModelAction,
+)
 from vonk_control.gateway.keys_contract import GatewayKeyCreated, GatewayKeyRevoked
 from vonk_control.jobs.operator_receipts import read_job_operator_receipt
 from vonk_control.model_cache.contract import ModelCacheOperatorResponse
@@ -83,6 +89,7 @@ if TYPE_CHECKING:
     from vonk_control.artifact_jobs.service import ArtifactJobService
     from vonk_control.fleet_profiles.service import FleetProfileService
     from vonk_control.fleet_projection.service import FleetProjection
+    from vonk_control.gateway.external_service import ExternalModelService
     from vonk_control.gateway.keys import GatewayKeyService
     from vonk_control.model_cache.service import ModelCacheService
     from vonk_control.operator_projection_api.services import FleetOperatorServices
@@ -199,6 +206,7 @@ class OperatorReceiptResolver:
     fleet: FleetProjection | None = None
     fleet_services: FleetOperatorServices | None = None
     keys: GatewayKeyService | None = None
+    external_models: ExternalModelService | None = None
     installations: RunSwitchOperationService | None = None
 
     def bind(self, app: FastAPI) -> None:
@@ -215,6 +223,55 @@ class OperatorReceiptResolver:
                         if getattr(self, field.name) is not None
                     },
                 )
+
+    def _external_receipt(
+        self, policy: ReceiptPolicy, result: BaseModel | Response
+    ) -> AcceptanceReceipt | None:
+        """The receipt of an accepted external model or credential binding, if it is one."""
+
+        if policy == ReceiptPolicy.GATEWAY_MODEL and isinstance(
+            result, ExternalModelAccepted
+        ):
+            try:
+                _available(self.external_models).receipt(
+                    result.alias, result.request_id
+                )
+            except InvalidRequestError as error:
+                # A removed model leaves once its withdrawal is confirmed: its
+                # absence is then the evidence.
+                if (
+                    error.typed_reason is not InvalidRequestReason.NOT_FOUND
+                    or result.action != ExternalModelAction.REMOVE
+                ):
+                    raise
+            return AcceptanceReceipt(
+                owner=ReceiptOwner.GATEWAY_MODEL,
+                id=result.alias,
+                request_id=result.request_id,
+                revision=result.revision,
+                href=f"/api/gateway/models/{quote(result.alias, safe='')}/requests?request_id={quote(result.request_id, safe='')}",
+            )
+        if policy == ReceiptPolicy.GATEWAY_CREDENTIAL and isinstance(
+            result, ExternalBindingAccepted
+        ):
+            try:
+                _available(self.external_models).binding_receipt(
+                    result.name, result.request_id
+                )
+            except InvalidRequestError as error:
+                if (
+                    error.typed_reason is not InvalidRequestReason.NOT_FOUND
+                    or result.action != ExternalBindingAction.REMOVE
+                ):
+                    raise
+            return AcceptanceReceipt(
+                owner=ReceiptOwner.GATEWAY_CREDENTIAL,
+                id=result.name,
+                request_id=result.request_id,
+                revision=result.revision,
+                href=f"/api/gateway/credentials/{quote(result.name, safe='')}/requests?request_id={quote(result.request_id, safe='')}",
+            )
+        return None
 
     def resolve(
         self,
@@ -514,6 +571,9 @@ class OperatorReceiptResolver:
                     request_id=identity,
                     href=f"/api/key/{quote(result.name, safe='')}/requests?request_id={quote(identity, safe='')}",
                 )
+            external = self._external_receipt(policy, result)
+            if external is not None:
+                return external
             if policy == ReceiptPolicy.INSTALLATION and isinstance(
                 result, RunSwitchOperation
             ):

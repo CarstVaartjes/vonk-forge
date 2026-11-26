@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import Field, field_validator
 from vonk_forge_contracts import EndpointAlias
 
+from vonk_agent_protocol.identifiers import Digest
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 from vonk_agent_protocol.state_machines import GatewayRouteState
 from vonk_control.gateway.litellm import LiteLlmModelInfo
@@ -83,9 +84,20 @@ class RouteAcceptedRunIdentity(StrictModel):
     accepted_policy: RouteAcceptedModelPolicy
 
 
+class RouteExternalIdentity(StrictModel):
+    """One external model entry of a candidate bundle, by the content that renders it."""
+
+    deployment_id: str = Field(min_length=1, max_length=36)
+    revision: int = Field(ge=1)
+    entry_sha256: Digest
+
+
 class RouteIdentityDocument(StrictModel):
     """The document whose digest names one candidate route bundle."""
 
     schema_version: Literal[1] = 1
     runs: list[RouteRunIdentity | RouteAcceptedRunIdentity]
     aliases: dict[EndpointAlias, str]
+    # Absent when no external model is served, so a gateway without external models
+    # keeps the digest it had before the field existed.
+    externals: list[RouteExternalIdentity] | None = None

@@ -464,6 +464,7 @@ class WaitOwnerKind(WireEnum):
     ROUTE_PUBLICATION = "route-publication"
     ROUTE_RECOVERY = "route-recovery"
     CATALOG_SYNC = "catalog-sync"
+    EXTERNAL_MODEL = "external-model"
     CERTIFICATE = "certificate"
     CERTIFICATE_REVOCATION = "certificate-revocation"
     COORDINATOR = "coordinator"

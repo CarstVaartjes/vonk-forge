@@ -32,6 +32,7 @@ from vonk_control.distribution_executor.preparation import (
 )
 from vonk_control.failures.coordinator import CoordinatorFailures
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.gateway.credential_custody import loaded_names
 from vonk_control.gateway.route_grants import require_existing_recipe_routes
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.repository import INVENTORY_MAX_AGE_SECONDS
@@ -148,6 +149,7 @@ def assemble_production_worker(
         prepare_key_routes=lambda runs: require_existing_recipe_routes(sessions, runs),
         management_policy=management_policy,
         clock=clock,
+        credentials=loaded_names,
     )
     # Reuse and archive-presence checks read the same image cache the
     # availability service writes, so prefer its explicit root.
@@ -466,6 +468,7 @@ def assemble_production_worker(
             fleet_profiles._reconcile_selected_roster(clock())
         ),
         WaitOwnerKind.ROUTE_PUBLICATION: lambda _key, _wait: recipe_routes.maintain(),
+        WaitOwnerKind.EXTERNAL_MODEL: lambda _key, _wait: recipe_routes.maintain(),
         WaitOwnerKind.ROUTE_RECOVERY: lambda key, _wait: recipe_operations.redrive_run(
             str(key[0])
         ),

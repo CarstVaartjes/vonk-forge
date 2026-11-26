@@ -15,6 +15,10 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_agent_protocol.state_machines import RoutePublicationState, RunState
 from vonk_agent_protocol.state_machines import RouteState as RunRouteState
+from vonk_control.gateway.external_publication import (
+    block_introduced,
+    record_externals,
+)
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.logging import log_event
@@ -28,12 +32,14 @@ from vonk_control.recipe_routes.shared import (
     _LOGGER,
     _WITHDRAWAL_ATTEMPTS,
     _WITHDRAWAL_BACKOFF_SECONDS,
+    RECIPE_ROUTE_CLAIM_ID,
     STOP_DISPATCH_GRACE,
     STOP_WITHDRAWAL_PENDING,
     RecipeEndpointAuthorityRefused,
     RecipeRankStopped,
     RecipeRouteError,
     RecipeRouteSuperseded,
+    _ActivatedRecipeRouteError,
     _aware,
     _Publication,
     _RecipeCandidate,
@@ -239,7 +245,7 @@ def _withdrawal_effect(
     # the API's grant loop narrows the grants afterwards.
     return (
         self._publisher.publish_recipe(candidate, required=SupervisorPhase.DRAINED)
-        if candidate.state.aliases
+        if candidate.state.aliases or candidate.externals.served
         else self._publish_empty(candidate.state.digest)
     )
 
@@ -286,12 +292,13 @@ def _record_withdrawal_in_session(
     generation: LiteLlmGeneration,
 ) -> None:
     candidate = withdrawal.candidate
+    record_externals(session, candidate.externals, now=self._clock())
     self.projection_in_session(
         session,
         generation,
         state=(
             RoutePublicationState.COMPLETED
-            if candidate.state.aliases
+            if candidate.state.aliases or candidate.externals.served
             else RoutePublicationState.ROUTES_WITHDRAWN
         ),
     )
@@ -340,7 +347,15 @@ def maintain(self) -> bool:
     )
     if isinstance(step, bool):
         return step
-    self._execute(step)
+    try:
+        self._execute(step)
+    except _ActivatedRecipeRouteError:
+        if not step.settles_failure:
+            raise
+        # The failure hook already blocked the entries the generation introduced:
+        # that is progress, not a failure to back off from, so the next pass (the
+        # API tick, a few seconds away) publishes the local routes without them.
+        return True
     return True
 
 
@@ -465,6 +480,7 @@ def _maintenance_step_in_session(
             exclude_run_ids=frozenset(),
             lock=True,
             served=served,
+            introduce_externals=True,
         )
     except RecipeRouteError as error:
         if error.run_id is None:
@@ -507,6 +523,17 @@ def _maintenance_step_in_session(
                 run.updated_at = self._clock()
 
         return self._withdrawal_publication(session, withdrawal, after=record_reason)
+    return _publish_if_changed(self, session, candidate, served)
+
+
+def _publish_if_changed(
+    self: RecipeRouteService,
+    session: Session,
+    candidate: _RecipeCandidate,
+    served: ServedModelInfo,
+) -> bool | _Publication:
+    """Publish ``candidate`` when it is not the live, completed bundle."""
+
     owner = session.get(RoutePublicationOwner, 1)
     publication = (
         session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
@@ -527,11 +554,13 @@ def _maintenance_step_in_session(
     candidate_changed = current_digest != candidate.state.digest
     if not durable_current or candidate_changed:
         claim = self._claim_in_session(session, candidate.state.digest)
+        introduced = candidate.externals.introduced
 
         def complete(session: Session, generation: LiteLlmGeneration) -> None:
             self.projection_in_session(
                 session, generation, state=RoutePublicationState.COMPLETED
             )
+            record_externals(session, candidate.externals, now=self._clock())
             for run_id in sorted(candidate.included):
                 run = session.get(RecipeRun, run_id)
                 if run is not None:
@@ -542,10 +571,18 @@ def _maintenance_step_in_session(
                     run.route_error = None
                     run.updated_at = self._clock()
 
+        def fail(session: Session, error: Exception) -> None:
+            # Only a generation that was written and not acknowledged blames the
+            # entries it introduced; a refusal before it was written blames none.
+            if isinstance(error, _ActivatedRecipeRouteError):
+                block_introduced(session, candidate.externals, now=self._clock())
+
         return _Publication(
             claim=claim,
             effect=lambda: self._publish(candidate),
             complete=complete,
+            fail=fail if introduced else None,
+            settles_failure=bool(introduced),
         )
     return False
 
@@ -559,20 +596,43 @@ def _maintain_empty_routes(
         exclude_run_ids=frozenset(),
         lock=True,
         served=served,
+        introduce_externals=True,
     )
+    if candidate.externals.served:
+        # No run is published, but an external model is: the same publish rule.
+        return _publish_if_changed(self, session, candidate, served)
     if candidate.included or candidate.endpoints or candidate.state.aliases:
         return False
     owner = session.get(RoutePublicationOwner, 1)
     publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+    live = self._publisher.active_marker_digest()
+    claim = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
+    in_flight = (
+        claim is not None and claim.state == RoutePublicationState.PUBLICATION_PENDING
+    )
+    # A generation that was written and never recorded (its entries did not start)
+    # is live: nothing served may stay on the gateway beyond the recorded one. A
+    # publication still in flight has written its generation and not yet recorded
+    # it; withdrawing now would supersede it.
+    unrecorded = (
+        not in_flight
+        and live is not None
+        and (publication is None or live != publication.activation_marker_digest)
+    )
     if (
-        owner is not None
-        and owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
-        and publication is not None
-        and publication.state == RoutePublicationState.COMPLETED
-        and publication.generation == owner.owner_generation
+        candidate.externals.withdrawing
+        or unrecorded
+        or (
+            owner is not None
+            and owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
+            and publication is not None
+            and publication.state == RoutePublicationState.COMPLETED
+            and publication.generation == owner.owner_generation
+        )
     ):
-        # The live bundle still lists models although no run is published:
-        # a lifecycle path withdrew the last route only in the database.
+        # The live bundle still lists models although nothing is served: a
+        # lifecycle path withdrew the last route only in the database, or the
+        # last external model was disabled or removed.
         return self._withdrawal_publication(
             session, self.prepare_withdrawal_in_session(session, frozenset(), served)
         )

@@ -48,11 +48,14 @@ from vonk_control.fleet_events.outbox import FleetEventRepository
 from vonk_control.fleet_events.stream import FleetStream
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.fleet_projection.service import FleetProjection
+from vonk_control.gateway.credential_custody import loaded_names
+from vonk_control.gateway.external_service import ExternalModelService
 from vonk_control.gateway.keys import (
     GatewayKeyError,
     GatewayKeyService,
     keep_default_key,
 )
+from vonk_control.gateway.litellm_surface import shipped_surface
 from vonk_control.gateway.route_grants import recipe_key_routes
 from vonk_control.gateway.route_runtime import (
     AtomicRouteBundlePublisher,
@@ -81,6 +84,7 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.recipe_routes.shared import ROUTE_RECONCILE_SECONDS
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.preparation import (
@@ -171,7 +175,7 @@ async def _keep_recipe_routes(
     gateway_keys: GatewayKeyService,
     stop: asyncio.Event,
     *,
-    interval_seconds: float = 5.0,
+    interval_seconds: float = ROUTE_RECONCILE_SECONDS,
 ) -> None:
     """Recover route/grant effects from durable intent independently of catalog sync."""
 
@@ -396,6 +400,9 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         check=lambda service: service.check_health(),
     )
 
+    external_models = ExternalModelService(
+        sessions, surface=shipped_surface, clock=clock, credentials=loaded_names
+    )
     recipe_routes = capabilities.guard(
         ControllerCapability.RECIPE_ROUTES,
         RecipeRouteService,
@@ -408,6 +415,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 forbidden_cidrs=settings.direct_fabric_cidrs,
             ),
             clock=clock,
+            credentials=loaded_names,
         ),
     )
     recipe_builds = RecipeBuildService(
@@ -728,6 +736,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         model_cache=model_cache,
         recipe_image_availability=recipe_image_production.service,
         gateway_keys=gateway_keys,
+        external_models=external_models,
         lifespan=lifespan,
     )
     app.state.capabilities = capabilities

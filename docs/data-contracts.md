@@ -237,9 +237,11 @@ module defines its own.
 | `control/src/vonk_control/recipe_update_batches/contract.py` | controller-contract | 8 | One current contract for durable recipe-update intent and observation. |
 | `control/src/vonk_control/recipe_update_batches/notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |
 | `control/src/vonk_control/resource_planning/contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
-| `control/src/vonk_control/gateway/route_bundle_contract.py` | controller-contract | 7 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
+| `control/src/vonk_control/gateway/route_bundle_contract.py` | controller-contract | 8 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/gateway/keys_contract.py` | controller-contract | 3 | Wire documents of gateway client keys. |
 | `control/src/vonk_control/gateway/external_contract.py` | controller-contract | 9 | An external model: the operator's input, the accepted non-secret spec, its destination, credential bindings and rendered gateway entry. |
+| `control/src/vonk_control/gateway/external_api_contract.py` | controller-contract | 17 | The external model and credential binding routes: views, reviews, accept requests and what an accepted review digests. |
+| `control/src/vonk_control/gateway/credential_custody.py` | controller-contract | 1 | The names of the secrets the LiteLLM supervisor loaded (`/supervisor/credentials.json`); never a value. |
 | `control/src/vonk_control/gateway/litellm_surface.py` | controller-contract | 1 | What the pinned LiteLLM accepts (`deploy/compose/litellm/surface.json`), generated from the pinned image. |
 | `control/src/vonk_control/run_switch_contract/requests.py` | controller-contract | 15 | Run switch contract: requests. |
 | `control/src/vonk_control/run_switch_contract/evidence.py` | controller-contract | 16 | Run switch contract: evidence. |

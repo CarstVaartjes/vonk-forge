@@ -9,6 +9,7 @@ from typing import cast as typing_cast
 
 from pydantic import ValidationError
 
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import InstallationState
@@ -20,6 +21,7 @@ from vonk_control.fleet_profiles.capacity import (
     sibling_profile_ports,
     sibling_profile_runs,
 )
+from vonk_control.gateway.alias_namespace import external_aliases
 from vonk_control.gpu.clock_validation import assess_gpu_clock
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.prebuilt_images import policy_prebuilt_reference
@@ -35,6 +37,7 @@ from vonk_control.run_switch_contract.evidence import RunSwitchReason
 from vonk_control.run_switch_contract.observation import RunSwitchObservedImageIdentity
 from vonk_control.run_switch_contract.plans import RunSwitchPlan
 from vonk_control.run_switch_contract.requests import RunSwitchPreviewRequest
+from vonk_control.run_switch_contract.vocabulary import RunSwitchReasonScope
 from vonk_control.run_switch_operations.constants import (
     _active_recipe_revision,
     _is_artifact_phase,
@@ -168,6 +171,19 @@ class RunPlanningMixin:
                 ),
             )
             blockers.extend(conflict_blockers)
+            # A name an external model serves is a blocker of the review, as it is
+            # for a profile, not a refusal after the load was accepted.
+            blockers.extend(
+                _as_reason(
+                    RunSwitchCode.ALIAS_TAKEN,
+                    f"Model name {alias} is served by an external model.",
+                    scope=typing_cast(
+                        RunSwitchReasonScope, RunSwitchReasonScopeName.RECIPE.value
+                    ),
+                    node_ids=node_ids,
+                )
+                for alias in sorted(external_aliases(session, (request.alias,)))
+            )
             inspection = service._inspect_artifacts(
                 session,
                 request.model_content_sha256,

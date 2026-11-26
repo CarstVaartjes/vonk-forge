@@ -8,6 +8,7 @@ import errno
 import fcntl
 import logging
 import os
+import re
 import secrets
 import signal
 import stat
@@ -17,6 +18,11 @@ from pathlib import Path
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control.categorized_errors import UnsettledOutcome
+from vonk_control.gateway.credential_custody import (
+    MAX_CREDENTIAL_BYTES,
+    STAGED_CREDENTIALS_DIRECTORY,
+)
+from vonk_control.gateway.external_contract import BINDING_NAME_PATTERN
 from vonk_control.runtime.asset_contract import RuntimeAssetInventory
 
 _LOGGER = logging.getLogger(__name__)
@@ -521,6 +527,44 @@ def _stage_compose_secrets_once(
     )
 
 
+def stage_gateway_credentials(
+    source_root: Path = Path("/gateway-credentials"),
+    destination_root: Path = Path("/normalized") / STAGED_CREDENTIALS_DIRECTORY,
+) -> None:
+    """Stage each operator-provided gateway credential for LiteLLM alone.
+
+    ``secrets/gateway-credentials/<BINDING>`` is one secret per file.  A file that is
+    not a safe regular file, or whose name is not a binding name, is left out; one
+    damaged file never stops the rest of the staging.  A staged secret whose source
+    is gone is removed, and a Compose file without the mount stages none.
+    """
+    pattern = re.compile(BINDING_NAME_PATTERN)
+    try:
+        names = sorted(item.name for item in source_root.iterdir())
+    except OSError:
+        names = []
+    wanted = [name for name in names if pattern.fullmatch(name)]
+    for name in wanted:
+        try:
+            stage_runtime_file(
+                source_root / name,
+                destination_root / name,
+                owner_uid=10002,
+                owner_gid=10001,
+                mode=0o400,
+                maximum_bytes=MAX_CREDENTIAL_BYTES,
+            )
+        except (OSError, RuntimeSecretError, UnsettledOutcome) as error:
+            _LOGGER.warning("gateway credential %s was not staged: %s", name, error)
+    try:
+        leftovers = list(destination_root.iterdir())
+    except OSError:
+        return
+    for path in leftovers:
+        if path.name not in wanted:
+            path.unlink(missing_ok=True)
+
+
 def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
     target = Path(path)
     if not target.is_absolute() or len(target.parts) < 2:
@@ -655,6 +699,7 @@ def stage_runtime() -> None:
     if os.geteuid() != 0:
         raise RuntimeError("runtime-init must start as root")
     stage_compose_secrets()
+    stage_gateway_credentials()
     stage_runtime_assets()
     prepare_shared_volumes()
 

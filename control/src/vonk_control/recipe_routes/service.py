@@ -23,6 +23,10 @@ from vonk_agent_protocol.state_machines import RouteState as RunRouteState
 from vonk_control import bounded_retry
 from vonk_control.agent_operation_facts import job_start_deadline
 from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
+from vonk_control.gateway.external_publication import (
+    CredentialNames,
+    record_externals,
+)
 from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.jobs.documents import DistributedRecoveryMarker
@@ -68,6 +72,10 @@ from vonk_control.stored.documents import RouteClaimMarker
 from vonk_control.waits.persisted import schedule_wait
 
 
+def _no_credentials() -> None:
+    """No supervisor has said which credentials it loaded."""
+
+
 class RecipeRouteService:
     def __init__(
         self,
@@ -78,12 +86,14 @@ class RecipeRouteService:
         clock: Callable[[], datetime],
         maximum_age_seconds: int = ROUTE_EVIDENCE_MAX_AGE_SECONDS,
         prepare_key_routes: Callable[[frozenset[str]], None] | None = None,
+        credentials: CredentialNames = _no_credentials,
     ) -> None:
         if not 1 <= maximum_age_seconds <= ROUTE_EVIDENCE_MAX_AGE_SECONDS:
             raise ValueError("recipe route evidence age is invalid")
         self.sessions = sessions
         self._publisher = publisher
         self._prepare_key_routes = prepare_key_routes
+        self._credentials = credentials
         self._management_policy = management_policy
         self._clock = clock
         self._maximum_age = timedelta(seconds=maximum_age_seconds)
@@ -243,6 +253,12 @@ class RecipeRouteService:
                     return self._execute_once(publication)
                 except SecurityRefusalError, _RecipeRunContended:
                     raise
+                except _ActivatedRecipeRouteError as error:
+                    last = error
+                    if publication.settles_failure:
+                        # The hook blocked what the unacknowledged generation
+                        # introduced; repeating it would wait out the same timeout.
+                        break
                 except RecipeRouteNotReady as error:
                     last = error
                 except Exception as error:  # noqa: BLE001
@@ -417,6 +433,7 @@ class RecipeRouteService:
         candidate: _RecipeCandidate,
         generation: LiteLlmGeneration,
     ) -> None:
+        record_externals(session, candidate.externals, now=self._clock())
         run = session.get(RecipeRun, run_id)
         if run is not None:
             run.version += 1
@@ -882,6 +899,7 @@ class RecipeRouteService:
         exclude_run_ids: frozenset[str],
         lock: bool,
         served: ServedModelInfo,
+        introduce_externals: bool = False,
     ) -> _RecipeCandidate:
         return candidate.candidate_in_session(
             self,
@@ -890,4 +908,5 @@ class RecipeRouteService:
             exclude_run_ids=exclude_run_ids,
             lock=lock,
             served=served,
+            introduce_externals=introduce_externals,
         )

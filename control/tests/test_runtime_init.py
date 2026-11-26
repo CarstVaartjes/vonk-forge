@@ -643,3 +643,27 @@ def test_runtime_init_marks_only_a_completed_run_healthy_then_idles(
     runtime_init.main(marker=marker, idle=lambda: idles.append("idle"))
     assert marker.read_text() == "staged\n"
     assert idles == ["idle"]
+
+
+def test_gateway_credentials_are_staged_one_file_each_and_retired_with_their_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Break caught: a damaged or misnamed credential file stopping every other
+    # staging step, or a removed secret staying readable by LiteLLM.
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
+    source = tmp_path / "credentials"
+    staged = tmp_path / "normalized" / "gateway-credentials"
+    source.mkdir()
+    (source / "PARTNER").write_bytes(b"sk-partner")
+    (source / "lower").write_bytes(b"ignored")
+    (source / "LINKED").symlink_to(source / "PARTNER")
+
+    runtime_init.stage_gateway_credentials(source, staged)
+    assert [path.name for path in staged.iterdir()] == ["PARTNER"]
+    assert (staged / "PARTNER").stat().st_mode & 0o777 == 0o400
+
+    (source / "PARTNER").unlink()
+    runtime_init.stage_gateway_credentials(source, staged)
+    assert list(staged.iterdir()) == []
+    # A Compose file from before the mount stages nothing and fails nothing.
+    runtime_init.stage_gateway_credentials(tmp_path / "absent", staged)

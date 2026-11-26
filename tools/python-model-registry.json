@@ -507,6 +507,14 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/gateway/external_api_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/gateway/credential_custody.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/run_switch_contract/requests.py",
       "kind": "controller-contract"
     },

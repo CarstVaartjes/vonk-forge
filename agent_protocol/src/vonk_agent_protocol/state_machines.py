@@ -96,6 +96,20 @@ class ExternalPublicationState(WireEnum):
     WITHDRAWN = "withdrawn"
 
 
+class ExternalBlockReason(WireEnum):
+    """Why an external model deployment is not serving: the typed reason beside its state.
+
+    Set with ``blocked`` (and kept while a deployment is withdrawn because of it);
+    cleared when the deployment publishes again.
+    """
+
+    BINDING_MISSING = "binding-missing"
+    CREDENTIAL_MISSING = "credential-missing"
+    DESTINATION_NOT_APPROVED = "destination-not-approved"
+    ENTRY_INVALID = "entry-invalid"
+    START_FAILED = "start-failed"
+
+
 class CertificateState(WireEnum):
     """The standing of a node's client certificate, as the fleet projection shows it."""
 
@@ -323,6 +337,7 @@ __all__ = [
     "DistributionAssignmentState",
     "EndpointState",
     "EnrollmentGrantState",
+    "ExternalBlockReason",
     "ExternalPublicationState",
     "InstallationNodeState",
     "InstallationState",

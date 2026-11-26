@@ -69,6 +69,12 @@ services:
         source: ./secrets/gateway
         target: /gateway-secrets
         bind: {create_host_path: true}
+      # One file per credential binding for external models; staged for LiteLLM alone.
+      - type: bind
+        source: ./secrets/gateway-credentials
+        target: /gateway-credentials
+        read_only: true
+        bind: {create_host_path: true}
 
   postgres:
     # PostgreSQL 17+ is required: the Controller sets the transaction_timeout

@@ -197,6 +197,11 @@ time its container starts it stages, before the services that read it start:
   `normalized-private-keys` (owner and mode per consumer, the administrator
   password included), and the gateway master key under
   `secrets/gateway/authority`;
+- each external-model credential, `secrets/gateway-credentials/<BINDING>` (one
+  secret per file, the name an upper-case binding name), for LiteLLM alone; a
+  staged secret whose file is gone is removed. Replacing a file takes effect on
+  the next `docker compose restart runtime-init`, which restarts LiteLLM and cuts
+  its in-flight streams;
 - this release's runtime kit in `runtime-assets`, with files a release no
   longer ships removed;
 - the ownership of the shared volume roots (`/state`, the object stores,

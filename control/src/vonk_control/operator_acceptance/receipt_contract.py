@@ -45,6 +45,8 @@ class ReceiptPolicy(StrEnum):
     FLEET_ACTION = "fleet-action"
     ENROLLMENT_REVOKE = "enrollment-revoke"
     KEY = "key"
+    GATEWAY_MODEL = "gateway-model"
+    GATEWAY_CREDENTIAL = "gateway-credential"
     INSTALLATION = "installation"
 
 
@@ -58,6 +60,8 @@ class ReceiptOwner(StrEnum):
     NODE = "node"
     ENROLLMENT = "enrollment"
     KEY = "key"
+    GATEWAY_MODEL = "gateway-model"
+    GATEWAY_CREDENTIAL = "gateway-credential"
     RUN_SWITCH = "run-switch"
     AGENT_ATTEMPT = "agent-attempt"
     AGENT_OPERATION = "agent-operation"

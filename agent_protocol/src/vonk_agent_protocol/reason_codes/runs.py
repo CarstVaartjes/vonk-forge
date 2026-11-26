@@ -9,6 +9,8 @@ class RunSwitchCode(WireEnum):
     """Run/Switch phase blockers, waits and failure codes."""
 
     ACTIVE_RUN_CONFLICT = "run-switch.active-run-conflict"
+    #: A model name an external model serves; the load cannot take it.
+    ALIAS_TAKEN = "run-switch.alias-taken"
     ADVANCE_FAILED = "run-switch.advance-failed"
     AGENT_UPGRADE_REQUIRED = "run-switch.agent-upgrade-required"
     ARTIFACT_IDENTITY_UNKNOWN = "run-switch.artifact-identity-unknown"

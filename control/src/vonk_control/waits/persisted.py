@@ -46,6 +46,7 @@ from vonk_control.models.fleet import (
     FleetProfileApplication,
     FleetProfileSelection,
 )
+from vonk_control.models.gateway import GatewayExternalDeployment
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.models.routes import RoutePublicationOwner
@@ -73,6 +74,8 @@ def read_wait(owner: ScheduledWaitOwner) -> QueueWait | None:
             raise TypeError("unreadable wait evidence")
         evidence = owner.wait_evidence
         if owner.next_action_at is None:
+            if evidence.resume_condition is WaitResumeCondition.OPERATOR_ACTION:
+                return None  # parked for an operator: no due time, nothing to redrive
             raise ValueError("wait has no due field")
         return QueueWait(**dict(evidence), next_check=aware(owner.next_action_at))
     except ValueError, TypeError:
@@ -155,6 +158,35 @@ def write_wait(
     changed = owner.wait_evidence != evidence or owner.next_action_at != due
     owner.wait_evidence = evidence
     owner.next_action_at = due
+    return changed
+
+
+def park_wait(
+    owner: ScheduledWaitOwner,
+    *,
+    reason: OperationReason,
+    detail: str,
+    now: datetime,
+    operator_action: OperatorActionName,
+) -> bool:
+    """Record why work waits for an operator, with no due time: nothing redrives it.
+
+    The evidence names the action that resumes it.  The owner is looked at again
+    only when its own intent changes (an edit or an enable), never by the clock.
+    """
+    identity, kind = owner_identity(owner)
+    changed = write_wait(
+        owner,
+        identity=identity,
+        kind=kind,
+        reason=reason,
+        now=now,
+        next_check=now,
+        blockers=[make_blocker(reason, detail)],
+        resume_condition=WaitResumeCondition.OPERATOR_ACTION,
+        operator_action=operator_action,
+    )
+    owner.next_action_at = None
     return changed
 
 
@@ -349,6 +381,7 @@ def owner_identity(
         (FleetProfileSelection, WaitOwnerKind.SELECTED_PROFILE),
         (ModelCacheOperation, WaitOwnerKind.MODEL_CACHE),
         (RecipeLibrarySyncRun, WaitOwnerKind.CATALOG_SYNC),
+        (GatewayExternalDeployment, WaitOwnerKind.EXTERNAL_MODEL),
         (RecipeRun, WaitOwnerKind.ROUTE_RECOVERY),
         (RoutePublicationOwner, WaitOwnerKind.ROUTE_PUBLICATION),
         (AgentCertificate, WaitOwnerKind.CERTIFICATE),

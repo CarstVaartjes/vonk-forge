@@ -148,3 +148,25 @@ assert not any(value == "emSign ECC Root CA - G3"
         timeout=30,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.built_image
+@pytest.mark.parametrize("image_fixture", ["controller_image", "worker_image"])
+def test_controller_images_ship_the_litellm_surface_the_api_admits_against(
+    request: pytest.FixtureRequest, image_fixture: str
+) -> None:
+    # Break caught: an image without the document answered every external model
+    # review with an error, and nothing but a request would have said so.
+    image: str = request.getfixturevalue(image_fixture)
+    probe = (
+        "from vonk_control.gateway.litellm_surface import shipped_surface; "
+        "assert shipped_surface().providers"
+    )
+    completed = subprocess.run(
+        ["docker", "run", "--rm", "--entrypoint", "python", image, "-c", probe],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr

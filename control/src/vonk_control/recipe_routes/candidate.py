@@ -18,6 +18,7 @@ from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN, read_recipe
 
 from vonk_agent_protocol.state_machines import RouteState as RunRouteState
 from vonk_agent_protocol.state_machines import RunState
+from vonk_control.gateway.external_publication import plan_externals
 from vonk_control.gateway.litellm import LiteLlmPolicy, RouteState, ServedModelInfo
 from vonk_control.gateway.route_bundle_contract import (
     RouteAcceptedModelPolicy,
@@ -66,6 +67,7 @@ def _candidate_once(
     exclude_run_ids: frozenset[str],
     lock: bool,
     served: ServedModelInfo,
+    introduce_externals: bool = False,
 ) -> _RecipeCandidate:
     now = _aware(self._clock())
     aliases: dict[str, str] = {}
@@ -349,7 +351,15 @@ def _candidate_once(
             if retained_aliases:
                 included.add(run.id)
                 self._note_retained(run.id, [str(error)])
-    identity = RouteIdentityDocument(runs=run_identities, aliases=aliases)
+    externals = plan_externals(
+        session,
+        now=now,
+        credentials=self._credentials(),
+        introduce=introduce_externals,
+    )
+    identity = RouteIdentityDocument(
+        runs=run_identities, aliases=aliases, externals=externals.identities()
+    )
     digest = hashlib.sha256(
         json.dumps(
             # An absent fact is not part of the identity, so a route without
@@ -361,7 +371,7 @@ def _candidate_once(
     ).hexdigest()
     state = RouteState(aliases=aliases, digest=digest)
     policy = LiteLlmPolicy(models=model_policies)
-    return _RecipeCandidate(state, frozenset(included), policy, endpoints)
+    return _RecipeCandidate(state, frozenset(included), policy, endpoints, externals)
 
 
 class _InvalidRouteAlias(RecipeRouteNotReady):
@@ -491,6 +501,7 @@ def candidate_in_session(
     exclude_run_ids: frozenset[str],
     lock: bool,
     served: ServedModelInfo,
+    introduce_externals: bool = False,
 ) -> _RecipeCandidate:
     """One authoritative observation; the request owner retries fresh transactions."""
     try:
@@ -501,6 +512,7 @@ def candidate_in_session(
             exclude_run_ids=exclude_run_ids,
             lock=lock,
             served=served,
+            introduce_externals=introduce_externals,
         )
     except (ValidationError, RecipeExecutionContractError) as error:
         raise RecipeRouteNotReady(

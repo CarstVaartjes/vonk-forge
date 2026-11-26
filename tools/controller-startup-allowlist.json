@@ -12,6 +12,7 @@
         "ClusterMappingService",
         "CompositeDistributionPhaseExecutor",
         "ControllerExecutionPlanService",
+        "ExternalModelService",
         "DatabaseSourceBundleStore",
         "FailureEvidenceService",
         "FleetEventRepository",

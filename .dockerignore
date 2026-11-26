@@ -62,6 +62,7 @@ deploy/compose/litellm/*
 !deploy/compose/litellm/entrypoint.sh
 !deploy/compose/litellm/config_supervisor.py
 !deploy/compose/litellm/patch-vllm-passthrough.py
+!deploy/compose/litellm/surface.json
 !deploy/compose/prometheus/
 !deploy/compose/prometheus/**
 !deploy/compose/tailscale/

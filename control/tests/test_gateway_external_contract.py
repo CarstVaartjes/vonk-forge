@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from functools import cache
 from pathlib import Path
 
 import pytest
 from pydantic import JsonValue
 
+from vonk_control.gateway.credential_custody import (
+    CREDENTIALS_PATH,
+    MAX_CREDENTIAL_BYTES,
+    STAGED_CREDENTIALS_DIRECTORY,
+)
 from vonk_control.gateway.external_contract import (
+    BINDING_NAME_PATTERN,
+    CREDENTIAL_ENV_PREFIX,
     PROVIDER_ORIGIN_PREFIX,
     ApprovedDestination,
     CredentialBinding,
@@ -27,7 +36,11 @@ from vonk_control.gateway.litellm import (
     render_config,
     render_external_entry,
 )
-from vonk_control.gateway.litellm_surface import LiteLlmSurface, load_surface
+from vonk_control.gateway.litellm_surface import (
+    SURFACE_PATH,
+    LiteLlmSurface,
+    load_surface,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 SECRET = "sk-live-0123456789abcdef"
@@ -333,3 +346,75 @@ def test_an_external_entry_renders_beside_local_routes_and_round_trips() -> None
     assert served["model_info"]["vonk_origin"] == "external"
     parsed = LiteLlmConfig.model_validate(document)
     assert parsed.model_list == [entry]
+
+
+@pytest.mark.parametrize(
+    "provider",
+    ["ollama", "ollama_chat", "lm_studio", "llamafile", "xinference", "hosted_vllm"],
+)
+def test_a_provider_with_a_local_default_base_needs_its_own_https_base(
+    provider: str,
+) -> None:
+    # Break caught: such a provider sends to its built-in ``http://localhost``
+    # default when ``api_base`` is absent, past the https-only rule.
+    bare = ExternalModelInput(
+        model_name="local-ish", litellm_params={"model": f"{provider}/llama3"}
+    )
+    problems = _validate(bare)
+    assert isinstance(problems, list)
+    assert (
+        "litellm_params.api_base",
+        ExternalEntryCode.INSECURE_DESTINATION,
+    ) in {(item.path, item.code) for item in problems}
+    named = ExternalModelInput(
+        model_name="local-ish",
+        litellm_params={"model": f"{provider}/llama3", "api_base": f"{PARTNER}/v1"},
+    )
+    assert isinstance(_validate(named), ExternalDeploymentSpec)
+
+
+def test_the_default_https_port_is_one_origin_in_an_entry_and_a_binding() -> None:
+    # Break caught: ``https://host:443`` and ``https://host`` were two origins, so
+    # a binding approving one refused the other.
+    on_port = _validate(_openai(api_base=f"{PARTNER}:443/v1"))
+    assert isinstance(on_port, ExternalDeploymentSpec)
+    assert on_port.destination.origins == [PARTNER]
+    binding = CredentialBinding(
+        name="PARTNER",
+        revision=1,
+        destinations=[ApprovedDestination(origin=f"{PARTNER}:443")],
+    )
+    assert binding.destinations[0].origin == PARTNER
+    assert (
+        validate_external_entry(
+            _openai(), _surface(), {"PARTNER": binding}, taken_aliases=()
+        ).__class__
+        is ExternalDeploymentSpec
+    )
+
+
+def test_the_supervisor_and_the_controller_agree_on_the_custody_words(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Break caught: the LiteLLM supervisor (a file the image loads with no package
+    # around it) kept its own copy of the binding rule, the size bound, the
+    # variable prefix and the file names, and one side moved alone.
+    monkeypatch.syspath_prepend(str(ROOT / "agent_protocol/src/vonk_agent_protocol"))
+    spec = importlib.util.spec_from_file_location(
+        "supervisor_for_custody_words",
+        ROOT / "deploy/compose/litellm/config_supervisor.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    supervisor = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, supervisor)
+    spec.loader.exec_module(supervisor)
+    assert supervisor.CREDENTIAL_NAME.pattern == BINDING_NAME_PATTERN + r"\Z"
+    assert supervisor.CREDENTIAL_ENV_PREFIX == CREDENTIAL_ENV_PREFIX
+    assert supervisor.MAX_CREDENTIAL_BYTES == MAX_CREDENTIAL_BYTES
+    assert CREDENTIALS_PATH.name == supervisor.CREDENTIALS_NAME
+    assert supervisor.CREDENTIAL_DIRECTORY.name == STAGED_CREDENTIALS_DIRECTORY
+    assert CREDENTIALS_PATH.parent == supervisor.ACK_ROOT
+    # The Controller image copies the surface to the path the Controller reads.
+    dockerfile = (ROOT / "control/Dockerfile").read_text(encoding="utf-8")
+    assert f"COPY deploy/compose/litellm/surface.json {SURFACE_PATH}\n" in dockerfile
