@@ -517,7 +517,7 @@ class MetricsRegistry:
         if backup_age is not None:
             lines.extend(
                 (
-                    "# HELP vonk_control_backup_age_seconds Age of the last successful encrypted control backup.",
+                    "# HELP vonk_control_backup_age_seconds Age of the last successful control backup.",
                     "# TYPE vonk_control_backup_age_seconds gauge",
                     f"vonk_control_backup_age_seconds {backup_age:g}",
                 )
