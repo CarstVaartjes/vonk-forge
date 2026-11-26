@@ -50,7 +50,6 @@ from vonk_control.models.gateway import (
     GatewayExternalDeployment,
 )
 from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY, ROUTE_RECOVERY, schedule
-from vonk_control.stored.rows import read_row_column
 from vonk_control.waits.persisted import schedule_wait
 
 #: A start that failed is looked at again at the shared policy's cap: every try
@@ -119,7 +118,7 @@ def read_bindings(session: Session) -> Mapping[str, CredentialBinding]:
 
     found: dict[str, CredentialBinding] = {}
     for row in session.scalars(select(GatewayCredentialBinding)):
-        destinations = read_row_column(row, "destinations")
+        destinations = row.destinations
         if isinstance(destinations, list):
             found[row.name] = CredentialBinding(
                 name=row.name, revision=row.revision, destinations=destinations
@@ -187,7 +186,7 @@ def plan_externals(
         select(GatewayExternalDeployment).order_by(GatewayExternalDeployment.alias)
     ).all()
     for row in rows:
-        stored = read_row_column(row, "applied_spec")
+        stored = row.applied_spec
         applied = _spec(stored)
         state = settle(row, now=now)
         reason = (
@@ -244,7 +243,7 @@ def _introduce(
 ) -> ServedExternal | None:
     """The desired entry when it may publish; otherwise the deployment blocks."""
 
-    stored = read_row_column(row, "desired_spec")
+    stored = row.desired_spec
     desired = _spec(stored)
     if desired is None:
         _block(row, ExternalBlockReason.ENTRY_INVALID, now=now)
@@ -306,7 +305,7 @@ def record_externals(session: Session, plan: ExternalPlan, *, now: datetime) -> 
 def _still_desired(row: GatewayExternalDeployment, item: ServedExternal) -> bool:
     """Whether the row still wants exactly the content the generation served."""
 
-    stored = read_row_column(row, "desired_spec")
+    stored = row.desired_spec
     return (
         row.state == ExternalPublicationState.PENDING.value
         and _spec(stored) == item.spec

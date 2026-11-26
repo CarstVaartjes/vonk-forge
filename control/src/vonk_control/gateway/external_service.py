@@ -73,7 +73,6 @@ from vonk_control.models.gateway import (
     GatewayCredentialBinding,
     GatewayExternalDeployment,
 )
-from vonk_control.stored.rows import read_row_column
 from vonk_control.waits.persisted import schedule_wait
 
 
@@ -255,7 +254,7 @@ class ExternalModelService:
                     spec = admitted
         current = None
         if row is not None:
-            stored = read_row_column(row, "desired_spec")
+            stored = row.desired_spec
             current = stored if isinstance(stored, ExternalDeploymentSpec) else None
         destination = spec.destination if spec is not None else None
         bindings = spec.credential_bindings if spec is not None else []
@@ -325,7 +324,7 @@ class ExternalModelService:
             assert spec is not None
             row.enabled = True
             row.removal_requested = False
-            stored = read_row_column(row, "desired_spec")
+            stored = row.desired_spec
             if stored != spec:
                 row.desired_revision += 1
                 row.desired_spec = spec
@@ -511,8 +510,8 @@ def _dependents(
     for row in session.scalars(
         select(GatewayExternalDeployment).order_by(GatewayExternalDeployment.alias)
     ):
-        applied = read_row_column(row, "applied_spec")
-        desired = read_row_column(row, "desired_spec")
+        applied = row.applied_spec
+        desired = row.desired_spec
         spec = applied if isinstance(applied, ExternalDeploymentSpec) else desired
         if not isinstance(spec, ExternalDeploymentSpec):
             continue
@@ -529,7 +528,7 @@ def _dependents(
 
 
 def _view(row: GatewayExternalDeployment) -> ExternalModelView:
-    desired = read_row_column(row, "desired_spec")
+    desired = row.desired_spec
     spec = desired if isinstance(desired, ExternalDeploymentSpec) else None
     state = ExternalPublicationState(row.state)
     return ExternalModelView(

@@ -8,8 +8,6 @@ NAS custody.
 
 from __future__ import annotations
 
-from enum import StrEnum
-
 from pydantic import AwareDatetime, Field
 from vonk_forge_contracts import EndpointAlias
 
@@ -18,6 +16,7 @@ from vonk_agent_protocol.state_machines import (
     ExternalBlockReason,
     ExternalPublicationState,
 )
+from vonk_agent_protocol.wire_model import WireEnum
 from vonk_control.gateway.external_contract import (
     ApprovedDestination,
     BindingName,
@@ -30,7 +29,7 @@ from vonk_control.identifiers import UuidId
 from vonk_control.strict_json import StrictModel
 
 
-class ExternalModelAction(StrEnum):
+class ExternalModelAction(WireEnum):
     """What an operator asks of one external model."""
 
     PUT = "put"
@@ -39,7 +38,7 @@ class ExternalModelAction(StrEnum):
     REMOVE = "remove"
 
 
-class ExternalEffect(StrEnum):
+class ExternalEffect(WireEnum):
     """What the gateway does when a change is accepted: the review names each one."""
 
     #: Every config change restarts LiteLLM; its in-flight streams are cut after a grace.
@@ -119,7 +118,7 @@ class ExternalModelAccepted(StrictModel):
     state: ExternalPublicationState
 
 
-class ExternalBindingAction(StrEnum):
+class ExternalBindingAction(WireEnum):
     PUT = "put"
     REMOVE = "remove"
 
