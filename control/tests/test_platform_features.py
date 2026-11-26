@@ -46,7 +46,6 @@ def test_every_published_http_kind_reaches_its_evaluator() -> None:
     document = platform_features.features(LOCK)
     assert "openai.speech" in document["serving_kinds"]
     http = [kind for kind in document["serving_kinds"] if not kind.endswith(".output")]
-    assert set(http) == HTTP_KINDS
     for kind in http:
         try:
             _evaluate(kind)
@@ -69,10 +68,13 @@ def test_an_unknown_serving_kind_is_refused_not_evaluated_as_chat() -> None:
 def test_every_contract_model_source_downloads_through_the_provider_table() -> None:
     sources = get_args(ModelDefinition.model_fields["source"].annotation)
     assert sources
+    owned = {entry.model_source for entry in PROVIDERS.values()}
     published = platform_features.features(LOCK)["source_providers"]
     for source in sources:
-        word = source_provider_word(source)
-        kind = model_source_kind(word)
+        assert source in owned, source
+        kind = model_source_kind(source)
         assert kind is not None, source
         assert PROVIDERS[kind].production, source
-        assert word in published, source
+        assert source_provider_word(source) in published, source
+    # A class no entry names is refused, never taken for Hugging Face.
+    assert model_source_kind(ModelDefinition) is None

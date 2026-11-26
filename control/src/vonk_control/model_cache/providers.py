@@ -435,15 +435,17 @@ def source_provider_word(source: type[BaseModel]) -> str:
     return str(word)
 
 
-def model_source_kind(provider: str) -> str | None:
-    """The artifact kind a Model source with this ``provider`` word downloads as."""
+def model_source_kind(source: type[BaseModel]) -> str | None:
+    """The artifact kind a contract Model source class downloads as, by identity.
+
+    None for a class no entry names: the caller refuses it, never guesses.
+    """
 
     return next(
         (
             str(kind)
             for kind, entry in PROVIDERS.items()
-            if entry.model_source is not None
-            and source_provider_word(entry.model_source) == provider
+            if entry.model_source is source
         ),
         None,
     )
