@@ -101,6 +101,11 @@ signing, and promotion. Create each environment for both `dev` and `stable`:
 | `installer-acceptance-<channel>` | `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT` | `VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY` |
 | `installer-promotion-<channel>` | `R2_INSTALLER_PUBLIC_BUCKET`, `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT`, `VONK_INSTALLER_RELEASE_KEY_FINGERPRINT` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `VONK_INSTALLER_RELEASE_PRIVATE_KEY` |
 
+The table is the complete list of environment secrets in each environment. The
+canary row's two Tailscale entries are the whole of that environment's tailnet
+authority; the `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_*` names belong to a
+child tailnet created at run time and are never stored as environment secrets.
+
 Stable releases use three more environments, all restricted to tag `v*`:
 
 | Environment | Variables | Secrets |
@@ -122,13 +127,8 @@ reviewer (`prevent_self_review` off) on `apt-release` and
 `installer-acceptance-stable` and `installer-promotion-stable` hold the same
 `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT`, the SHA-256 of the DER public key.
 Both canary environments hold the same factory Tailscale client.
-`scripts/stable-preflight` checks all of this; see the
+`scripts/release/stable-preflight` checks all of this; see the
 [stable release runbook](../runbooks/stable-release.md).
-
-The table is the complete list of environment secrets in each environment. The
-canary row's two Tailscale entries are the whole of that environment's tailnet
-authority; the `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_*` names belong to a
-child tailnet created at run time and are never stored as environment secrets.
 
 Set `INSTALLER_PUBLIC_ORIGIN=https://install.vonkforge.ai`. Use one dedicated
 public R2 bucket and a token restricted to object read/write in only that

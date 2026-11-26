@@ -6,6 +6,11 @@ machinery is described in [Platform release publication](platform-release-public
 and [Agent package release](../operations/agent-package-release.md); this page is
 the order of work.
 
+Prerequisites in code: the cross-channel agent package lookup (#2898), the
+undeclared-table retention (#2899), the vonkctl open-word fix (#2896), the
+stable compatibility gate (#2904) and the preflight (#2902) are merged and in
+the tagged commit.
+
 ## Version policy
 
 - The workspace version is the next release. The tag equals it (`v1.0.0` for
@@ -39,8 +44,12 @@ the order of work.
    any (2 if state cannot be read):
 
    ```sh
-   scripts/stable-preflight --repo CarstVaartjes/vonk-forge --tag vX.Y.Z --sha <sha>
+   scripts/release/stable-preflight --repo CarstVaartjes/vonk-forge --tag vX.Y.Z --sha <sha>
    ```
+
+   It needs `gh` (logged in with read access to the repository, its
+   environments and Actions variables) and `skopeo` on the PATH; a missing tool
+   or unreadable state exits 2, not 1.
 
    It checks the release switches, the stable environments and their deployment
    policies, name parity with the dev twins, the acceptance and agent key
@@ -56,12 +65,29 @@ the order of work.
 Only the owner signs and pushes the tag, with the key listed in
 `.github/release-allowed-signers`:
 
+The tag must be signed with the allowed release signer: principal
+`cvaartjes@visualfabriq.com` in `.github/release-allowed-signers`. A plain
+`git tag -s` signs with the machine's default key, which is not that signer and
+fails the release's signature check. Name the key explicitly. Replace
+`<allowed release signing key>` with the public key of the allowed release
+signer (the line the signing agent lists for it); the key's location is
+filled in by the owner:
+
 ```sh
-git fetch origin
-git tag -s vX.Y.Z <sha> -m "Vonk Forge X.Y.Z"
+git checkout main && git pull --ff-only origin main
+git -c gpg.format=ssh -c user.signingkey='<allowed release signing key>' \
+  tag -s vX.Y.Z <sha> -m "Vonk Forge X.Y.Z"
 git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag vX.Y.Z
 git push origin vX.Y.Z
 ```
+
+If the signing program is not the default (for example the 1Password SSH
+agent), add `-c gpg.ssh.program=<path of its ssh-sign program>` to the `tag`
+command. Run `verify-tag` in an up-to-date main checkout, because it reads
+`.github/release-allowed-signers` from the working tree. It must print
+`Good "git" signature` for that principal before you push. To retry, delete the
+local tag with `git tag -d vX.Y.Z` and sign again; never push a tag that failed
+verification.
 
 The owner then approves two deployments in the Actions run:
 
@@ -93,23 +119,29 @@ Announce deprecations there.
   deploy it. For a code fix the owner deletes the tag
   (`git push origin :refs/tags/vX.Y.Z`, and `gh release delete vX.Y.Z --yes`
   for a draft) and tags the fixed commit.
-- **A settings fix only, after publication started:** rerun the failed jobs.
-  Publication is idempotent and reconciles an already accepted set.
+- **A settings fix only, after publication started:** fix the settings, then
+  rerun the failed jobs of the same run. Publication is idempotent and
+  reconciles an already accepted set.
 - **A code fix after anything immutable is public:** bump the patch and release
   that version. Never move a published tag.
 
 ## Switching a deployment between channels
 
 Each hop must be a Debian upgrade of the agent (`0.1.1~dev.N` to `0.1.1` to
-`1.0.0~dev.M`); do not rely on `dpkg` accepting a downgrade. Before switching a
+`1.0.0~dev.M`); do not rely on `dpkg` accepting a downgrade. So dev to stable is
+an upgrade only between the tag and the next version bump, while dev builds are
+still `X.Y.Z~dev.N`; after the bump dev sorts above stable, and moving back to
+dev is the upgrade. Before switching a
 working fleet, wait for an idle artifact queue, announce the change with UTC
 times, and copy `.env`, `docker-compose.yaml`, `secrets/` and the newest
 PostgreSQL backup aside.
 
 To stable:
 
-1. Rerun the installer from the directory that contains `vonk-forge/`. The
-   unqualified endpoint is stable once a stable release exists:
+1. Check that `curl -fsS https://install.vonkforge.ai/artifacts/stable/current.manifest`
+   names version `X.Y.Z`. Then rerun the installer from the directory that
+   contains `vonk-forge/`. The unqualified endpoint is stable once a stable
+   release exists:
 
    ```sh
    curl -fsSL https://install.vonkforge.ai/nas | sh
@@ -119,7 +151,9 @@ To stable:
    `:latest` Vonk images.
 2. Redeploy the Compose project. This recreates the Controller; serving runs
    carry across it.
-3. `vonkctl --json platform` shows the stable channel.
+3. `vonkctl --json platform` has no channel field. Check that its
+   `api_source_tree` equals `git rev-parse vX.Y.Z^{tree}` (the stable images are
+   the tagged commit's), and take the channel from `.env`.
 4. `vonkctl fleet upgrade --all --yes --detach`. The Controller finds each
    installed agent package under either channel, so the Sparks move to the
    stable agent through the relay, with no installer rerun and no sudo.
@@ -133,7 +167,8 @@ curl -fsSL https://install.vonkforge.ai/dev/nas | sh
 ```
 
 Then `.env` has `VONK_INSTALL_CHANNEL=dev`; redeploy, check `vonkctl --json
-platform`, and run the fleet upgrade again. A Spark's apt source keeps the
+platform` (its `api_source_tree` equals the tree of the commit you moved to;
+the channel is the one in `.env`), and run the fleet upgrade again. A Spark's apt source keeps the
 channel it was installed with; that only matters for a manual `apt upgrade`.
 Rerunning the `/spark` installer (`/dev/spark` for dev) on a Spark switches it
 and needs that host's administrative rights.
