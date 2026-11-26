@@ -63,7 +63,8 @@ def _overview(
         path = "/api/fleet"
     elif noun in {"model", "recipe"}:
         path = f"/api/{noun}/library"
-        query = {"cached": True}
+        # The library API's largest page, so the bare listing shows every cached entry.
+        query = _query(cached=True, limit=512)
     else:
         path = f"/api/profile/{_profile_number(args)}"
     return _poll_path(

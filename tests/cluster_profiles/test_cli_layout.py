@@ -266,10 +266,11 @@ def test_job_run_wide_adds_details_without_an_observation_line(printed):
 
 
 def test_library_page_hint_hides_the_cursor_until_wide(printed):
-    payload = {"recipes": [], "next_cursor": "c" * 400}
-    short = printed(render_payload, payload, "recipe", action="library")
+    # Break caught: the bare listing (no --cursor) pointing at a flag it lacks.
+    payload = {"recipes": [], "next_cursor": "c" * 400, "filters": {"cached": True}}
+    short = printed(render_payload, payload, "recipe")
     wide = printed(render_payload, payload, "recipe", action="library", wide=True)
-    assert [line for line in short if line.startswith("Next page: add --cursor")]
+    assert "vonkctl recipe library --cached --cursor" in "\n".join(short)
     assert not [line for line in short if "c" * 400 in line]
     assert [line for line in wide if "c" * 400 in line]
 
