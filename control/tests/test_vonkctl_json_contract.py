@@ -355,7 +355,7 @@ def test_incompatible_schema_edits_are_detected() -> None:
     assert incompatibilities(base, {"properties": base["properties"]})
     # A property literally named ``required`` is not the keyword.
     named = {"properties": {"required": {"type": "string"}}}
-    assert incompatibilities(named, named) == []
+    assert incompatibilities(named, {"properties": {"required": {"type": "integer"}}})
     # A union that drops an alternative nobody emits any more keeps the version.
     union = {"anyOf": [{"$ref": "#/A"}, {"$ref": "#/B"}, {"$ref": "#/C"}]}
     assert incompatibilities(union, {"anyOf": [{"$ref": "#/A"}, {"$ref": "#/C"}]}) == []
