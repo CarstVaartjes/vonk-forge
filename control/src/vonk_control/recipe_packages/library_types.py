@@ -86,6 +86,9 @@ class RecipeLibraryItem:
     # The capabilities this launch serves, as the signed index derived them
     # (the contracts' ``served_capabilities``); none when it carries none.
     served_capabilities: tuple[str, ...] | None = None
+    # Blocks this Controller withheld for a word it does not know (``None``
+    # above): unknown here, not withdrawn, so a recorded value stays.
+    withheld_blocks: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)

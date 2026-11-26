@@ -13,7 +13,8 @@ path every signed index takes) and checks what that parser made of it:
   ``served_capabilities`` and in the vocabulary;
 - no block is lost, except an API block whose own reasoning placement or
   remaining-context word is unknown: neither has a cautious neutral (a guessed
-  placement sends a wrong request), so the parser withholds that block.
+  placement sends a wrong request), so the parser withholds that block and
+  marks it withheld (``withheld_blocks``), which keeps the recorded value.
 
 It stops at the snapshot. The vector's kept entries are rebound to new digests
 while their package archives are not, so no package is loaded from it.
@@ -76,6 +77,14 @@ def _at(value: object, path: tuple[str, ...]) -> object:
     return value
 
 
+def _no_neutral(entry: dict[str, Any]) -> bool:
+    """Whether the entry's base API block holds the word where it has no neutral."""
+    api = entry.get("api")
+    return isinstance(api, dict) and any(
+        _at(api.get("api"), site) == WORD for site in NO_NEUTRAL_API_SITES
+    )
+
+
 def _words(values: Iterable[object] | None) -> set[str]:
     return {str(value) for value in values} if values is not None else set()
 
@@ -101,6 +110,8 @@ def check(raw: bytes) -> dict[str, Any]:
         failures.append(f"no served_capabilities carries {WORD}")
     if not any(_holds(entry.get("display"), WORD) for entry in models.values()):
         failures.append(f"no Model display carries {WORD}")
+    if not any(_no_neutral(entry) for entry in recipes.values()):
+        failures.append(f"no API block carries {WORD} where it has no neutral")
     with tempfile.TemporaryDirectory() as cache_root:
         client = RecipePackageClient(cache_root=Path(cache_root))
         try:
@@ -143,26 +154,22 @@ def check(raw: bytes) -> dict[str, Any]:
             continue
         failures.extend(
             f"Recipe {name} lost its {block}"
-            for block in RECIPE_BLOCKS
-            if entry.get(block) is not None and getattr(item, block) is None
+            for block in (*RECIPE_BLOCKS, "api")
+            if entry.get(block) is not None
+            and getattr(item, block) is None
+            and block not in item.withheld_blocks
         )
         if WORD in (entry.get("served_capabilities") or ()) and WORD not in _words(
             item.served_capabilities
         ):
             failures.append(f"Recipe {name} lost the capability {WORD}")
-        if entry.get("api") is None:
-            continue
-        unneutral = any(
-            _at(entry["api"]["api"], site) == WORD for site in NO_NEUTRAL_API_SITES
-        )
-        if item.api is None:
+        if entry.get("api") is not None and item.api is None:
             withheld_api.append(name)
-        if (item.api is None) != unneutral:
-            failures.append(
-                f"Recipe {name} API block "
-                + ("withheld without" if item.api is None else "kept despite")
-                + " an unknown word that has no neutral"
-            )
+            if not _no_neutral(entry):
+                failures.append(
+                    f"Recipe {name} API block withheld without an unknown word "
+                    "that has no neutral"
+                )
     vocabulary = snapshot.vocabulary
     if vocabulary is None or WORD not in {
         word.name for word in vocabulary.capabilities
