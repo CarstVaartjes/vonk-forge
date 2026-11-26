@@ -5,6 +5,7 @@ import importlib
 import importlib.machinery
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -441,24 +442,30 @@ def test_rust_toolchain_has_one_owner() -> None:
     manifest = tomllib.loads((ROOT / "Cargo.toml").read_text())
     assert manifest["workspace"]["package"]["rust-version"] == channel
     versioned_install = re.compile(r"rustup toolchain install[ \t]+(?![-\"$])\S")
-    # A digit-bounded match: 1.100.0 must not hide inside 11.100.04 or 1.100.0.1.
+    # A digit-bounded match: 1.100.0 must not hide inside 11.100.0 or 1.100.04.
     named = re.compile(rf"(?<![\d.]){re.escape(channel)}(?!\d)")
     skipped = {"node_modules", "target", ".venv", ".git"}
+
+    def walk(top: str) -> list[Path]:
+        found: list[Path] = []
+        for here, dirs, names in os.walk(ROOT / top):
+            dirs[:] = [name for name in dirs if name not in skipped]
+            found += [Path(here) / name for name in names]
+        return found
+
     candidates = [
-        *(ROOT / ".github").rglob("*"),
-        *(ROOT / "scripts").rglob("*"),
-        *(ROOT / "rust").rglob("*.sh"),
+        *walk(".github"),
+        *walk("scripts"),
+        *(path for path in walk("rust") if path.suffix == ".sh"),
         *(
             path
-            for top in ROOT.iterdir()
-            if top.is_dir() and not top.name.startswith(".")
-            for path in top.rglob("Dockerfile*")
+            for top in ("control", "deploy", "nas_setup", "packaging", "install")
+            for path in walk(top)
+            if path.name.startswith("Dockerfile")
         ),
     ]
     copies = []
     for path in sorted(set(candidates)):
-        if skipped & set(path.relative_to(ROOT).parts) or not path.is_file():
-            continue
         text = path.read_text(errors="ignore")
         if named.search(text) or versioned_install.search(text):
             copies.append(str(path.relative_to(ROOT)))

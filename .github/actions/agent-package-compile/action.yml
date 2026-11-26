@@ -109,7 +109,7 @@ runs:
       run: |
         set -euo pipefail
         rustup set profile minimal
-        rustup toolchain install
+        scripts/retry-dependency-fetch rustup toolchain install
         scripts/retry-dependency-fetch rustup target add "$TARGET"
 
     - name: Restore architecture Rust dependency cache

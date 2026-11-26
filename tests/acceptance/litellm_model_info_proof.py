@@ -54,7 +54,7 @@ from vonk_control.gateway.litellm import (
     render_config,
 )
 from vonk_control.gateway.route_bundle_contract import RouteAcceptedModelPolicy
-from vonk_control.gateway.route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
+from vonk_control.gateway.route_grants import GatewayInferenceRoute
 
 ROOT = Path(__file__).resolve().parents[2]
 VECTORS = ROOT / "control/tests/fixtures/route_model_info/vectors.json"
@@ -221,13 +221,12 @@ CLIENT_SCOPE = [
 ]
 
 
-def generate_key(work: Path, key_alias: str, routes: list[str]) -> str:
+def generate_key(work: Path, key_alias: str) -> str:
     """A virtual key, created by the Controller's own key service."""
     service = GatewayKeyService(
         base_url=f"http://127.0.0.1:{PORT}",
         master_key=lambda: MASTER_KEY,
         intent_root=work / "keys",
-        route_grants=lambda _models, _runs: routes,
     )
     deadline = time.monotonic() + 120
     while True:  # the key store is ready once the database migration finished
@@ -238,9 +237,24 @@ def generate_key(work: Path, key_alias: str, routes: list[str]) -> str:
         time.sleep(2)
 
 
+def narrow_key() -> str:
+    """A key the Controller never issues; proves audio sits under openai_routes."""
+    status, created = call(
+        "/key/generate",
+        {
+            "key_alias": "proof-no-openai-routes",
+            "models": CLIENT_SCOPE,
+            "allowed_routes": [GatewayInferenceRoute.MODEL_INFO.value],
+            "metadata": {"managed_by": "vonk-forge"},
+        },
+    )
+    check(status == 200, f"key generate answered {status}")
+    return created["key"]  # type: ignore[index]
+
+
 def prove_client_key(work: Path) -> str:
     """An ordinary client key reads its own facts; returns it for the audio proof."""
-    key = generate_key(work, "proof-client", list(BASE_KEY_ROUTES))
+    key = generate_key(work, "proof-client")
     status, info = call("/v1/model/info", key=key)
     check(status == 200, f"a client key was refused /v1/model/info: {status} {info}")
     names = sorted(entry["model_name"] for entry in info["data"])  # type: ignore[index]
@@ -269,7 +283,7 @@ def refused(action: object) -> int:
     raise SystemExit("model_info proof failed: the gateway served a refused call")
 
 
-def prove_audio(key: str, work: Path) -> None:
+def prove_audio(key: str) -> None:
     """The audio routes through the real gateway, with an ordinary client key."""
     client = sdk(key)
     transcription, speech = alias_of("transcription"), alias_of("speech-instructions")
@@ -375,13 +389,7 @@ def prove_audio(key: str, work: Path) -> None:
     check(outside in (401, 403), f"an out-of-scope speech got {outside}")
 
     # A key without openai_routes reads facts but cannot call either path.
-    narrow = sdk(
-        generate_key(
-            work,
-            "proof-no-openai-routes",
-            [GatewayInferenceRoute.MODEL_INFO.value],
-        )
-    )
+    narrow = sdk(narrow_key())
     for denied in (
         lambda: narrow.audio.transcriptions.create(
             model=transcription, file=("clip.wav", UPLOAD_WAV, "audio/wav")
@@ -464,7 +472,7 @@ def prove(work: Path) -> None:
     check(
         "tools" in forwarded[0] and "response_format" in forwarded[0], "params dropped"
     )
-    prove_audio(client_key, work)
+    prove_audio(client_key)
 
 
 def main() -> None:
