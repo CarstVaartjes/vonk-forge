@@ -27,7 +27,6 @@ from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.route_activation import (
     ROUTE_ACK_TIMEOUT_SECONDS,
     ROUTE_SHUTDOWN_SECONDS,
-    ROUTE_STARTUP_SECONDS,
 )
 from vonk_agent_protocol.state_machines import (
     ExternalPublicationState,
@@ -559,15 +558,17 @@ def _dark_seconds(action: ExternalModelAction) -> int:
     """The longest a failing start of this change keeps local models down.
 
     Per try: the failed generation waits out its acknowledgement, the next
-    reconcile pass comes a few seconds later, and the gateway restarts without the
-    entry (shutdown and startup, as the supervisor budgets them).
+    reconcile pass comes a few seconds later, and the recovery generation then
+    takes a full transition of its own: the supervisor first stops the hung broken
+    child (shutdown and reap) and then starts the new one, which the same
+    acknowledgement timeout budgets.
     """
 
     if action in {ExternalModelAction.PUT, ExternalModelAction.ENABLE}:
         return START_FAILURE_LIMIT * (
             ROUTE_ACK_TIMEOUT_SECONDS
             + ceil(ROUTE_RECONCILE_SECONDS)
-            + ROUTE_STARTUP_SECONDS
+            + ROUTE_ACK_TIMEOUT_SECONDS
         )
     return 0
 
