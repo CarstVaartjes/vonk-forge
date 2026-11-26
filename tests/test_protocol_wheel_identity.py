@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts.protocol_wheel import protocol_wheel_name
+from scripts.release.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,11 +20,11 @@ def test_wheel_name_follows_project_version_from_any_directory(tmp_path: Path) -
     project.write_text(
         f'[project]\nname = "vonk-agent-protocol"\nversion = "{version}"\n'
     )
-    (root / "scripts").mkdir()
+    (root / "scripts/release").mkdir(parents=True)
     for name in ("protocol-wheel-name", "protocol_wheel.py"):
-        shutil.copy2(ROOT / "scripts" / name, root / "scripts" / name)
+        shutil.copy2(ROOT / "scripts/release" / name, root / "scripts/release" / name)
     result = subprocess.run(
-        [sys.executable, str(root / "scripts/protocol-wheel-name")],
+        [sys.executable, str(root / "scripts/release/protocol-wheel-name")],
         cwd=tmp_path,
         capture_output=True,
         text=True,

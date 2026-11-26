@@ -10,7 +10,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        scripts/retry-dependency-fetch cargo fetch --locked
+        scripts/ci/retry-dependency-fetch cargo fetch --locked
         cargo fmt --all --check
         cargo clippy --workspace --all-targets --frozen -- -D warnings
         cargo test --workspace --locked

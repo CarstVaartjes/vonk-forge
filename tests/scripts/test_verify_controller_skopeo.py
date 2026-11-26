@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/verify-controller-skopeo"
+SCRIPT = ROOT / "scripts/images/verify-controller-skopeo"
 
 
 def test_controller_skopeo_verification_is_digest_bound_and_rootless() -> None:

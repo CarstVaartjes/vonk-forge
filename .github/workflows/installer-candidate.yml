@@ -183,7 +183,7 @@ jobs:
           compose=${compose_paths[0]}
           payload=$RUNNER_TEMP/payload.json
           scripts/build-control-wheel
-          uv run --project control --frozen python scripts/build-nas-compose-bundle \
+          uv run --project control --frozen python scripts/release/build-nas-compose-bundle \
             --compose "$compose" \
             --channel "$CHANNEL" \
             --output "$payload"
@@ -214,7 +214,7 @@ jobs:
           nas_wheels=("$RUNNER_TEMP/setups/nas/"vonk_nas_setup-*-py3-none-any.whl)
           test "${#nas_wheels[@]}" -eq 1
           assemble=(
-            uv run --project control --frozen python scripts/install-release-publication assemble
+            uv run --project control --frozen python scripts/release/install-release-publication assemble
             --channel "$CHANNEL"
             --version "$VERSION"
             --source-sha "$SOURCE_SHA"
@@ -246,7 +246,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/ci-apt-install rclone
+          scripts/ci/ci-apt-install rclone
 
       - name: Revalidate source authority before R2 credentials
         if: ${{ !inputs.premerge }}
@@ -268,7 +268,7 @@ jobs:
             stable)
               git fetch --force --tags origin
               tag=${AUTHORITY_REF#refs/tags/}
-              scripts/verify-release-tag-authority \
+              scripts/release/verify-release-tag-authority \
                 "$tag" "$TAG_OID" "$SOURCE_SHA"
               ;;
             *) exit 64 ;;
@@ -288,7 +288,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
-          uv run --project control --frozen python scripts/install-release-publication publish-candidate \
+          uv run --project control --frozen python scripts/release/install-release-publication publish-candidate \
             --bundle "$RUNNER_TEMP/installer-publication" \
             --rclone-remote "r2:$R2_INSTALLER_PUBLIC_BUCKET" \
             | tee "$RUNNER_TEMP/candidate-receipt.jsonl"

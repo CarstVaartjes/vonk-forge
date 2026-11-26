@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (($# != 5)); then
+  echo "usage: verify-published-image IDENTITY IMAGE DIGEST IMMUTABLE_TAG|- TREE" >&2
+  exit 64
+fi
+
+identity=$1
+image=$2
+digest=$3
+immutable_tag=$4
+# The Git tree the image must be built from; the CI step resolves it.
+tree=$5
+
+case "$identity" in
+  api) expected_image=ghcr.io/carstvaartjes/vonk-forge-api ;;
+  worker) expected_image=ghcr.io/carstvaartjes/vonk-forge-worker ;;
+  litellm) expected_image=ghcr.io/carstvaartjes/vonk-forge-litellm ;;
+  *) echo "unsupported published image identity: $identity" >&2; exit 64 ;;
+esac
+[[ "$image" == "$expected_image" ]]
+[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$tree" =~ ^[0-9a-f]{40}$ ]]
+if [[ "$immutable_tag" == - ]]; then
+  reference="$image@$digest"
+else
+  [[ "$immutable_tag" =~ ^dev-sha-[0-9a-f]{40}$ ]]
+  reference="$image:$immutable_tag"
+fi
+
+scratch=$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP must be set}/${identity}.verification.XXXXXX")
+cleanup() {
+  rm -rf -- "${scratch:?}"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Buildx's JSON of `.` contains manifest and image configs, but not the
+# Provenance/SBOM methods. Project them explicitly in the same registry read.
+inspection="$scratch/inspection.json"
+scripts/ci/retry-dependency-fetch docker buildx imagetools inspect "$reference" \
+  --format '{"inspection":{{json .}},"provenance":{{json .Provenance}},"sbom":{{json .SBOM}}}' \
+  > "$inspection"
+[[ "$(jq -er '.inspection.manifest.digest' "$inspection")" == "$digest" ]]
+manifest_file="$scratch/manifest.json"
+platform_records="$scratch/platforms.tsv"
+provenance_file="$scratch/provenance.json"
+sbom_file="$scratch/sbom.json"
+jq -e '.inspection.manifest' "$inspection" > "$manifest_file"
+scripts/images/verify-multiarch-image-manifest "$manifest_file" > "$platform_records"
+jq -e '.provenance' "$inspection" > "$provenance_file"
+jq -e '.sbom' "$inspection" > "$sbom_file"
+jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
+  "$provenance_file" >/dev/null
+jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
+  "$sbom_file" >/dev/null
+
+build_revision=""
+build_tree=""
+while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
+  [[ "$attestation_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+  labels=$(jq -ec --arg platform "linux/$architecture" \
+    '.inspection.image[$platform].config.Labels | select(."org.opencontainers.image.source" == "https://github.com/CarstVaartjes/vonk-forge")' \
+    "$inspection")
+  observed_revision=$(jq -er '."org.opencontainers.image.revision" | select(test("^[0-9a-f]{40}$"))' <<< "$labels")
+  observed_tree=$(jq -er '."ai.vonkforge.source.tree"' <<< "$labels")
+  [[ "$observed_tree" =~ ^[0-9a-f]{40}$ ]]
+  if [[ -z "$build_revision" ]]; then
+    build_revision=$observed_revision
+    build_tree=$observed_tree
+    if [[ "$build_tree" != "$tree" ]]; then
+      # Only isolated LiteLLM inputs can prove equivalence to an older
+      # build. API/worker remain exact-source: their tree must be this one.
+      scripts/images/dev-image-inputs same-inputs "$identity" "$build_tree" "$tree"
+    fi
+  fi
+  [[ "$observed_revision" == "$build_revision" && "$observed_tree" == "$build_tree" ]]
+  jq -e --arg platform "linux/$architecture" \
+    --arg revision "$build_revision" \
+    '(.[$platform] | ([.. | objects | select(
+        ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
+        or (((.SLSA?.buildType? // "") | length) > 0)
+        or (((.buildDefinition?.buildType? // "") | length) > 0)
+      )] | length > 0)
+      and ([.. | strings | select(. == $revision)] | length > 0))' \
+    "$provenance_file" >/dev/null
+  jq -e --arg platform "linux/$architecture" \
+    '.[$platform] | [.. | objects | select(
+        .SPDXID? == "SPDXRef-DOCUMENT"
+        and ((.spdxVersion? // "") | startswith("SPDX-"))
+      )] | length > 0' "$sbom_file" >/dev/null
+done < "$platform_records"

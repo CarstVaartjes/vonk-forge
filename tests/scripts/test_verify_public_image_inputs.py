@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from scripts.protocol_wheel import protocol_wheel_name
+from scripts.release.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/verify-public-image-inputs"
+SCRIPT = ROOT / "scripts/images/verify-public-image-inputs"
 
 
 def run(root: Path) -> subprocess.CompletedProcess[str]:
@@ -178,6 +178,7 @@ def test_every_wheel_in_the_docker_copy_is_scanned(tmp_path: Path) -> None:
 def test_scripts_copied_into_the_controller_image_bring_their_sibling_modules() -> None:
 
     copied: dict[str, set[str]] = {}
+    renamed: dict[str, set[str]] = {}
     for line in (ROOT / "control/Dockerfile").read_text().splitlines():
         words = line.split()
         if len(words) < 3 or words[0] != "COPY" or words[1].startswith("--"):
@@ -190,14 +191,17 @@ def test_scripts_copied_into_the_controller_image_bring_their_sibling_modules() 
                 if destination.endswith("/")
                 else posixpath.dirname(destination) + "/"
             )
-            copied.setdefault(directory, set()).add(Path(source).name)
+            copied.setdefault(directory, set()).add(source)
             if not destination.endswith("/"):
-                copied[directory].add(Path(destination).name)
+                renamed.setdefault(directory, set()).add(Path(destination).name)
 
     missing = []
-    for directory, names in copied.items():
-        for name in sorted(names):
-            path = ROOT / "scripts" / name
+    for directory, sources in copied.items():
+        names = {Path(source).name for source in sources} | renamed.get(
+            directory, set()
+        )
+        for source in sorted(sources):
+            path = ROOT / source
             if not path.is_file() or (
                 "python" not in path.read_text().partition("\n")[0]
                 and path.suffix != ".py"
@@ -213,7 +217,7 @@ def test_scripts_copied_into_the_controller_image_bring_their_sibling_modules() 
                 )
                 for module in modules:
                     sibling = f"{module.split('.')[0]}.py"
-                    if (ROOT / "scripts" / sibling).is_file() and sibling not in names:
-                        missing.append(f"{directory}{name} imports scripts/{sibling}")
+                    if (path.parent / sibling).is_file() and sibling not in names:
+                        missing.append(f"{directory}{path.name} imports {sibling}")
 
     assert missing == []

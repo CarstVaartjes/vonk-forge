@@ -11,11 +11,11 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/install-release-publication"
+SCRIPT = ROOT / "scripts/release/install-release-publication"
 
 
 def _module():
-    sys.path.insert(0, str(ROOT / "scripts"))
+    sys.path.insert(0, str(ROOT / "scripts/release"))
     try:
         loader = importlib.machinery.SourceFileLoader(
             "install_release_publication", str(SCRIPT)
@@ -26,7 +26,7 @@ def _module():
         loader.exec_module(module)
         return module
     finally:
-        sys.path.remove(str(ROOT / "scripts"))
+        sys.path.remove(str(ROOT / "scripts/release"))
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def ancestry(tmp_path: Path):
     module = _module()
     # The publisher resolves its Git cwd from its source location. Point that
     # location at the fixture, while exercising the real ancestry implementation.
-    module.__file__ = str(repo / "scripts/install-release-publication")
+    module.__file__ = str(repo / "scripts/release/install-release-publication")
     return module, older, newer
 
 

@@ -73,14 +73,14 @@ from cluster_profiles.generated_control.models.fleet_enroll_request import (
 from cluster_profiles.generated_control.models.recipe_download_request import (
     RecipeDownloadRequest,
 )
-from scripts.canary_package import canary_package_path
-from scripts.development_slice_client import (
+from scripts.fleet.canary_package import canary_package_path
+from scripts.fleet.development_slice_client import (
     MAXIMUM_RESPONSE_BYTES,
     Client,
     SliceError,
     require_object,
 )
-from scripts.spark_lifecycle_contract import (
+from scripts.release.spark_lifecycle_contract import (
     GATES,
     PHASES,
     ContractError,

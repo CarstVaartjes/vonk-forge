@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "agent_protocol/src",
         "agent_protocol/pyproject.toml",
         "uv.lock",
-        "scripts/export-agent-wire-schema",
+        "scripts/dev/export-agent-wire-schema",
     ] {
         println!("cargo:rerun-if-changed={}", root.join(input).display());
     }
@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let schema = output.join("wire.json");
     let status = Command::new("python3")
-        .arg(root.join("scripts/export-agent-wire-schema"))
+        .arg(root.join("scripts/dev/export-agent-wire-schema"))
         .arg("--output")
         .arg(&schema)
         .env("PYTHONDONTWRITEBYTECODE", "1")

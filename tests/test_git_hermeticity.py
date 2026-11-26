@@ -233,7 +233,7 @@ def test_added_line_guard_does_not_read_checkout_git_state(tmp_path: Path) -> No
     git.write_text(f"#!/bin/sh\ntouch '{marker}'\nexit 91\n")
     git.chmod(0o755)
     completed = subprocess.run(
-        ["bash", str(ROOT / "scripts/check-added-lines")],
+        ["bash", str(ROOT / "scripts/dev/check-added-lines")],
         input="",
         cwd=ROOT,
         env={

@@ -38,7 +38,7 @@ jobs:
         uses: ./.github/actions/protocol-env
       - name: Install the pinned nightly toolchain
         run: |
-          scripts/retry-dependency-fetch rustup toolchain install "$FUZZ_NIGHTLY" --profile minimal --component rustfmt
+          scripts/ci/retry-dependency-fetch rustup toolchain install "$FUZZ_NIGHTLY" --profile minimal --component rustfmt
       - name: Restore the cargo-fuzz binary
         id: tool
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

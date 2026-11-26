@@ -16,7 +16,7 @@ runs:
         set -euo pipefail
         read -r channel components < <(python3 -c 'import tomllib; t = tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]; print(t["channel"], ",".join(t.get("components", [])))')
         rustup set profile minimal
-        scripts/retry-dependency-fetch rustup toolchain install "$channel" ${components:+--component "$components"}
+        scripts/ci/retry-dependency-fetch rustup toolchain install "$channel" ${components:+--component "$components"}
         rustup default "$channel"
     - name: Restore read-only Rust dependency cache
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

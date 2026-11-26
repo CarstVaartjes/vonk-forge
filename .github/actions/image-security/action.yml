@@ -36,7 +36,7 @@ runs:
         for architecture in amd64 arm64; do
           tag="vonk-forge-litellm-smoke:${architecture}-${GITHUB_RUN_ID}"
           tags+=("$tag")
-          scripts/retry-dependency-fetch skopeo copy \
+          scripts/ci/retry-dependency-fetch skopeo copy \
             --override-os linux --override-arch "$architecture" \
             "docker://$IMAGE" \
             "docker-daemon:$tag"

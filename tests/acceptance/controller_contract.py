@@ -30,7 +30,7 @@ from cluster_profiles.observation_transfer_reader import (
     check_observation_deadline,
     receive_observation,
 )
-from scripts.development_slice_client import MAXIMUM_RESPONSE_BYTES
+from scripts.fleet.development_slice_client import MAXIMUM_RESPONSE_BYTES
 
 _REFERENCE = "#/components/schemas/"
 _MAXIMUM_DEPTH = 16

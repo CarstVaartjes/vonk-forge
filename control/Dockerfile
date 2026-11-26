@@ -107,11 +107,11 @@ COPY agent_protocol/src/ ./agent_protocol/src/
 # except the generated documents reaches the runtime image.
 COPY src/cluster_profiles/ ./src/cluster_profiles/
 COPY tools/hatch_build.py ./tools/hatch_build.py
-COPY scripts/check_environment.py scripts/ensure-project-venv scripts/generate-control-clients scripts/export-agent-wire-schema ./scripts/
+COPY scripts/dev/check_environment.py scripts/dev/ensure-project-venv scripts/dev/generate-control-clients scripts/dev/export-agent-wire-schema ./scripts/dev/
 COPY schemas/install-release-manifest.schema.json ./schemas/install-release-manifest.schema.json
 COPY install/installer-release-public.pem ./install/installer-release-public.pem
-RUN scripts/generate-control-clients \
-    && scripts/export-agent-wire-schema --output rust/crates/vonk-agent-protocol/schema/wire.json
+RUN scripts/dev/generate-control-clients \
+    && scripts/dev/export-agent-wire-schema --output rust/crates/vonk-agent-protocol/schema/wire.json
 
 # Only packaging embeds the commit identity; it must not invalidate generators.
 # The same writer stamps the CLI wheel, so one tree gives the Controller and
@@ -153,7 +153,7 @@ COPY inventory/wheels/vonk_agent_protocol-*.whl /wheels/
 # whichever release is newest.
 COPY inventory/wheels/vonk_forge_public_contracts-5.5.0-py3-none-any.whl /wheels/
 COPY agent_protocol/pyproject.toml ./agent_protocol/
-COPY scripts/protocol-wheel-name scripts/protocol_wheel.py ./scripts/
+COPY scripts/release/protocol-wheel-name scripts/release/protocol_wheel.py ./scripts/release/
 COPY deploy/compose/python-bootstrap.lock /tmp/python-bootstrap.lock
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates \
@@ -184,7 +184,7 @@ COPY --from=server-identity /build-identity.json ./src/vonk_control/build-identi
 # path, so the dependency layer above is reused instead of downloaded again.
 RUN PYTHONPATH="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib", vars={"base": "/install", "platbase": "/install"}))')" \
     python -m pip install --no-cache-dir --prefix=/install \
-    "/wheels/$(scripts/protocol-wheel-name)" \
+    "/wheels/$(scripts/release/protocol-wheel-name)" \
     /wheels/vonk_forge_public_contracts-5.5.0-py3-none-any.whl \
     .
 
@@ -258,8 +258,8 @@ FROM runtime-root AS worker-root
 FROM runtime-root AS compose-bundle-digest
 COPY deploy/compose/compose.yaml /compose/compose.yaml
 COPY deploy/compose/tailscale/compose.yaml /compose/tailscale/compose.yaml
-COPY scripts/render-dev-compose /compose/render-dev-compose
-COPY scripts/image_policy.py /compose/image_policy.py
+COPY scripts/release/render-dev-compose /compose/render-dev-compose
+COPY scripts/release/image_policy.py /compose/image_policy.py
 RUN python -c 'import pathlib, runpy; print(runpy.run_path("/compose/render-dev-compose")["bundle_digest"](pathlib.Path("/compose/compose.yaml")))' > /compose-bundle-digest \
     && grep -Eqx '[0-9a-f]{64}' /compose-bundle-digest
 

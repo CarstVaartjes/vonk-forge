@@ -1,6 +1,6 @@
 [[values]]
 semantic_id = "agent_protocol.wheel"
-owner = "scripts/protocol_wheel.py"
+owner = "scripts/release/protocol_wheel.py"
 selector = "protocol_wheel_name"
 family = "protocol_wheel"
 
