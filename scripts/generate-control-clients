@@ -39,6 +39,9 @@ from vonk_forge_contracts.qualification_status import (  # noqa: E402 -- the pro
     QualificationStatus,
 )
 
+from cluster_profiles.control_client.shown_words import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    open_shown_words,
+)
 from vonk_agent_protocol.job_wire import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     MEDIA_TYPE_PATTERN,
 )
@@ -90,6 +93,7 @@ from vonk_control.model_cache.fleet_removal_contract import (  # noqa: E402 -- t
     FleetRemovalReason,
 )
 from vonk_control.operation_api.openapi import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    ExternalSchemaDocument,
     admin_openapi_schema,
 )
 from vonk_control.runs.readiness import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
@@ -130,6 +134,19 @@ def _schema(*, include_browser_auth: bool) -> dict[str, object]:
         ),
     )
     return admin_openapi_schema(app)
+
+
+def cli_schema() -> ExternalSchemaDocument:
+    """The document vonkctl ships and its Python client is generated from.
+
+    It is the admin contract with the word sets vonkctl only shows opened
+    (``cluster_profiles.control_client.shown_words``); the Controller and the
+    browser keep the exact document.
+    """
+
+    schema = _schema(include_browser_auth=False)
+    open_shown_words(schema)
+    return schema
 
 
 def typescript_vocabulary() -> str:
@@ -335,7 +352,7 @@ def main() -> None:
             _schema(include_browser_auth=True),
             path=output_root / OPENAPI.relative_to(ROOT),
         )
-        _write_openapi(_schema(include_browser_auth=False), path=cli_openapi_output)
+        _write_openapi(cli_schema(), path=cli_openapi_output)
         return
 
     # Keep the document complete. Generated clients receive a filtered
@@ -344,7 +361,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="vonk-openapi-clients-") as temporary:
         client_openapi = Path(temporary) / "openapi.json"
 
-        admin_schema = _schema(include_browser_auth=False)
+        admin_schema = cli_schema()
         _write_openapi(admin_schema, path=cli_openapi_output)
         _write_openapi(
             _generated_client_schema(admin_schema, python_compatibility=True),

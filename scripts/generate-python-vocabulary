@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from enum import StrEnum
 from pathlib import Path
 from typing import get_args
 
@@ -92,8 +93,26 @@ HOOK_WORDS = ROOT / "scripts/hook_words_generated.py"
 ROUTE_WORDS = ROOT / "agent_protocol/src/vonk_agent_protocol/route_activation_words.py"
 
 
-def cli_words() -> str:
-    words = {
+#: The closed vocabularies whose StrEnum ``cli_states_generated`` carries whole.
+_CLI_ENUMS = (
+    GpuClockMetric,
+    RouteState,
+    JobContractState,
+    ProgressPhase,
+    ProfileChildPhase,
+    ProfileReportedPhase,
+    QualificationStatus,
+    QualificationOutcome,
+)
+_LIFECYCLE_SETS = (
+    ("TERMINAL_LIFECYCLE_STATES", TERMINAL_LIFECYCLE_STATES),
+    ("LIVE_LIFECYCLE_STATES", LIVE_LIFECYCLE_STATES),
+    ("UNSUCCESSFUL_LIFECYCLE_STATES", UNSUCCESSFUL_LIFECYCLE_STATES),
+)
+
+
+def _cli_word_constants() -> dict[str, StrEnum]:
+    return {
         "STOP_UNCONFIRMED": StopOutcome.UNCONFIRMED,
         "WAIT_DEPENDENCY_PENDING": WaitReason.DEPENDENCY_PENDING,
         "WAIT_SPARK_BUSY": WaitReason.SPARK_BUSY,
@@ -137,10 +156,46 @@ def cli_words() -> str:
         "ACTION_FOLLOW": CacheOperationKind.FOLLOW,
         "JOB_KIND_CLEANUP": ProfileChildJobKind.CLEANUP,
         "ASSET_VERIFIED": AssetAvailability.VERIFIED,
-        **{
-            f"ASSET_{kind.upper().replace('-', '_')}": kind
-            for kind in get_args(ArtifactKind)
-        },
+    }
+
+
+def _artifact_kind_constants() -> dict[str, str]:
+    return {
+        f"ASSET_{kind.upper().replace('-', '_')}": kind
+        for kind in get_args(ArtifactKind)
+    }
+
+
+def cli_word_sources() -> dict[str, frozenset[str]]:
+    """The contract vocabularies each name of ``cli_states_generated`` comes from.
+
+    ``tests/test_generated_contracts.py`` reads which of them vonkctl decides
+    by (see ``cluster_profiles.control_client.shown_words``).
+    """
+
+    sources = {enum.__name__: frozenset({enum.__name__}) for enum in _CLI_ENUMS}
+    sources |= {
+        name: frozenset({type(member).__name__})
+        for name, member in _cli_word_constants().items()
+    }
+    sources |= {
+        name: frozenset({"ArtifactKind"}) for name in _artifact_kind_constants()
+    }
+    sources |= {name: frozenset({"LifecycleState"}) for name, _ in _LIFECYCLE_SETS}
+    return sources | {
+        "PHASE_WORDS": frozenset(
+            {"ProgressPhase", "ProfileChildPhase", "ProfileReportedPhase"}
+        ),
+        "WAIT_WORDS": frozenset({"WaitReason"}),
+        "HTTP_STATUS_DISPOSITIONS": frozenset({"Disposition"}),
+        "PROFILE_REFUSAL_CODES": frozenset({"ProfileReasonCode"}),
+    }
+
+
+def cli_words() -> str:
+    words: dict[str, StrEnum | str] = {
+        **_cli_word_constants(),
+        **_artifact_kind_constants(),
     }
     lines = [
         '"""The contract words the CLI compares, generated. Do not edit.',
@@ -156,16 +211,7 @@ def cli_words() -> str:
         "",
         "",
     ]
-    for enum_type in (
-        GpuClockMetric,
-        RouteState,
-        JobContractState,
-        ProgressPhase,
-        ProfileChildPhase,
-        ProfileReportedPhase,
-        QualificationStatus,
-        QualificationOutcome,
-    ):
+    for enum_type in _CLI_ENUMS:
         lines += [
             f"class {enum_type.__name__}(StrEnum):",
             *(
@@ -179,11 +225,7 @@ def cli_words() -> str:
         f"{name} = {json.dumps(getattr(member, 'value', member))}"
         for name, member in words.items()
     ]
-    for name, states in (
-        ("TERMINAL_LIFECYCLE_STATES", TERMINAL_LIFECYCLE_STATES),
-        ("LIVE_LIFECYCLE_STATES", LIVE_LIFECYCLE_STATES),
-        ("UNSUCCESSFUL_LIFECYCLE_STATES", UNSUCCESSFUL_LIFECYCLE_STATES),
-    ):
+    for name, states in _LIFECYCLE_SETS:
         lines += [
             "",
             f"# The lifecycle states that are {name.split('_')[0].lower()}.",

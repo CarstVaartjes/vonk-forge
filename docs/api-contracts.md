@@ -248,7 +248,12 @@ or equality between two manually written fixtures is insufficient.
 
 The server never imports vonkctl. The Controller owns the document bound
 (`vonk_control.control_limits`); `scripts/generate-control-clients` writes
-`generated_control/limits.py` for the CLI beside `media_types.py`. The
+`generated_control/limits.py` for the CLI beside `media_types.py`. The CLI's
+copy (`src/cluster_profiles/schemas/control-openapi.json`) and the Python client
+are generated from the admin contract with the closed response sets vonkctl
+only shows opened to any word (`cluster_profiles.control_client.shown_words`);
+`control/openapi.json` and the TypeScript client stay exact. See
+[error reporting](error-reporting.md) for which sets stay closed. The
 Controller reads its own `build-identity.json` from the image, which
 `tools/stamp_build_identity.py` writes; the Dockerfile's `server-identity` stage
 and the CLI wheel hook run that one writer. The CLI keeps its own stdlib

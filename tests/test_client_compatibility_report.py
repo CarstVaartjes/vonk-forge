@@ -101,3 +101,22 @@ def test_new_values_types_and_removed_routes_are_reported() -> None:
     assert breaks(_contract(_LEVELS, extra_route=True), _contract(_LEVELS)) == [
         "GET /api/new: route removed"
     ]
+
+
+def test_a_word_set_the_prior_ships_open_reads_new_words() -> None:
+    shown = {"type": "string", "minLength": 1, "maxLength": 128}
+    prior = _contract({"type": "string"})
+    prior["components"]["schemas"]["Library"]["properties"]["state"] = shown
+    newer = _contract({"type": "string"})
+    newer["components"]["schemas"]["Library"]["properties"]["state"]["enum"].append(
+        "stale"
+    )
+    opened = _contract({"type": "string"})
+    opened["components"]["schemas"]["Library"]["properties"]["state"] = shown
+
+    assert breaks(prior, newer) == []
+    # Against a prior that still closes the set, opening it is reported.
+    found = breaks(_contract({"type": "string"}), opened)
+    assert [line.split(":")[0] for line in found] == [
+        "GET /api/recipe/library 200.state"
+    ]
