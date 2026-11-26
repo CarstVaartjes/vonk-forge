@@ -3,8 +3,8 @@
 The catalog reader keeps a word a newer contract minor added as an
 ``UnrecognisedWord``. A capability is shown by its name: the release's own
 vocabulary labels it, and the Library serves capabilities as names. So a
-capability word of a capability's shape (:data:`KEPT`, and an entry's
-``served_capabilities``) is kept. No other unknown word is stored or served,
+capability word that fits a served name, at most 64 characters (:data:`KEPT`,
+and an entry's ``served_capabilities``), is kept. No other unknown word is stored or served,
 but one must not cost the rest of its block either. So :func:`known_block`
 rebuilds the block:
 
@@ -73,8 +73,16 @@ class _NoNeutral(Exception):
     """A scalar word with no neutral value: leave out its enclosing object."""
 
 
+#: Why a block is withheld when it cannot stand without its unknown words.
+WITHOUT_UNKNOWN_WORD: Final = "it cannot stand without an unknown word"
+
+
 class BlockWithheld(Exception):
-    """The block cannot stand without its unknown words."""
+    """The block is withheld; ``reason`` says why, for the sync's note."""
+
+    def __init__(self, reason: str = WITHOUT_UNKNOWN_WORD) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 def known_block[B: BaseModel](block: B) -> B:
@@ -88,10 +96,11 @@ def known_block[B: BaseModel](block: B) -> B:
         return type(block).model_validate_json(
             json.dumps(rebuilt), context=read_context() if keeps else None
         )
-    # One block's rebuild never stops the sync, whatever fails: the caller
-    # withholds that block and notes it.
-    except Exception as error:
+    except (_NoNeutral, ValidationError) as error:
         raise BlockWithheld from error
+    # Any other failure costs only this block too, and its note names it.
+    except Exception as error:
+        raise BlockWithheld(f"its rebuild failed ({type(error).__name__})") from error
 
 
 def known_field[V: BaseModel | tuple[str, ...]](value: V) -> V:
@@ -108,7 +117,7 @@ def known_field[V: BaseModel | tuple[str, ...]](value: V) -> V:
 
 
 def _kept_capability(word: object) -> bool:
-    """A known capability, or a newer one with a capability's shape."""
+    """A known capability, or a newer one that fits a served name."""
 
     if not isinstance(word, UnrecognisedWord):
         return True

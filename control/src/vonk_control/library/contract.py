@@ -18,14 +18,10 @@ from pydantic import (
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
-    ModelDisplayIdentity,
-    ModelLineage,
     PrebuiltImage,
     RecipeDefinition,
     RecipeDisplay,
 )
-from vonk_forge_contracts.display import ModalityWord
-from vonk_forge_contracts.model import Description, ModelLicense, Tags, Title
 from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
@@ -85,10 +81,7 @@ Text64 = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 #: A capability by name. The release's vocabulary labels it, so a name a newer
 #: contract minor added is served as published (the reader keeps only a word of
 #: this shape). Its own schema definition keeps the published ``$ref`` target.
-type CapabilityName = Annotated[
-    str,
-    StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$"),
-]
+type CapabilityName = Text64
 Text80 = Annotated[str, StringConstraints(min_length=1, max_length=80)]
 Text128 = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 Text200 = Annotated[str, StringConstraints(min_length=1, max_length=200)]
@@ -309,37 +302,14 @@ def recipe_actions(local: LibraryLocalState) -> list[LibraryCacheAction]:
     )
 
 
-class LibraryModelDisplay(StrictModel):
+class LibraryModelDisplay(ModelDisplay):
     """The published Model display as the Library serves it.
 
     The contract's ``ModelDisplay`` with each capability as its name, so a
     capability this Controller's contract does not list is shown, not refused.
     """
 
-    kind: Literal["model-display"] = "model-display"
-    identity: ModelDisplayIdentity
-    family_title: Title
-    model_title: Title
-    description: Description
-    tags: Tags
-    modalities: list[ModalityWord] = Field(min_length=1)
-    capabilities: list[CapabilityName] = Field(max_length=64)
-    license: ModelLicense
-    lineage: ModelLineage | None = None
-
-    @classmethod
-    def of(cls, display: ModelDisplay) -> LibraryModelDisplay:
-        return cls(
-            identity=display.identity,
-            family_title=display.family_title,
-            model_title=display.model_title,
-            description=display.description,
-            tags=display.tags,
-            modalities=display.modalities,
-            capabilities=[str(name) for name in display.capabilities],
-            license=display.license,
-            lineage=display.lineage,
-        )
+    capabilities: list[CapabilityName] = Field(max_length=64)  # pyright: ignore[reportIncompatibleVariableOverride]  # served by name, not the contract's closed set
 
 
 class LibraryModelProjection(StrictModel):

@@ -816,13 +816,19 @@ class ManagedRecipeCatalogSyncService:
             )
         # Newest only: a recipe the published library no longer lists stops
         # being offered.  Installed and running revisions are untouched.  A
-        # snapshot with skipped documents or no recipes may be incomplete, so
-        # it retracts nothing; the next complete sync does.  Only the
+        # snapshot with skipped documents, withheld entries (they need a newer
+        # platform; their older revision stays offered) or no recipes may be
+        # incomplete, so it retracts nothing; the next complete sync does.  Only the
         # Controller's own automatic sync of the published library retracts: a
         # manual or fixture sync (an operator import, the Spark canary) carries
         # a deliberately partial view and must never withdraw the rest.
         withdrawals_observed = False
-        if trigger == "automatic" and snapshot.items and not snapshot.problems:
+        if (
+            trigger == CatalogSyncTrigger.AUTOMATIC
+            and snapshot.items
+            and not snapshot.problems
+            and not snapshot.withheld
+        ):
             withdrawals_observed = True
             retracted = self._catalog.retract_absent_from(
                 [
@@ -915,10 +921,11 @@ class ManagedRecipeCatalogSyncService:
         result.state = (
             CatalogSyncState.PARTIAL if result.problems else CatalogSyncState.CURRENT
         )
-        # An unreadable display is a note, decided after the state: it neither
-        # makes the sync partial nor costs the unchanged-tick fast path.
+        # A withheld entry or an unreadable display is a note, decided after
+        # the state: it neither makes the sync partial nor costs the
+        # unchanged-tick fast path.
         room = max(0, _MAX_RESULT_ITEMS - len(result.problems))
-        result.problems.extend(snapshot.display_notes[:room])
+        result.problems.extend((*snapshot.withheld, *snapshot.display_notes)[:room])
         return result
 
     def _store_source_bundle(self, item: RecipeLibraryItem, actor: str) -> None:

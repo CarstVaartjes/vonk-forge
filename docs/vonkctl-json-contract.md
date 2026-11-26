@@ -73,7 +73,7 @@ the page is the last.
 
 - Adding a field, or a value to an open string, keeps the version. Clients
   must ignore fields they do not know; the published schemas allow them. A
-  capability is such an open string (`CapabilityName`, a lowercase slug): a
+  capability is such an open string (`CapabilityName`, a string of 1 to 64 characters): a
   capability a newer recipe contract adds never changes these schemas, and a
   client shows a name it does not know as the name.
 - A `$ref` that names another definition keeps the version when that

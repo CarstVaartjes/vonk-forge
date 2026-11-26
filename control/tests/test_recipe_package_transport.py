@@ -47,6 +47,7 @@ from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -822,7 +823,8 @@ def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
     try:
         snapshot = client.list()
         assert snapshot.problems == ()
-        assert any("catalog_entities" in note.detail for note in snapshot.display_notes)
+        [withheld] = snapshot.withheld
+        assert "catalog_entities" in withheld.detail
         assert snapshot.items
         assert not snapshot.catalog_entities
     finally:
@@ -832,14 +834,14 @@ def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
 def test_an_unknown_served_capability_is_kept_by_name(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    """A capability a newer contract adds is served by its name; a word without
-    a capability's shape is left out, and neither stops the index sync."""
+    """A capability a newer contract adds is served by its name; a word longer
+    than a served name is left out, and neither stops the index sync."""
     index_bytes, _, package = _canonical_package_fixture()
     index = json.loads(index_bytes)
     index["recipes"][0]["served_capabilities"] = [
         "text-generation",
         "teleportation",
-        "Not A Name!",
+        "x" * 65,
     ]
     release = _release_for(_canonical(index) + b"\n", package)
     client = _client(release, tmp_path / "packages")
@@ -970,8 +972,9 @@ def test_an_entry_needing_a_newer_platform_is_withheld_and_the_sync_completes(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     """A recipe whose new revision uses an executed kind a newer contract added
-    is withheld with a note: every other entry applies, the sync is current,
-    its older revision stops being offered and still resolves for running work."""
+    is withheld with a note: every other entry applies and the sync is current.
+    The view is incomplete, so nothing is retracted: the older revision stays
+    offered and a saved profile naming it still resolves to it."""
     first_bytes, _, first_package = _canonical_package_fixture()
     _, other, other_package = _canonical_package_fixture(slug="other-recipe")
 
@@ -1025,18 +1028,17 @@ def test_an_entry_needing_a_newer_platform_is_withheld_and_the_sync_completes(
     [note] = status.problems
     assert note.recipe_uri is None
     assert "fixture/other-recipe" in note.detail
-    assert [item.recipe_id for item in status.withdrawn_recipes] == [older.recipe_id]
-    assert key not in catalog.recipe_catalog_local_revisions([key])
-    [kept] = (
-        sessions()
-        .scalars(
+    assert status.withdrawn_count == 0
+    assert catalog.recipe_catalog_local_revisions([key])[key] == older
+    with sessions() as session:
+        [kept] = session.scalars(
             select(CatalogDocumentRevision.id).where(
                 CatalogDocumentRevision.slug == "other-recipe"
             )
-        )
-        .all()
-    )
-    assert catalog.get_recipe(kept).id == kept
+        ).all()
+        resolved = FleetProfileService._recipe_identity(session, "fixture/other-recipe")
+    assert isinstance(resolved, tuple)
+    assert resolved[1] == kept
 
 
 def test_an_unknown_blame_leaves_out_only_its_evidence_record() -> None:

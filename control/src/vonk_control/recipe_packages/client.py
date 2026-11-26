@@ -819,6 +819,7 @@ class RecipePackageClient:
             updated_at=envelope.updated_at,
             catalog_entities=catalog_entities,
             problems=tuple(problems),
+            withheld=reader.withheld,
             display_notes=(*reader.notes, *model_notes, *recipe_notes),
         ), packages
 

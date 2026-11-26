@@ -350,7 +350,7 @@ in both clients. A capability is served as its name (`LibraryModelDisplay`, the
 open `CapabilityName` in `schemas/vonkctl`), so the sync keeps one a newer
 contract minor added and a new capability needs no Controller or vonkctl
 release; an executed word it cannot keep withholds only that entry, with a
-note.
+note, and pauses retraction so its older revision stays offered.
 
 ## Deployment and fleet safety
 
