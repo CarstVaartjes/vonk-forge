@@ -165,7 +165,7 @@ PRODUCERS = {
             "deploy/compose/tailscale/configure.sh",
             "deploy/compose/tests/test.env",
             "install/installer-release-public.pem",
-            "inventory/wheels/vonk_forge_public_contracts-5.5.0-py3-none-any.whl",
+            "inventory/wheels/vonk_forge_public_contracts-5.6.0-py3-none-any.whl",
             "nas_setup/hatch_build.py",
             "nas_setup/pyproject.toml",
             "nas_setup/src/**",

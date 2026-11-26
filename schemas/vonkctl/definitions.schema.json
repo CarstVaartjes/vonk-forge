@@ -1879,6 +1879,7 @@
         "3d-generation",
         "audio-generation",
         "audio-understanding",
+        "background-removal",
         "chat",
         "code-generation",
         "decision",
