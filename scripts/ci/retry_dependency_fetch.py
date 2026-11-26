@@ -26,6 +26,7 @@ _COMMANDS = (
     ("skopeo", "inspect"),
     ("skopeo", "copy"),
     ("cosign", "verify"),
+    ("curl", "--fail"),
     ("docker", "pull"),
     ("docker", "buildx", "imagetools", "inspect"),
     ("git", "fetch"),

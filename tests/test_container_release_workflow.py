@@ -1816,9 +1816,7 @@ def test_every_litellm_build_verifies_the_locked_base_signature_first() -> None:
                 installs = [
                     earlier
                     for earlier in steps[:index]
-                    if str(earlier.get("uses", "")).startswith(
-                        "sigstore/cosign-installer@"
-                    )
+                    if earlier.get("uses") == "./.github/actions/install-cosign"
                 ]
                 assert installs, f"{path.name}:{name} does not install cosign"
     assert "ci.yml:nas-install" in sites
