@@ -120,15 +120,18 @@ def known_entries[E: (CatalogModelEntry, CatalogRecipeEntry)](
     section: CatalogSection,
     entries: Iterable[E],
     unknown: Mapping[tuple[CatalogSection, str], frozenset[str]],
-) -> tuple[list[E], list[ManagedCatalogSyncProblem]]:
+) -> tuple[list[E], list[ManagedCatalogSyncProblem], dict[str, frozenset[str]]]:
     """The entries with each unknown-word block rebuilt from known words.
 
     A block that cannot stand without its unknown words is withheld (``None``)
-    and noted once per block.
+    and noted once per block. The third value names those blocks per
+    ``publisher/slug``: this release cannot read them, so they are unknown, not
+    withdrawn, and a recorded value stays.
     """
 
     known: list[E] = []
     withheld: dict[tuple[str, str], list[str]] = {}
+    blocks: dict[str, set[str]] = {}
     for entry in entries:
         identity = entry.document.identity
         name = f"{identity.publisher}/{identity.slug}"
@@ -138,6 +141,7 @@ def known_entries[E: (CatalogModelEntry, CatalogRecipeEntry)](
                 update[block] = known_field(getattr(entry, block))
             except BlockWithheld as reason:
                 update[block] = None
+                blocks.setdefault(name, set()).add(block)
                 # Noted below, once per block and reason: never a silent absence.
                 withheld.setdefault((block, reason.reason), []).append(name)
         known.append(entry.model_copy(update=update) if update else entry)
@@ -147,7 +151,7 @@ def known_entries[E: (CatalogModelEntry, CatalogRecipeEntry)](
         )
         for (block, reason), names in withheld.items()
     ]
-    return known, notes
+    return known, notes, {name: frozenset(names) for name, names in blocks.items()}
 
 
 def published_documents(

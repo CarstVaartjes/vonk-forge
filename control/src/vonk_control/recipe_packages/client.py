@@ -747,10 +747,10 @@ class RecipePackageClient:
         )
         reader = catalog_read.report(read.problems)
         problems = list(reader.problems)
-        models, model_notes = catalog_read.known_entries(
+        models, model_notes, _ = catalog_read.known_entries(
             CatalogSection.MODELS, envelope.catalog_entities, reader.unknown
         )
-        recipes, recipe_notes = catalog_read.known_entries(
+        recipes, recipe_notes, recipe_withheld = catalog_read.known_entries(
             CatalogSection.RECIPES, envelope.recipes, reader.unknown
         )
         family_titles = {family.slug: family.title for family in envelope.families}
@@ -808,6 +808,7 @@ class RecipePackageClient:
                         if entry.served_capabilities is None
                         else tuple(str(word) for word in entry.served_capabilities)
                     ),
+                    withheld_blocks=recipe_withheld.get(key, frozenset()),
                 )
             )
         return RecipeLibrarySnapshot(

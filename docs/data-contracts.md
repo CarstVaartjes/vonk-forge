@@ -36,6 +36,15 @@ that no longer occurs fails as stale.
 | Published Model and Recipe | `vonk_forge_contracts` in the recipes checkout | none | `ModelDefinition`, `RecipeDefinition` in `generated.d.ts` | catalog, compiler |
 | Database rows | SQLAlchemy models, `control/src/vonk_control/models/` | none | none | Controller |
 
+The Controller's forward tolerance of a newer recipes minor is proven, not
+described: the recipes release ships a future vector (`future-canary-index.json`,
+in `SHA256SUMS`); FB's lock refresh (in progress) will verify it and place it in
+`control/tests/fixtures/`, which until then holds a stand-in built with the
+recipes tool; and both `control/tests/test_future_vector.py` and the clean-Spark lane read it with
+the Controller's index parser (see [Release acceptance before
+merge](testing-and-ci.md#release-acceptance-before-merge)). A new closed-word
+site in the contract is covered by the producer's schema walk with no list here.
+
 Regenerate everything with `scripts/dev/generate-agent-wire` (wire, installer
 release schema, `generated.rs`), `scripts/dev/generate-control-clients` (OpenAPI,
 Python and TypeScript clients, TypeScript vocabulary) and
