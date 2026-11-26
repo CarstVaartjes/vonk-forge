@@ -99,7 +99,7 @@ command to run next. With `--json` the error document carries `usage` and
 `recovery_actions`.
 `vonkctl --version` reports the installed build without Controller credentials.
 The [accepted CLI update command](../operators/cli-updates.md) checks the signed
-installer publication and applies an update only when requested.
+installer publication and applies an update only when requested. On stable, an accepted release with a different version is always an update; on dev, only changed content is.
 
 Human output shows current state, complete identifiers, blockers, and the next
 available action. Terminals too narrow for a table get stacked records; piped

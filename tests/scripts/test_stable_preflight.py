@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+import json
+import subprocess
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from types import ModuleType
+from typing import Any
+
+import pytest
+
 from tools.stable_preflight import (
     POLICIES,
     TWINS,
@@ -129,3 +138,60 @@ def test_each_source_input_is_checked() -> None:
     assert subjects == sorted(
         ["tag", "main-ancestry", "release", "image/worker", "image/litellm", "signers"]
     )
+
+
+def _script() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / "scripts/release/stable-preflight"
+    loader = SourceFileLoader("stable_preflight_script", str(path))
+    module = ModuleType(loader.name)
+    module.__file__ = str(path)
+    loader.exec_module(module)
+    return module
+
+
+def test_an_environment_without_a_branch_policy_reads_as_no_policies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _script()
+    answers = {
+        "": {"protection_rules": []},
+        "/secrets?per_page=100": {"secrets": []},
+        "/variables?per_page=100": {"variables": []},
+    }
+
+    def run(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        suffix = command[-1].removeprefix("repos/o/r/environments/e")
+        if suffix == "/deployment-branch-policies":
+            return subprocess.CompletedProcess(command, 1, "", "gh: HTTP 404")
+        return subprocess.CompletedProcess(command, 0, json.dumps(answers[suffix]), "")
+
+    monkeypatch.setattr(script.subprocess, "run", run)
+
+    state = script.environment_state("o/r", "e")
+
+    assert state is not None
+    assert state["policies"] == []
+
+
+def test_the_image_digest_is_read_for_linux_whatever_the_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _script()
+    monkeypatch.setattr(script.platform, "machine", lambda: "arm64")
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **_: Any) -> str:
+        commands.append(command)
+        if command[0] == "gh":
+            return ""
+        return "sha256:" + "c" * 64 + "\n"
+
+    monkeypatch.setattr(script, "run", run)
+
+    state = script.image_state("o/r", "api", "0" * 40)
+
+    assert state["attested"] is True
+    inspect = commands[0]
+    assert inspect[:2] == ["skopeo", "inspect"]
+    assert inspect[inspect.index("--override-os") + 1] == "linux"
+    assert inspect[inspect.index("--override-arch") + 1] == "arm64"

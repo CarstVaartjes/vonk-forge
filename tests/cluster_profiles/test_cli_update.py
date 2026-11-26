@@ -1057,6 +1057,10 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             }
             assert requests.count(wheel_path) == 2
             assert requests.count("/api/cli/contract") == 1
+            # The real installed METADATA equals the wheel's: no reinstall loop.
+            again = invoke([str(python), "-c", driver, origin, str(key)])
+            assert again.returncode == 0, again.stderr
+            assert json.loads(again.stdout)["updated"] is False
             assert "/api/platform" not in requests
             # uv's real tool receipt must now reference the installed accepted
             # bytes rather than retaining the initial fixture wheel.
@@ -1697,33 +1701,78 @@ def test_signed_download_total_deadline_ends_slow_drip_and_fresh_read_works():
             thread.join(timeout=30)
 
 
-def test_equal_package_bytes_reuse_across_different_provenance(tmp_path, monkeypatch):
-    key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
+def _run_with_installed(tmp_path, monkeypatch, *, channel, version="other", runs=2):
+    key, objects = _signed_publication(tmp_path, source_sha="b" * 40, channel=channel)
     wheel_bytes = next(value for url, value in objects.items() if url.endswith(".whl"))
     with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as archive:
         content_identity = cli_update.wheel_content_identity(archive)
     monkeypatch.setattr(
-        cli_update, "installed_content_identity", lambda: content_identity
+        cli_update,
+        "installed_content_identity",
+        lambda: content_identity,
     )
     monkeypatch.setattr(
         cli_update,
         "current_build",
-        lambda: {"version": "other", "source_sha": "c" * 40},
+        lambda: {"version": version, "source_sha": "c" * 40},
     )
     installs = []
-    monkeypatch.setattr(
-        cli_update, "_install", lambda *args, **kwargs: installs.append(args)
-    )
-    for _ in range(2):
-        result = cli_update.run_update(
-            channel="stable",
+
+    def install(*args, **kwargs):
+        installs.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(cli_update, "_install", install)
+    results = [
+        cli_update.run_update(
+            channel=channel,
             origin="https://install.vonkforge.ai",
             public_key=key,
             apply=True,
             download=lambda url, maximum: objects[url],
+            compatibility_observation=_controller_observation,
         )
-        assert result["updated"] is False
+        for _ in range(runs)
+    ]
+    return results, installs
+
+
+def test_equal_package_bytes_reuse_across_different_provenance_on_dev(
+    tmp_path, monkeypatch
+):
+    results, installs = _run_with_installed(tmp_path, monkeypatch, channel="dev")
+    assert [result["updated"] for result in results] == [False, False]
     assert installs == []
+
+
+def test_stable_installs_a_different_version_with_equal_bytes(tmp_path, monkeypatch):
+    results, installs = _run_with_installed(
+        tmp_path, monkeypatch, channel="stable", runs=1
+    )
+    assert results[0]["updated"] is True
+    assert len(installs) == 1
+
+
+def test_stable_keeps_equal_bytes_of_the_same_version(tmp_path, monkeypatch):
+    results, installs = _run_with_installed(
+        tmp_path, monkeypatch, channel="stable", version="1.2.3"
+    )
+    assert [result["updated"] for result in results] == [False, False]
+    assert installs == []
+
+
+def test_a_requires_python_only_change_is_new_content():
+    def wheel(requires: str) -> str | None:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("cluster_profiles/a.py", "x = 1\n")
+            archive.writestr("x-1.dist-info/METADATA", f"Name: x\n{requires}\n")
+        with zipfile.ZipFile(buffer) as archive:
+            return cli_update.wheel_content_identity(archive)
+
+    assert wheel("Requires-Python: >=3.14") == wheel("Requires-Python: >=3.14")
+    assert wheel("Requires-Python: >=3.14") != wheel("Requires-Python: >=3.15")
+    assert wheel("Requires-Dist: a>=1") != wheel("Requires-Dist: a>=2")
 
 
 def _script(tmp_path: Path, body: str) -> str:

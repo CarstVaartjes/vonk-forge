@@ -389,8 +389,16 @@ def run_update(
         and installed_content is not None
         and installed_content == target_content
     )
+    # Stable is labelled by version: an accepted release with another version
+    # is an update even when the bytes match (a quick, idempotent reinstall).
+    # Dev keeps the pure content rule.
+    relabel = channel == "stable" and current["version"] != release["version"]
+    if relabel:
+        equal_content = False
     result["update_available"] = (
-        not equal_content
+        True
+        if relabel
+        else not equal_content
         if target_content is not None and installed_content is not None
         else None
     )

@@ -214,6 +214,10 @@ def _inputs(
     cli_wheel = tmp_path / "vonk_cluster_profiles-0.1.1-py3-none-any.whl"
     with zipfile.ZipFile(cli_wheel, "w") as archive:
         archive.writestr(
+            "vonk_cluster_profiles-0.1.1.dist-info/METADATA",
+            "Metadata-Version: 2.4\nName: vonk-cluster-profiles\nRequires-Python: >=3.15\n",
+        )
+        archive.writestr(
             "cluster_profiles/build-identity.json",
             json.dumps(
                 {
