@@ -775,7 +775,7 @@ def check_prebuilt_key(ctx: CheckContext) -> None:
         ctx.python
         and not ctx.is_test
         and "prebuilt-key" in ctx.modes
-        and ctx.path.startswith("control/src/")
+        and ctx.path.startswith(("control/src/", "src/", "scripts/"))
         and not ctx.path.startswith(PREBUILT_KEY_INGEST)
     ):
         ctx.hits.extend(

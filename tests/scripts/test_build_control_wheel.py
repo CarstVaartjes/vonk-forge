@@ -13,7 +13,6 @@ SCRIPT = ROOT / "scripts/build-control-wheel"
 WHEEL_NAME = protocol_wheel_name(ROOT)
 _PREPARING_ACTIONS = {
     "./.github/actions/prepare-control-wheel",
-    "./.vonk-forge/.github/actions/prepare-control-wheel",
 }
 
 

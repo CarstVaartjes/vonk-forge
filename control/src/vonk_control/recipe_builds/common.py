@@ -385,9 +385,8 @@ def inspect_package_source_policy(
     """Apply the Controller's build source policy to a recipe and its context.
 
     ``prepare_plan`` runs the same :func:`inspect_build_source_policy` over the
-    same :func:`_source_policy_document`; the recipe library validation and the
-    prebuilt-image planner call this instead of a copy, so a recipe the
-    Controller would refuse can neither pass validation nor publish an image.
+    same :func:`_source_policy_document`; the recipe library validation calls this instead of a copy, so a recipe the
+    Controller would refuse cannot pass validation.
     ``source_sha256`` is the digest the catalog binds to the recipe, when it
     differs from the bundle's own.
     """

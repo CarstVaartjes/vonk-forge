@@ -25,12 +25,7 @@ from vonk_control.artifact_jobs.contracts import slot_input_media_type
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.gateway.litellm import LiteLlmPolicy, RouteState, render_config
 from vonk_control.gateway.route_bundle_contract import RouteAcceptedModelPolicy
-from vonk_control.prebuilt_images import (
-    _bundle_relative,
-    _library_recipe,
-    executable_build_key,
-    package_build_intent,
-)
+from vonk_control.prebuilt_images import _library_recipe
 from vonk_control.revision_images import revision_source_bundle
 
 from .catalog_dry_run import (
@@ -161,16 +156,6 @@ def test_build_identity_is_the_packaged_source_bundle(
     item, bundle = _library_recipe(ROOT, INDEX, RECIPES[slug])
     assert item.source_bundle_sha256 == bundle.sha256
     assert revision_source_bundle(dry_run.revision(_digest(slug))) == bundle.sha256
-    build = read_recipe(item.document).execution.build
-    intent = package_build_intent(
-        item.document,
-        source_bundle_sha256=bundle.sha256,
-        dockerfile_payload=dict(bundle.files)[
-            _bundle_relative(build.dockerfile, build.context.path)
-        ],
-    )
-    assert intent["source_bundle_sha256"] == bundle.sha256
-    executable_build_key(intent)
 
 
 @pytest.mark.parametrize("slug", _params())
