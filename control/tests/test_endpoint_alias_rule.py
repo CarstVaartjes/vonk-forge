@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib
 import pkgutil
 import types
-from typing import Annotated, Any, Union, cast, get_args, get_origin
+from typing import Any, Union, get_args, get_origin
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
@@ -63,7 +63,10 @@ def _models() -> list[type[BaseModel]]:
     while pending:
         model = pending.pop()
         pending.extend(model.__subclasses__())
-        if model.__module__.startswith(("vonk_control.", "cluster_profiles.")):
+        parametrized = model.__pydantic_generic_metadata__["origin"] is not None
+        if not parametrized and model.__module__.startswith(
+            ("vonk_control.", "cluster_profiles.")
+        ):
             found.append(model)
     return found
 
@@ -79,10 +82,7 @@ def _without_none(annotation: Any) -> Any:
 def _slot(model: type[BaseModel], name: str, part: str) -> TypeAdapter[Any]:
     field = model.model_fields[name]
     if part == "value":
-        annotation = field.annotation
-        if field.metadata:
-            annotation = Annotated[(annotation, *field.metadata)]
-        return TypeAdapter(cast(Any, annotation))
+        return TypeAdapter(field.rebuild_annotation())
     container = _without_none(field.annotation)
     return TypeAdapter(get_args(container)[0])
 
