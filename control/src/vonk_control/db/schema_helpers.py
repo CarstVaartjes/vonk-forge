@@ -351,23 +351,52 @@ class UndeclaredTableAction(StrEnum):
 
 
 def _undeclared_table_action(
-    stamp: str | None, current: Minor | None
+    stamp: str | None, current: Minor
 ) -> UndeclaredTableAction:
     """The one transition for an undeclared table.
 
     unstamped -> STAMP; stamped with this minor or newer -> KEEP; stamped with
-    an older minor -> DROP; an unparseable stamp is stamped again. An unknown
-    Controller minor keeps everything: keeping is the safe side.
+    an older minor -> DROP; an unparseable stamp is stamped again.
     """
 
-    if current is None:
-        return UndeclaredTableAction.KEEP
     found = _STAMP_PATTERN.fullmatch(stamp) if stamp else None
     if found is None:
         return UndeclaredTableAction.STAMP
     if current > (int(found[1]), int(found[2])):
         return UndeclaredTableAction.DROP
     return UndeclaredTableAction.KEEP
+
+
+def _undeclared_stamps(connection: Connection) -> dict[str, str]:
+    """The tables of the current schema that carry an undeclared stamp."""
+
+    return {
+        name: comment
+        for name, comment in connection.exec_driver_sql(
+            "SELECT c.relname, obj_description(c.oid, 'pg_class') FROM pg_class c "
+            "WHERE c.relkind = 'r' AND c.relnamespace = current_schema()::regnamespace"
+        )
+        if comment and comment.startswith(_UNDECLARED_STAMP)
+    }
+
+
+def _clear_declared_stamps(connection: Connection) -> None:
+    """Clear the stamp of a table the model declares again.
+
+    Runs before the differences are read, so the stale comment is not reported
+    as drift.
+    """
+
+    if connection.dialect.name != "postgresql":
+        return
+    quote = connection.dialect.identifier_preparer.quote
+    for table_name in sorted(
+        _undeclared_stamps(connection).keys() & set(Base.metadata.tables)
+    ):
+        connection.exec_driver_sql(f"COMMENT ON TABLE {quote(table_name)} IS NULL")
+        _LOGGER.info(
+            "Table %s is declared again; cleared its undeclared stamp", table_name
+        )
 
 
 def _reconcile_undeclared_tables(connection: Connection, ops: Any) -> None:
@@ -379,8 +408,7 @@ def _reconcile_undeclared_tables(connection: Connection, ops: Any) -> None:
     saw it undeclared and dropped by the first Controller of a later minor.
     Foreign keys go first so a RESTRICT key cannot block a delete; the drop has
     no CASCADE, so a table a declared table still references is refused, logged
-    and retried on the next start. A declared table that still carries a stamp
-    (it came back) has the stamp cleared.
+    and retried on the next start.
     """
 
     if connection.dialect.name != "postgresql":
@@ -389,20 +417,8 @@ def _reconcile_undeclared_tables(connection: Connection, ops: Any) -> None:
     inspector = inspect(connection)
     declared = set(Base.metadata.tables)
     undeclared = sorted(set(inspector.get_table_names()) - declared - _FOREIGN_TABLES)
-    stamps = {
-        name: comment
-        for name, comment in connection.exec_driver_sql(
-            "SELECT c.relname, obj_description(c.oid, 'pg_class') FROM pg_class c "
-            "WHERE c.relkind = 'r' AND c.relnamespace = current_schema()::regnamespace"
-        )
-        if comment and comment.startswith(_UNDECLARED_STAMP)
-    }
+    stamps = _undeclared_stamps(connection)
     quote = connection.dialect.identifier_preparer.quote
-    for table_name in sorted(stamps.keys() & declared):
-        connection.exec_driver_sql(f"COMMENT ON TABLE {quote(table_name)} IS NULL")
-        _LOGGER.info(
-            "Table %s is declared again; cleared its undeclared stamp", table_name
-        )
     for table_name in undeclared:
         for key in inspector.get_foreign_keys(table_name):
             name = key["name"]
@@ -416,18 +432,20 @@ def _reconcile_undeclared_tables(connection: Connection, ops: Any) -> None:
                 _LOGGER.warning(
                     "Could not drop foreign key %s.%s: %s", table_name, name, error
                 )
+    current = _CONTROLLER_MINOR
+    if current is None:
+        return  # unknown version: keep every table, drop none
     for table_name in undeclared:
-        action = _undeclared_table_action(stamps.get(table_name), _CONTROLLER_MINOR)
+        action = _undeclared_table_action(stamps.get(table_name), current)
         try:
             with connection.begin_nested():
                 if action is UndeclaredTableAction.DROP:
                     ops.drop_table(table_name)
                     _LOGGER.info("Dropped undeclared table %s", table_name)
                 elif action is UndeclaredTableAction.STAMP:
-                    major, minor = _CONTROLLER_MINOR or (0, 0)
                     connection.exec_driver_sql(
                         f"COMMENT ON TABLE {quote(table_name)} "
-                        f"IS '{_UNDECLARED_STAMP}{major}.{minor}'"
+                        f"IS '{_UNDECLARED_STAMP}{current[0]}.{current[1]}'"
                     )
                     _LOGGER.warning(
                         "Kept undeclared table %s until the next minor", table_name

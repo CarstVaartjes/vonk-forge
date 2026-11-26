@@ -380,15 +380,37 @@ def test_postgres_reconciliation_keeps_undeclared_table_for_one_minor(
                 "ON DELETE RESTRICT)"
             )
         )
+    with Session(postgres_engine) as session, session.begin():
+        session.add(AgentNode(node_id="n1", state="active"))
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO some_retired_table (id, node_id) VALUES ('r1', 'n1')")
+        )
+    # The second pass has the same minor and takes the KEEP branch.
+    for _ in range(2):
+        with postgres_engine.begin() as connection:
+            verify_schema_is_current(connection)
+        with postgres_engine.connect() as connection:
+            inspector = inspect(connection)
+            assert not inspector.get_foreign_keys("some_retired_table")
+            assert (
+                inspector.get_table_comment("some_retired_table")["text"]
+                == "vonk-undeclared-since 1.0"
+            )
+            assert (
+                connection.execute(
+                    text("SELECT id FROM some_retired_table")
+                ).scalar_one()
+                == "r1"
+            )
+    with postgres_engine.begin() as connection:
+        connection.execute(text("DELETE FROM agent_nodes WHERE node_id = 'n1'"))
+    # An unknown Controller version keeps the table and leaves it as it is.
+    monkeypatch.setattr(schema_helpers, "_CONTROLLER_MINOR", None)
     with postgres_engine.begin() as connection:
         verify_schema_is_current(connection)
     with postgres_engine.connect() as connection:
-        inspector = inspect(connection)
-        assert not inspector.get_foreign_keys("some_retired_table")
-        assert (
-            inspector.get_table_comment("some_retired_table")["text"]
-            == "vonk-undeclared-since 1.0"
-        )
+        assert "some_retired_table" in inspect(connection).get_table_names()
 
 
 def test_postgres_reconciliation_drops_older_stamp_and_clears_declared(

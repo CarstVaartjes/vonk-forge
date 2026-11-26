@@ -25,6 +25,7 @@ from vonk_control.db.schema_helpers import (
     SchemaDrift,
     SchemaDriftKind,
     _check_constraint_differences,
+    _clear_declared_stamps,
     _column_default_sql,
     _constraint_kind,
     _constraint_label,
@@ -64,6 +65,7 @@ def reconcile_schema(connection: Connection) -> None:
 
     exact_integer_adoption.adopt_exact_integer_columns(connection)
     ops = Operations(MigrationContext.configure(connection))
+    _clear_declared_stamps(connection)
     differences = _schema_differences(connection)
     drift: SchemaDrift = {kind: [] for kind in SchemaDriftKind}
     drift[SchemaDriftKind.UNHANDLED_DIFFERENCE].extend(
