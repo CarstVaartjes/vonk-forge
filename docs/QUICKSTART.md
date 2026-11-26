@@ -10,7 +10,7 @@ are optional; without an upstream key, local model routes still work.
 
 On Intel or ARM macOS or Linux, provide `curl`, `openssl` and installed
 `uv`, then run the signed installer. It verifies one portable Python setup
-wheel and its payload; `uv` manages the isolated Python 3.14 runtime:
+wheel and its payload; `uv` manages the isolated Python 3.15 runtime:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/nas | sh

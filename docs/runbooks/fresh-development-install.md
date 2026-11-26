@@ -19,7 +19,7 @@ policy never belong in an operator tailnet.
 
 On an Intel or ARM Linux or macOS workstation with `curl`, `openssl`
 and installed `uv`, run the command below. It verifies the exact Python NAS
-setup wheel and payload, then uses an isolated Python 3.14 environment:
+setup wheel and payload, then uses an isolated Python 3.15 environment:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/dev/nas | sh

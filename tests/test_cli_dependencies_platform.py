@@ -15,6 +15,7 @@ import pytest
 from tools import cli_dependencies
 
 ROOT = Path(__file__).resolve().parents[1]
+PYTHON = (ROOT / ".python-version").read_text().strip()
 
 
 def _build(env: Path, stamp: str | None) -> Path:
@@ -47,9 +48,9 @@ def test_matching_environment_is_accepted(
     "stamp",
     [
         None,
-        "darwin-arm64 python3.14\n"
+        f"darwin-arm64 python{PYTHON}\n"
         if cli_dependencies.platform_key() != "darwin-arm64"
-        else "linux-arm64 python3.14\n",
+        else f"linux-arm64 python{PYTHON}\n",
         f"{cli_dependencies.platform_key()} python2.7\n",
     ],
     ids=["unstamped", "other-platform", "other-interpreter"],

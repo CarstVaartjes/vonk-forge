@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "vonk-cluster-profiles"
 version = "0.1.1"
 description = "Vonk Forge cluster workload-profile contracts"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 dependencies = [
   "argon2-cffi>=25.1.0",
   "attrs>=26.1.0",
@@ -55,12 +55,16 @@ path = "tools/hatch_build.py"
 # The formatter writes PEP 758's `except A, B:`; the added-line guards read a
 # respelled header as the handler it replaces.
 target-version = "py314"
-# agent_protocol runs on the Sparks, which have Python 3.12. Files another
-# interpreter runs stay at 3.13 syntax: container scripts under deploy/ (the
-# LiteLLM image's Python), scripts and tests/nodes that a runner's or host's
-# system python3 starts, the stdlib-only tools module such scripts import, and
+# Py314 also makes Ruff reject PEP 810 `lazy import` as invalid syntax, which
+# enforces the no-lazy-imports rule; do not raise it to py315.
+# agent_protocol is pip-installed into the recipe adapter images (Ubuntu 24.04
+# system python3, 3.12; the Spark agent itself is Rust). Files another
+# interpreter runs stay at that interpreter's syntax: container scripts under
+# deploy/ (the LiteLLM image's Python, 3.13 syntax), and at 3.12 the scripts and
+# tests/nodes that a runner's or host's system python3 starts (ubuntu-24.04
+# python3 is 3.12), the stdlib-only tools module such scripts import, and
 # tests/acceptance, whose sources the Spark lane parses with the runner's 3.12.
-per-file-target-version = { "agent_protocol/**" = "py312", "deploy/**" = "py313", "scripts/**" = "py313", "tests/nodes/**" = "py313", "tests/acceptance/**" = "py313", "tools/generated_contracts.py" = "py313", "tools/litellm_surface.py" = "py313" }
+per-file-target-version = { "agent_protocol/**" = "py312", "deploy/**" = "py313", "scripts/**" = "py312", "tests/nodes/**" = "py312", "tests/acceptance/**" = "py312", "tools/generated_contracts.py" = "py312", "tools/litellm_surface.py" = "py313" }
 # Every extensionless executable in scripts/ and bin/ is Python unless excluded
 # here by name: a new shell script that is not listed fails Ruff loudly (a parse
 # error) instead of a new Python script being skipped silently.
@@ -171,7 +175,7 @@ exclude = ["scripts/dev/qualify-recipe", "scripts/images/reuse-development-image
 # One checker for the whole repository. scripts/dev/check-python-types runs it from
 # the control environment, which carries the union of both projects'
 # dependencies, so import resolution is complete.
-pythonVersion = "3.14"
+pythonVersion = "3.15"
 # The Controller and CI run Linux: a Mac hook checks the same platform.
 pythonPlatform = "Linux"
 typeCheckingMode = "standard"
@@ -198,7 +202,7 @@ exclude = [
     "**/.venv/**",
     "**/__pycache__/**",
 ]
-# The agent protocol runs on the Sparks, which have Python 3.12.
+# The agent protocol wheel runs on the recipe adapter images (system python3 3.12).
 executionEnvironments = [
     { root = "agent_protocol/src", pythonVersion = "3.12", extraPaths = ["agent_protocol/src"] },
     { root = "." },
