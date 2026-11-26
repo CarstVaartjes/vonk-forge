@@ -65,6 +65,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/scripts/test_stable_preflight.py",
+        "The stable preflight reports every kind of gap in the release settings once, by subject, and nothing for a complete shape.",
+    ),
+    (
         "tests/test_console_script_entry_points.py",
         "Every [project.scripts] target of the four pyprojects names a module file that defines its callable.",
     ),

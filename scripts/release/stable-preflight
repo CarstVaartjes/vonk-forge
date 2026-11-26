@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Check that a stable release tag can publish: a read-only preflight.
+
+Usage: stable-preflight --repo OWNER/REPO --tag vX.Y.Z --sha SHA
+                        [--reviewer-environment installer-acceptance-stable]
+
+It reads GitHub settings and the registry (``gh api`` GET requests, ``skopeo
+inspect`` and ``gh attestation verify``), prints every problem and exits 1 if
+there is any. It never writes GitHub or registry state. The checks live in
+``tools/stable_preflight.py``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import shlex
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from tools.stable_preflight import (  # noqa: E402 -- the repository import follows the repository root's sys.path entry
+    IMAGES,
+    POLICIES,
+    REVIEWER_ENVIRONMENTS,
+    TWINS,
+    EnvironmentState,
+    ImageState,
+    Snapshot,
+    check,
+)
+
+RELEASE_WORKFLOW = "installer-publication.yml"
+IMAGE_PREFIX = "ghcr.io/carstvaartjes/vonk-forge-"
+# The flags stable-release.yml passes when it validates each accepted image.
+SIGNER_WORKFLOW = ".github/workflows/dev-images.yml"
+
+
+class NotFound(Exception):
+    """The peer answered that the thing does not exist (or a check said no)."""
+
+
+def run(
+    command: list[str], *, missing: str | None = None, any_failure_is_no: bool = False
+) -> str:
+    """Run one command. ``missing`` is the stderr text that means "does not exist";
+    ``any_failure_is_no`` makes every non-zero exit a negative answer (a verifier).
+    A timeout, a missing tool or any other failure is RuntimeError: cannot read."""
+
+    try:
+        result = subprocess.run(
+            command, check=False, capture_output=True, text=True, timeout=120
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f"{command[0]} failed: {error}") from error
+    if result.returncode != 0:
+        if any_failure_is_no or (missing is not None and missing in result.stderr):
+            raise NotFound
+        raise RuntimeError(f"{' '.join(command[:3])} failed: {result.stderr.strip()}")
+    return result.stdout
+
+
+def api(path: str) -> Any:
+    # An explicit GET: this script never sends any other method.
+    return json.loads(run(["gh", "api", "-X", "GET", path], missing="HTTP 404"))
+
+
+def environment_state(repo: str, name: str) -> EnvironmentState | None:
+    base = f"repos/{repo}/environments/{name}"
+    try:
+        environment = api(base)
+    except NotFound:
+        return None
+    policies = api(f"{base}/deployment-branch-policies")
+    secrets = api(f"{base}/secrets?per_page=100")
+    variables = api(f"{base}/variables?per_page=100")
+    reviewers: list[str] = []
+    prevent_self_review: bool | None = None
+    for rule in environment["protection_rules"]:
+        if rule["type"] == "required_reviewers":
+            prevent_self_review = bool(rule.get("prevent_self_review"))
+            reviewers += [item["reviewer"]["login"] for item in rule["reviewers"]]
+    return {
+        "policies": [f"{p['type']}:{p['name']}" for p in policies["branch_policies"]],
+        "secrets": [item["name"] for item in secrets["secrets"]],
+        "variables": {item["name"]: item["value"] for item in variables["variables"]},
+        "reviewers": reviewers,
+        "prevent_self_review": prevent_self_review,
+    }
+
+
+def file_text(repo: str, path: str, ref: str) -> str:
+    content = api(f"repos/{repo}/contents/{path}?ref={ref}")
+    return base64.b64decode(content["content"]).decode()
+
+
+def image_state(repo: str, name: str, sha: str) -> ImageState:
+    image = f"{IMAGE_PREFIX}{name}"
+    try:
+        digest = run(
+            [
+                *shlex.split("skopeo inspect --format {{.Digest}}"),
+                f"docker://{image}:dev-sha-{sha}",
+            ],
+            missing="manifest unknown",
+        ).strip()
+    except NotFound:
+        return {"digest": None, "attested": False}
+    try:
+        run(
+            [
+                *shlex.split("gh attestation verify"),
+                f"oci://{image}@{digest}",
+                *("--repo", repo),
+                *("--signer-workflow", f"{repo}/{SIGNER_WORKFLOW}"),
+                *("--signer-digest", sha),
+                *("--source-digest", sha),
+                *("--source-ref", "refs/heads/main"),
+                "--deny-self-hosted-runners",
+            ],
+            any_failure_is_no=True,
+        )
+    except NotFound:
+        return {"digest": digest, "attested": False}
+    return {"digest": digest, "attested": True}
+
+
+def release_conclusion(repo: str, sha: str) -> str | None:
+    runs = api(
+        f"repos/{repo}/actions/workflows/{RELEASE_WORKFLOW}/runs"
+        f"?head_sha={sha}&branch=main&status=completed&per_page=20"
+    )["workflow_runs"]
+    conclusions = [item["conclusion"] for item in runs]
+    return "success" if "success" in conclusions else (conclusions or [None])[0]
+
+
+def snapshot(repo: str, tag: str, sha: str) -> Snapshot:
+    variables = api(f"repos/{repo}/actions/variables?per_page=100")["variables"]
+    cargo = tomllib.loads(file_text(repo, "Cargo.toml", sha))
+    signers = api(f"repos/{repo}/contents/.github/release-allowed-signers?ref=main")
+    return {
+        "tag": tag,
+        "sha": sha,
+        "variables": {item["name"]: item["value"] for item in variables},
+        "environments": {
+            name: environment_state(repo, name) for name in (*POLICIES, *TWINS)
+        },
+        "workspace_version": cargo["workspace"]["package"]["version"],
+        "behind_by": api(f"repos/{repo}/compare/{sha}...main")["behind_by"],
+        "release_conclusion": release_conclusion(repo, sha),
+        "images": {name: image_state(repo, name, sha) for name in IMAGES},
+        "signers_bytes": signers["size"],
+    }
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        description="Read-only check that a stable release tag can publish."
+    )
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--tag", required=True)
+    parser.add_argument("--sha", required=True)
+    parser.add_argument(
+        "--reviewer-environment",
+        choices=REVIEWER_ENVIRONMENTS,
+        default="installer-acceptance-stable",
+        help="the environment that carries the owner reviewer (Q1a or Q1b)",
+    )
+    parser.add_argument(
+        "--owner", default=None, help="reviewer login; default repo owner"
+    )
+    args = parser.parse_args(argv)
+    owner = args.owner or args.repo.split("/")[0]
+    try:
+        state = snapshot(args.repo, args.tag, args.sha)
+    except (RuntimeError, NotFound, KeyError, ValueError) as error:
+        print(f"cannot read the release state: {error!r}", file=sys.stderr)
+        return 2
+    problems = check(state, owner=owner, reviewer_environment=args.reviewer_environment)
+    for problem in problems:
+        print(f"{problem.subject}: {problem.detail}")
+    print(f"{len(problems)} problem(s)", file=sys.stderr)
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
