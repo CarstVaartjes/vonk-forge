@@ -677,7 +677,7 @@ def test_engine_metrics_vector_readings_are_valid_wire_readings(sample) -> None:
     assert json.loads(canonical_message(reading)) == sample["expected"]
 
 
-def _engine_window(telemetry, *, ratio_at, minutes=16, pending_from=0):
+def _engine_window(telemetry, *, ratio_at, minutes=16, pending_from=0, now_after=0):
     """Readings one minute apart for one run; returns (window, since, stalled)."""
     repository, sessions, _engine, clock = telemetry
     run = "55555555-5555-4555-8555-555555555555"
@@ -707,7 +707,7 @@ def _engine_window(telemetry, *, ratio_at, minutes=16, pending_from=0):
                 ),
             ),
         )
-    since = clock.now - ENGINE_STALL_WINDOW
+    since = clock.now + timedelta(minutes=now_after) - ENGINE_STALL_WINDOW
     with sessions() as session:
         windows = repository.engine_windows_in_session(session, [NODE_A], since)
     return not_progressing(windows[(NODE_A, run)], since)
@@ -729,3 +729,8 @@ def test_work_pending_only_late_in_the_window_is_not_judged(telemetry) -> None:
 
 def test_readings_covering_a_short_stretch_are_not_judged(telemetry) -> None:
     assert _engine_window(telemetry, ratio_at=None, minutes=5) is False
+
+
+def test_readings_that_stopped_early_in_the_window_are_not_judged(telemetry) -> None:
+    # Flat and pending, but nothing was received for the last 10 minutes.
+    assert _engine_window(telemetry, ratio_at=None, minutes=6, now_after=10) is False

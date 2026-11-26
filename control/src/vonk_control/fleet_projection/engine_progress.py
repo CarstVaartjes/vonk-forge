@@ -8,8 +8,9 @@ has no reading parser gives no verdict.
 The test is a change test, never a threshold: the KV ratio of a short request
 is a fraction of a percent. A run is not progressing only when all of these hold:
 
-- Coverage: the readings reach back to the start of the window, within a minute
-  of slack, so a run that only just started reporting is never judged.
+- Coverage: the readings reach both ends of the window, within a minute of
+  slack, so a run that only just started reporting, or whose readings stopped
+  early, is never judged.
 - Pending: requests are running or waiting in every reading, so an idle run is
   never judged.
 - Flat: none of the progress fields (the token counters, the end-to-end request
@@ -43,9 +44,11 @@ ENGINE_STALL_COVERAGE_SLACK = timedelta(seconds=60)
 
 
 def not_progressing(window: EngineWindow, since: datetime) -> bool:
+    until = since + ENGINE_STALL_WINDOW
     ranges = [span for span in window.progress_ranges if span is not None]
     return (
         window.oldest_received_at <= since + ENGINE_STALL_COVERAGE_SLACK
+        and window.newest_received_at >= until - ENGINE_STALL_COVERAGE_SLACK
         and window.pending_readings == window.readings
         and window.pending_min >= 1
         and bool(ranges)
@@ -53,13 +56,26 @@ def not_progressing(window: EngineWindow, since: datetime) -> bool:
     )
 
 
-def not_progressing_warning(title: str) -> ProjectionReason:
+def not_progressing_warning(
+    title: str, gpu_utilization_percent: float | None, gpu_power_watts: float | None
+) -> ProjectionReason:
     minutes = int(ENGINE_STALL_WINDOW.total_seconds() // 60)
+    gpu = "".join(
+        text
+        for text in (
+            None
+            if gpu_utilization_percent is None
+            else f" GPU utilisation {gpu_utilization_percent:.0f}%.",
+            None if gpu_power_watts is None else f" GPU power {gpu_power_watts:.0f} W.",
+        )
+        if text is not None
+    )
     return ProjectionReason(
         code=ProjectionCode.RUN_NOT_PROGRESSING,
-        detail=f"{title}: requests are pending but the engine showed no progress for {minutes} minutes."[
-            :256
-        ],
+        detail=(
+            f"{title}: requests are pending but the engine showed no progress "
+            f"for {minutes} minutes.{gpu}"
+        )[:256],
         severity=ProfileReasonSeverity.WARNING.value,
         recommendation=(
             "Look at the run's logs and, for a multi-node run, the fabric. "

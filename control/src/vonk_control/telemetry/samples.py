@@ -184,6 +184,7 @@ class EngineWindow:
     """
 
     oldest_received_at: datetime
+    newest_received_at: datetime
     readings: int
     #: Readings that report both requests running and waiting.
     pending_readings: int
@@ -504,6 +505,7 @@ class TelemetryRepository:
                 NodeTelemetrySample.node_id,
                 NodeEngineSample.run_id,
                 func.min(NodeTelemetrySample.received_at),
+                func.max(NodeTelemetrySample.received_at),
                 func.count(),
                 func.count(pending),
                 func.min(pending),
@@ -527,12 +529,13 @@ class TelemetryRepository:
         windows: dict[tuple[str, str], EngineWindow] = {}
         for result in rows:
             row: tuple[Any, ...] = tuple(result)
-            ranges = row[6:]
+            ranges = row[7:]
             windows[(row[0], row[1])] = EngineWindow(
                 oldest_received_at=_stored_utc(row[2]),
-                readings=row[3],
-                pending_readings=row[4],
-                pending_min=0 if row[5] is None else int(row[5]),
+                newest_received_at=_stored_utc(row[3]),
+                readings=row[4],
+                pending_readings=row[5],
+                pending_min=0 if row[6] is None else int(row[6]),
                 progress_ranges=tuple(
                     None if low is None else (low, high)
                     for low, high in zip(ranges[0::2], ranges[1::2], strict=True)

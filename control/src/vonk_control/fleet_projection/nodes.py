@@ -340,7 +340,11 @@ def _node(
         )
     stall_since = current - ENGINE_STALL_WINDOW
     warnings.extend(
-        not_progressing_warning(value.title or value.alias or value.run_id)
+        not_progressing_warning(
+            value.title or value.alias or value.run_id,
+            None if telemetry is None else telemetry.gpu_utilization_percent,
+            None if telemetry is None else telemetry.gpu_power_watts,
+        )
         for value in loaded
         if (window := (engine_windows or {}).get(value.run_id)) is not None
         and not_progressing(window, stall_since)
