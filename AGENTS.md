@@ -252,6 +252,9 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
   use their authoritative nested Pydantic models, validated on every persisted
   read and write; generate OpenAPI and the Python/TypeScript clients, and
   generate Rust wire structures with typify from the Pydantic JSON Schemas.
+- The Rust toolchain version lives only in `rust-toolchain.toml` (plus `rust-version` in the
+  root `Cargo.toml`). Workflows run bare `rustup toolchain install`; scripts read the file.
+  Agent builds stay on `ubuntu-24.04` (Spark glibc baseline).
 - Rust lint levels live only in `[workspace.lints]` of the root `Cargo.toml` and
   `clippy.toml`; a crate inherits them. Silence a lint only with a narrow
   `#[expect(lint, reason = "...")]`, never `#[allow]`. Take an exclusive file lock

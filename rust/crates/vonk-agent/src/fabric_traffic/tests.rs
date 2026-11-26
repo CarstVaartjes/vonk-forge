@@ -8,6 +8,19 @@ const VECTOR: &str = include_str!(
     "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/fabric-devices-v1.json"
 );
 
+/// The error files the vector's `counters` lists, in order: six RDMA
+/// `hw_counters`, then the netdev's `statistics`.
+const ERROR_COUNTERS: [&str; 8] = [
+    "packet_seq_err",
+    "local_ack_timeout_err",
+    "rnr_nak_retry_err",
+    "implied_nak_seq_err",
+    "req_transport_retries_exceeded",
+    "rx_icrc_encapsulated",
+    "rx_errors",
+    "tx_errors",
+];
+
 /// A sysfs shaped like a Spark's: devices under `class/infiniband`, each with
 /// a `device` link to its PCI function under `devices`.
 fn sysfs(devices: &serde_json::Value, reading: &str) -> tempfile::TempDir {
@@ -28,6 +41,16 @@ fn sysfs(devices: &serde_json::Value, reading: &str) -> tempfile::TempDir {
         )
         .unwrap();
         let [rx, tx] = [0, 1].map(|index| device[reading][index].as_u64().unwrap());
+        fs::write(class.join("ports/1/rate"), device["rate"].as_str().unwrap()).unwrap();
+        let hw = class.join("ports/1/hw_counters");
+        let netdev = pci.join("net/eth0/statistics");
+        fs::create_dir_all(&hw).unwrap();
+        fs::create_dir_all(&netdev).unwrap();
+        for (index, name) in ERROR_COUNTERS.iter().enumerate() {
+            let value = device["counters"][reading][index].as_u64().unwrap();
+            let dir = if index < 6 { &hw } else { &netdev };
+            fs::write(dir.join(name), value.to_string()).unwrap();
+        }
         fs::write(class.join("ports/1/counters/port_rcv_data"), rx.to_string()).unwrap();
         fs::write(
             class.join("ports/1/counters/port_xmit_data"),
@@ -48,7 +71,8 @@ fn the_shared_sample_reads_as_the_shared_deltas() {
     assert!(
         meter
             .observe_at(&first.path().join("class/infiniband"), start)
-            .is_empty()
+            .is_empty(),
+        "unexpected content"
     );
     let second = sysfs(&sample["devices"], "second");
     let window = Duration::from_secs(sample["window_seconds"].as_u64().unwrap());
@@ -86,4 +110,24 @@ fn a_counter_that_went_backwards_is_skipped() {
     // Only the device whose counters stayed (at zero) has a delta.
     assert_eq!(observed.len(), 1);
     assert_eq!(observed[0].port, "01:00.0");
+}
+
+#[test]
+fn an_error_counter_that_went_backwards_is_unknown_but_the_bytes_stay() {
+    let vector: serde_json::Value = serde_json::from_str(VECTOR).unwrap();
+    let devices = &vector["agent_sample"]["devices"];
+    let meter = Meter::default();
+    let start = Instant::now();
+    let first = sysfs(devices, "first");
+    meter.observe_at(&first.path().join("class/infiniband"), start);
+    let second = sysfs(devices, "second");
+    // The first device read 5 packet_seq_err before; now 4.
+    let class = second.path().join("class/infiniband/rocep1s0f1");
+    fs::write(class.join("ports/1/hw_counters/packet_seq_err"), "4").unwrap();
+    let observed = meter.observe_at(
+        &second.path().join("class/infiniband"),
+        start + Duration::from_secs(120),
+    );
+    let device = observed.iter().find(|d| d.bytes == 3_200_000_000).unwrap();
+    assert_eq!(device.errors, None);
 }

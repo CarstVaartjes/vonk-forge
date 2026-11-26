@@ -553,7 +553,7 @@ fn an_undecodable_byte_cannot_move_the_anchor_out_of_the_stream() {
     let (_, end, _, _) = last_failure_line(&stream).expect("the capture has a header");
     assert!(end <= stream.len(), "{end} > {}", stream.len());
     let tail = retain(&stream);
-    assert!(!tail.text.is_empty());
+    assert!(!tail.text.is_empty(), "{:?}", tail.text);
     // The declared bound is characters. An undecodable byte becomes one
     // replacement character, so the window can never decode into more
     // characters than the bytes it selected; only its byte weight grows.

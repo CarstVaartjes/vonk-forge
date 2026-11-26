@@ -520,8 +520,7 @@ fn sweep_with(
     let projection = retention_projection(data_root);
     let keep = projection
         .as_ref()
-        .map(|request| request.protected_model_objects.iter().cloned().collect())
-        .unwrap_or_default();
+        .map_or_default(|request| request.protected_model_objects.iter().cloned().collect());
     let current = untracked.and_then(|verdict| verdict.retention.as_ref());
     if let Some(retention) = read_retention(data_root).filter(|request| Some(request) == current) {
         let requested: BTreeSet<_> = retention.remove_model_objects.into_iter().collect();
@@ -708,8 +707,7 @@ pub fn unused_model_bytes(data_root: &Path) -> Option<u64> {
         return None;
     }
     let keep = retention_projection(data_root)
-        .map(|request| request.protected_model_objects.into_iter().collect())
-        .unwrap_or_default();
+        .map_or_default(|request| request.protected_model_objects.into_iter().collect());
     Some(
         unused_model_objects(data_root, owner, &keep)?
             .iter()

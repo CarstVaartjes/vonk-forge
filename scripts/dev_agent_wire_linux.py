@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import uuid
 from pathlib import Path
 
@@ -56,7 +57,9 @@ BASE_IMAGE = (
     "ubuntu:24.04@sha256:"
     "68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac"
 )
-RUST_TOOLCHAIN = "1.98.1"
+RUST_TOOLCHAIN = tomllib.loads(
+    (REPO_ROOT / "rust-toolchain.toml").read_text(encoding="utf-8")
+)["toolchain"]["channel"]
 UV_VERSION = (REPO_ROOT / ".tool-versions").read_text().split()[1]
 PYTHON_VERSION = "3.14"
 RECIPE_REVISION_FILE = Path("tests/acceptance/recipe-library-revision.txt")
@@ -142,26 +145,12 @@ def lane_contract(workflow_text: str, root: Path | None = None) -> dict[str, obj
         for command in run_commands(job)
         if "run_agent_wire_contracts.py" in command and "--build-only" not in command
     ]
-    # The toolchain has one owner: rust-toolchain.toml, which the setup-rust
-    # action installs; a job that installs it inline names its own.
-    toolchain = None
-    if root is not None and "./.github/actions/setup-rust" in job:
-        channel = re.search(
-            r'^\s*channel\s*=\s*"([^"]+)"',
-            (root / "rust-toolchain.toml").read_text(encoding="utf-8"),
-            re.MULTILINE,
-        )
-        toolchain = channel.group(1) if channel else None
-    rust = re.search(r"rustup toolchain install (\S+)", job)
-    if toolchain is None and rust:
-        toolchain = rust.group(1)
     uv = re.search(r"^\s*version-file:\s*(\S+)\s*$", job, re.MULTILINE)
     python = re.search(r'^\s*python-version:\s*"([^"]+)"\s*$', job, re.MULTILINE)
     runner = re.search(r"^\s*runs-on:\s*(\S+)\s*$", job, re.MULTILINE)
     revision = re.search(r"cat\s+(tests/acceptance/recipe-library-revision\.txt)", job)
     return {
         "tier_commands": tier_commands,
-        "rust_toolchain": toolchain,
         "uv_version": (root / uv.group(1)).read_text().split()[1]
         if uv and root is not None
         else None,
@@ -197,7 +186,6 @@ def check_lane_consistency(root: Path) -> list[str]:
         )
 
     comparisons = (
-        ("Rust toolchain", RUST_TOOLCHAIN, contract["rust_toolchain"]),
         ("uv version", UV_VERSION, contract["uv_version"]),
         ("Python version", PYTHON_VERSION, contract["python_version"]),
         ("runner image", CI_RUNNER.replace(":", "-"), contract["runner"]),

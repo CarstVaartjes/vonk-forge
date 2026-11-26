@@ -41,7 +41,7 @@ fn usable_swap_matches_the_python_vectors() {
     ))
     .unwrap();
     let usable = vectors["usable"].as_array().unwrap();
-    assert!(!usable.is_empty());
+    assert!(!usable.is_empty(), "{usable:?}");
     for pair in usable {
         assert_eq!(
             usable_swap_bytes(pair["total_bytes"].as_u64().unwrap()),

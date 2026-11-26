@@ -40,14 +40,12 @@ fn helper_rejection_message(code: HelperErrorCode, diagnostic: Option<&str>) -> 
     if code != HelperErrorCode::RuntimeProcessExited {
         return format!("host runtime helper rejected request: {code}");
     }
-    let facts = diagnostic
-        .map(|detail| {
-            crate::failure_evidence::exit_facts(detail)
-                .map(|(key, value)| format!("{key}={value}"))
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .unwrap_or_default();
+    let facts = diagnostic.map_or_default(|detail| {
+        crate::failure_evidence::exit_facts(detail)
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    });
     if facts.is_empty() {
         "the workload process exited".to_owned()
     } else {

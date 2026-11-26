@@ -667,8 +667,7 @@ jobs:
         run: |
           set -euo pipefail
           rustup set profile minimal
-          rustup toolchain install 1.98.1
-          rustup default 1.98.1
+          rustup toolchain install
           rustup target add aarch64-unknown-linux-gnu
 
       - name: Restore native renewal proof dependencies

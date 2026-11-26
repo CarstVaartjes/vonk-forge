@@ -174,8 +174,14 @@ async fn process_death_at_four_boundaries_recovers_on_an_idle_tick_without_execu
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].fence, claim.fence);
             assert_eq!(results[0].state, AgentResultState::Succeeded);
-            assert!(state.observation_claims().unwrap().is_empty());
-            assert!(state.pending_results().unwrap().is_empty());
+            assert!(
+                state.observation_claims().unwrap().is_empty(),
+                "unexpected content"
+            );
+            assert!(
+                state.pending_results().unwrap().is_empty(),
+                "unexpected content"
+            );
             if point == 3 {
                 let sent: AgentResult = vonk_agent_protocol::parse_strict(
                     &fs::read(root.join("received.json")).unwrap(),

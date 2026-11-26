@@ -250,7 +250,7 @@ fn system_runner_streams_a_large_artifact_to_a_bounded_preopened_file() {
         .unwrap();
 
     assert!(output.success);
-    assert!(output.stdout.is_empty());
+    assert!(output.stdout.is_empty(), "{:?}", output.stdout);
     assert_eq!(sink.metadata().unwrap().len(), 1024 * 1024);
     sink.seek(SeekFrom::Start(0)).unwrap();
     let mut sample = [0_u8; 16];

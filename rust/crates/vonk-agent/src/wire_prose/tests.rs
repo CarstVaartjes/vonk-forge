@@ -82,7 +82,7 @@ fn no_host_path_leaves_the_agent_in_any_result_form() {
             let sent = serde_json::to_value(wire_result(&result)).unwrap();
             let mut prose = Vec::new();
             prose_leaves(&sent, &mut prose);
-            assert!(!prose.is_empty());
+            assert!(!prose.is_empty(), "{prose:?}");
             for text in &prose {
                 assert!(!text.contains(['/', '\\']), "{operation:?}: {text}");
             }

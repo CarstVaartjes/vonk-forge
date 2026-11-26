@@ -63,14 +63,14 @@ class TelemetryWireModel(WireModel):
     pass
 
 
-_COUNTER_MAX = 2**63 - 1
+COUNTER_MAX = 2**63 - 1
 
 
 def _counter() -> Any:
     """A monotonic whole-number reading (per boot, or per engine process)."""
 
     return Field(
-        default=None, ge=0, le=_COUNTER_MAX, exclude_if=lambda value: value is None
+        default=None, ge=0, le=COUNTER_MAX, exclude_if=lambda value: value is None
     )
 
 

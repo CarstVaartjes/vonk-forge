@@ -510,7 +510,7 @@ pub fn spawn(data_root: PathBuf) {
         let mut reported = BTreeSet::new();
         loop {
             let now = Instant::now();
-            let known = active.lock().map(|known| known.clone()).unwrap_or_default();
+            let known = active.lock().map_or_default(|known| known.clone());
             let ids: Vec<String> = known.keys().cloned().collect();
             reported.retain(|id| known.contains_key(id));
             if ids != previous {
@@ -523,14 +523,13 @@ pub fn spawn(data_root: PathBuf) {
             let driver_targets = driver_failure
                 .as_ref()
                 .filter(|(event, _)| decision::driver_line_counts(*event, now))
-                .map(|(_, targets)| {
+                .map_or_default(|(_, targets)| {
                     targets
                         .iter()
                         .filter(|id| ids.contains(id))
                         .cloned()
                         .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+                });
             let sample = read_sample(|path| fs::read_to_string(path));
             let loading = crate::page_cache::loading(now);
             if let Some(trigger) = decision.observe(

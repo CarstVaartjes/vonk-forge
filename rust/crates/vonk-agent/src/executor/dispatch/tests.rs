@@ -96,7 +96,10 @@ async fn a_refusal_past_its_cool_down_is_offered_again_and_never_holds_the_claim
     assert!(results.iter().any(|result| result == &retained));
     assert!(results.iter().any(|result| result.fence == fresh.fence));
     // The Controller accepted it this time: acknowledged, refusal cleared.
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        state.pending_results().unwrap().is_empty(),
+        "unexpected content"
+    );
     assert_eq!(state.retained_rejection(&retained).unwrap(), None);
 }
 

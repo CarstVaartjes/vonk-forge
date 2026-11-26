@@ -302,7 +302,7 @@ def _wrapper(kind: DocumentKind) -> Any:
                 __module__=__name__,
                 schema_version=stamp,
                 result_kind=(cast(Any, Literal)[result_kind], ...),
-                result=(_OBSERVED[result_kind], ...),
+                result=(cast(Any, _OBSERVED[result_kind]), ...),
             )
             for result_kind in _RESULT_KINDS
         ]
@@ -313,7 +313,7 @@ def _wrapper(kind: DocumentKind) -> Any:
         __module__=__name__,
         schema_version=stamp,
         result_kind=(DocumentKind | None, None),
-        result=(Optional[Union[tuple(_OBSERVED.values())]], None),  # noqa: UP007, UP045
+        result=(cast(Any, Optional[Union[tuple(_OBSERVED.values())]]), None),  # noqa: UP007, UP045
     )
 
 

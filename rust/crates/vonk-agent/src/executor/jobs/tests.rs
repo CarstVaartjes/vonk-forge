@@ -550,7 +550,7 @@ fn job_start_preparation_reports_the_runtime_step_that_stopped_it() {
         &error,
     );
     assert_eq!(stage, FailureStage::JobInputs);
-    assert!(!cause.is_empty());
+    assert!(!cause.is_empty(), "{cause:?}");
     // An error that names no step of its own keeps the caller's step.
     let (stage, _) = local_step(
         FailureStage::RunStorage,

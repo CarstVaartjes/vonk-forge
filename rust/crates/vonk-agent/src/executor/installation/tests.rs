@@ -48,7 +48,7 @@ async fn uninstall_after_observation(damage: bool) {
         .filter(|artifact| artifact["model"]["content_sha256"] == model_content_sha256)
         .map(|artifact| store.join(artifact["sha256"].as_str().unwrap()))
         .collect();
-    assert!(!stored_model.is_empty());
+    assert!(!stored_model.is_empty(), "{stored_model:?}");
     for object in &stored_model {
         fs::write(object, b"model bytes").unwrap();
     }

@@ -32,6 +32,7 @@ _COMMANDS = (
     ("npm", "ci"),
     ("cargo", "fetch"),
     ("rustup", "toolchain", "install"),
+    ("rustup", "component", "add"),
     ("playwright", "install"),
 )
 _PERMANENT = re.compile(

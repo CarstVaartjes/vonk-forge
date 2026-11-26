@@ -54,7 +54,7 @@ fn both_devices_of_one_cabled_port_are_launched_in_a_fixed_order() {
     let address = "192.168.100.10".parse().unwrap();
     let binding = resolve(&sysfs, "enp1s0f1np1", address).unwrap();
     assert_eq!(binding.launch_hca, "=rocep1s0f1:1,roceP2p1s0f1:1");
-    assert!(binding.notes.is_empty());
+    assert!(binding.notes.is_empty(), "{:?}", binding.notes);
     // The identity names the link's own device only, so a missing or
     // recovered second rail never changes what a run is.
     assert_eq!(binding.identity_hca(), "NCCL_IB_HCA==rocep1s0f1:1");
@@ -150,7 +150,7 @@ fn devices_on_other_ports_or_models_are_never_mixed_in() {
     let address = "192.168.100.10".parse().unwrap();
     let binding = resolve(&sysfs, "enp1s0f1np1", address).unwrap();
     assert_eq!(binding.launch_hca, "=rocep1s0f1:1,roceP2p1s0f1:1");
-    assert!(binding.notes.is_empty());
+    assert!(binding.notes.is_empty(), "{:?}", binding.notes);
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn a_device_without_a_pci_function_gets_one_rail_and_no_note() {
     gid(&sysfs, "rxe0", "3", "::ffff:192.168.100.10", "RoCE v2");
     let binding = resolve(&sysfs, "enp1s0f1np1", "192.168.100.10".parse().unwrap()).unwrap();
     assert_eq!(binding.launch_hca, "=rxe0:1");
-    assert!(binding.notes.is_empty());
+    assert!(binding.notes.is_empty(), "{:?}", binding.notes);
 }
 
 #[test]

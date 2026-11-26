@@ -443,7 +443,7 @@ jobs:
           contracts: none
           cli-dependencies: "false"
       - name: Install pinned native Rust toolchain
-        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
+        run: scripts/retry-dependency-fetch rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: linux-arm64-candidate
@@ -460,7 +460,6 @@ jobs:
           VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
         run: |
           set -euo pipefail
-          rustup default 1.98.1
           scripts/materialize-agent-tools --output-root target
           key="$RUNNER_TEMP/agent-key.pem"
           trap 'rm -f -- "$key"' EXIT

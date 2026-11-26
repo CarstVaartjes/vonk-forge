@@ -118,6 +118,7 @@ async fn a_hung_or_oversized_engine_is_omitted_and_the_others_answer() {
     assert!(
         scrape_engines(&directory.path().join("missing"), SCRAPE_DEADLINE)
             .await
-            .is_empty()
+            .is_empty(),
+        "unexpected content"
     );
 }

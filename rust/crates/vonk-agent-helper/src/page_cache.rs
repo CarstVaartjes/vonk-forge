@@ -157,13 +157,10 @@ pub fn drop_page_cache(
             |bytes| bytes.to_string(),
         )
     };
-    let synced = synced
-        .map(|sync| format!(" sync={sync}"))
-        .unwrap_or_default();
+    let synced = synced.map_or_default(|sync| format!(" sync={sync}"));
     let refused = report
         .problem
-        .map(|problem| format!(" problem={problem}"))
-        .unwrap_or_default();
+        .map_or_default(|problem| format!(" problem={problem}"));
     eprintln!(
         "vonk-agent-helper: page cache drop request={request_id} cached_before_bytes={} cached_after_bytes={} mem_available_after_bytes={}{synced}{refused}",
         known(report.cached_before_bytes),

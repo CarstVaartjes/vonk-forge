@@ -198,7 +198,7 @@ async fn an_unowned_container_is_stopped_and_retired_and_a_known_one_is_left_alo
         "the known run must get no stop request"
     );
     assert_eq!(world.controller.grants(), vec![unowned.to_string()]);
-    assert!(world.controller.refusals().is_empty());
+    assert!(world.controller.refusals().is_empty(), "unexpected content");
     assert!(
         !world.lifecycle(unowned).exists(),
         "the claim was not retired"
@@ -261,7 +261,7 @@ async fn an_unreachable_or_refusing_controller_stops_nothing_and_the_next_cycle_
     world.controller.refuse_grants(true);
     cycle(&executor).await;
     assert_eq!(world.controller.refusals(), vec![run.to_string()]);
-    assert!(stops(&world.host).is_empty());
+    assert!(stops(&world.host).is_empty(), "unexpected content");
     assert!(world.host.is_running(run) && world.lifecycle(run).exists());
 
     world.controller.refuse_grants(false);
@@ -324,8 +324,8 @@ async fn a_container_without_a_readable_identity_is_not_stopped() {
     cycle(&executor).await;
 
     assert!(world.host.is_running(run) && world.lifecycle(run).exists());
-    assert!(world.controller.grants().is_empty());
-    assert!(stops(&world.host).is_empty());
+    assert!(world.controller.grants().is_empty(), "unexpected content");
+    assert!(stops(&world.host).is_empty(), "unexpected content");
 }
 
 #[tokio::test]
@@ -355,7 +355,7 @@ async fn a_slow_disposition_never_costs_a_running_run_its_report() {
         "the running run's report was dropped by the slow Controller"
     );
     assert!(world.host.is_running(known));
-    assert!(stops(&world.host).is_empty());
+    assert!(stops(&world.host).is_empty(), "unexpected content");
 }
 
 #[tokio::test]

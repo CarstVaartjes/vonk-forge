@@ -12,6 +12,7 @@ from typing import Annotated
 
 from pydantic import Field, model_validator
 
+from vonk_agent_protocol.telemetry import COUNTER_MAX
 from vonk_agent_protocol.wire_model import (
     MAX_TELEMETRY_CAPACITY_BYTES,
     WireEnum,
@@ -20,6 +21,8 @@ from vonk_agent_protocol.wire_model import (
 
 # Memory in bytes, at most telemetry's capacity bound (16 TiB).
 MemoryBytes = Annotated[int, Field(strict=True, ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)]
+# A link rate in Mb/s, at most 1 Tb/s.
+Mbps = Annotated[int, Field(ge=1, le=1_000_000)]
 
 
 class HostUnit(WireEnum):
@@ -122,10 +125,16 @@ class FabricDevice(WireModel):
     A DGX Spark reaches one cabled port through two RDMA devices; ``port`` is
     their shared PCI bus:slot.function (the PCI domain differs), which pairs
     the siblings. ``bytes`` is received plus transmitted bytes in the window.
-    The Controller compares siblings; nothing here is a verdict.
+    ``rate_mbps`` is the port's negotiated rate and ``errors`` the link and
+    transport errors counted in the window; each is ``None`` when unreadable
+    (for ``errors``, also when the device's error total went backwards, a
+    counter reset). They are facts, and nothing here is a
+    verdict: the Controller compares siblings and the declared bandwidth.
     """
 
     port: Annotated[str, Field(pattern=r"^[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$")]
     active: bool
     bytes: MemoryBytes
     window_seconds: Annotated[int, Field(strict=True, ge=1, le=86_400)]
+    rate_mbps: Mbps | None = None
+    errors: Annotated[int, Field(strict=True, ge=0, le=COUNTER_MAX)] | None = None

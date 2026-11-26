@@ -228,7 +228,7 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                         )
                         .unwrap();
                     assert_eq!(request.action, HostRuntimeAction::RunInspect);
-                    assert!(request.arguments.is_empty());
+                    assert!(request.arguments.is_empty(), "{:?}", request.arguments);
                     let effect = peer_root.join("effect").exists();
                     let unfenced_stop = operation == AgentOperation::RecipeStop && !effect;
                     match (

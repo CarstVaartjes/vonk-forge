@@ -50,7 +50,11 @@ fn root_apply_accepts_only_artifacts_bound_by_the_trusted_signed_release() {
     );
 
     assert!(result.is_err());
-    assert!(apply_runner.commands.is_empty());
+    assert!(
+        apply_runner.commands.is_empty(),
+        "{:?}",
+        apply_runner.commands
+    );
     assert!(!install_paths.config.exists());
 }
 
@@ -97,7 +101,7 @@ fn root_apply_rejects_an_attacker_signed_release_and_non_session_execution() {
         &trusted_authority,
     );
     assert!(matches!(untrusted, Err(SetupError::ReleaseSignature)));
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 
     let mut runner = RecordingRunner::default();
     let outside_session = apply_setup_from_with_authority(
@@ -109,7 +113,7 @@ fn root_apply_rejects_an_attacker_signed_release_and_non_session_execution() {
         &attacker_authority,
     );
     assert!(matches!(outside_session, Err(SetupError::PrivilegedInput)));
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 }
 
 #[test]
@@ -143,7 +147,7 @@ fn setup_signature_must_match_the_signed_release_before_prompt_or_sudo() {
     );
 
     assert!(matches!(result, Err(SetupError::ReleaseSignature)));
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 }
 
 #[test]
@@ -219,7 +223,7 @@ fn a_root_that_did_not_sign_the_release_refuses_before_prompt_or_sudo() {
     );
 
     assert!(matches!(result, Err(SetupError::ReleaseSignature)));
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
 }
 
 #[test]
@@ -279,6 +283,6 @@ fn root_apply_trusts_only_the_root_owned_staged_root_and_refuses_another_signer(
         &authority,
     );
     assert!(matches!(result, Err(SetupError::ReleaseSignature)));
-    assert!(runner.commands.is_empty());
+    assert!(runner.commands.is_empty(), "{:?}", runner.commands);
     assert!(!install_paths.config.exists());
 }

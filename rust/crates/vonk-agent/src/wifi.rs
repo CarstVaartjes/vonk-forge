@@ -95,7 +95,10 @@ pub(crate) fn collect(interface: &mut NetworkInterface) {
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use super::{NetworkInterface, attributes::*};
+    use super::{
+        NetworkInterface,
+        attributes::{IFINDEX, get, radio, station, u32_value},
+    };
     use rustix::net::{
         AddressFamily, RecvFlags, SendFlags, SocketFlags, SocketType, bind,
         netlink::{self, SocketAddrNetlink},
