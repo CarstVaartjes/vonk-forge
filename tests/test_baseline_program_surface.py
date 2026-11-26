@@ -261,7 +261,11 @@ def test_installed_controller_programs_use_only_the_stable_surface() -> None:
         programs = lane_programs((ACCEPTANCE / name).read_text(encoding="utf-8"))
         files |= programs.files
         inline.extend(programs.inline)
-    assert {"spark_canary_catalog_import.py", "receipt_fault.py"} <= files
+    assert {
+        "spark_canary_catalog_import.py",
+        "receipt_fault.py",
+        "future_vector_read.py",
+    } <= files
     offenders = {
         name: violations
         for name in sorted(files)

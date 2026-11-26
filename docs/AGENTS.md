@@ -17,7 +17,8 @@ lease inheritance, stale-attempt fencing, and failure isolation. Do not claim
 that documentation or a timeout alone proves current code cannot deadlock.
 
 Distinguish target contracts from implemented behavior
-and tested/deployed evidence. Keep operator commands accurate until the matching
+and tested/deployed evidence. A reader's tolerance of a newer recipes minor is
+evidenced by the future vector gate ([testing-and-ci.md](testing-and-ci.md#release-acceptance-before-merge)). Keep operator commands accurate until the matching
 implementation ships. Remove superseded architecture instructions and update
 their references; retain useful product rationale with an explicit historical
 scope rather than letting it override the current architecture.

@@ -484,6 +484,41 @@ def test_canary_catalog_import_hands_the_exact_fixture_to_the_controller(
     ]
 
 
+@pytest.mark.parametrize(
+    ("returncode", "failures"), [(0, []), (1, ["Recipes lost: ['a/b']"])]
+)
+def test_future_vector_read_gates_on_the_installed_controller_verdict(
+    tmp_path: Path, returncode: int, failures: list[str]
+) -> None:
+    """The vector's bytes reach the in-container program; any failure fails the lane."""
+    lifecycle = _module()
+    commands: list[tuple[list[str], str | None]] = []
+
+    def run_command(command, *, input_text=None, **_kwargs):
+        commands.append((list(command), input_text))
+        return subprocess.CompletedProcess(
+            command,
+            returncode,
+            stdout="warning\n" + json.dumps({"failures": failures}) + "\n",
+            stderr="",
+        )
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.project = "vonk-spark-1-arm64"
+    run._run_command = run_command
+
+    if failures:
+        with pytest.raises(lifecycle.LifecycleError, match="future vector"):
+            run._read_future_vector(b'{"recipes": []}')
+    else:
+        assert run._read_future_vector(b'{"recipes": []}') == {"failures": []}
+    [(command, input_text)] = commands
+    assert command[command.index("exec") :][4:7] == ["control-api", "python", "-c"]
+    assert command[-1] == lifecycle.FUTURE_VECTOR_READ.read_text()
+    assert input_text == '{"recipes": []}'
+
+
 def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> None:
     """The in-container program imports the real canary through catalog sync."""
     pytest.importorskip("vonk_control", reason="requires the control environment")

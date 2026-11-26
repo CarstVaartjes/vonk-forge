@@ -789,6 +789,7 @@ jobs:
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --run-id "$GITHUB_RUN_ID" \
             --platform "$VONK_ACCEPTANCE_PLATFORM" \
+            --future-vector control/tests/fixtures/future-canary-index.json \
             --output "$RUNNER_TEMP/spark-acceptance/report-$VONK_ACCEPTANCE_PLATFORM.json"
 
       - name: Stop run-local object server

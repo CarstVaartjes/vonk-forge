@@ -988,6 +988,24 @@ supplies the intermediate stages) instead of `mode=max`.
 The acceptance lanes use disposable synthetic Spark services on ARM64 CI hosts;
 physical GPUs and model quality still require their designated qualification.
 
+The clean-Spark lane's first phase (`future-vector`) is the G4 gate: the
+installed Controller's own index parser reads the recipes future vector, a real
+signed index as a newer recipes minor could publish it (an unknown word at every
+closed-word site outside an execution document, an unknown field on every closed
+object, one extra Recipe with an unknown serving kind).
+`tests/acceptance/future_vector_read.py` runs inside `control-api` and gets
+`control/tests/fixtures/future-canary-index.json` (`--future-vector`; the lock
+refresh places it from the newest recipes release) on stdin. Every Model and
+every Recipe but that one must be kept, every capability word kept, and no block
+lost except an API block whose reasoning placement or remaining-context word is
+unknown (neither has a cautious neutral). It stops at the snapshot and loads no
+package: the vector rebinds the kept entries' digests, not their archives. On the
+stable channel the installed Controller is the stable release, so this is the
+stable leg; a release that reuses the pull request's Spark proof reuses this
+check with it (same Controller images, same fixture).
+`control/tests/test_future_vector.py` runs the same program in process against
+this tree's parser, and checks that the contract reader reports every word.
+
 A new lane phase can start in `OBSERVED_PHASES` (`tests/acceptance/spark_upgrade_carry.py`)
 when the platform change it needs is not in a promoted release yet: it runs and
 reports in the lane's report and as a warning annotation, but its failure does

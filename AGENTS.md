@@ -288,7 +288,11 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
 
 - Published Model and Recipe structures are defined by the canonical Pydantic
   package in vonk-forge-recipes; read the signed index only through
-  `catalog_reader.read_catalog`. Controller APIs and Controller/Spark messages
+  `catalog_reader.read_catalog`. The recipes future vector
+  (`control/tests/fixtures/future-canary-index.json`, G4) is the gate on that
+  reader: `tests/acceptance/future_vector_read.py` runs in `control/tests` and
+  inside the clean-Spark lane's installed Controller; fix what it exposes in the
+  reader, never by special-casing its words. Controller APIs and Controller/Spark messages
   use their authoritative nested Pydantic models, validated on every persisted
   read and write; generate OpenAPI and the Python/TypeScript clients, and
   generate Rust wire structures with typify from the Pydantic JSON Schemas.
