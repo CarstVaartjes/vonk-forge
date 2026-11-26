@@ -39,6 +39,11 @@ from vonk_control.fleet_projection.common import (
     telemetry_point,
 )
 from vonk_control.fleet_projection.display_memory import display_memory_advice
+from vonk_control.fleet_projection.engine_progress import (
+    ENGINE_STALL_WINDOW,
+    not_progressing,
+    not_progressing_warning,
+)
 from vonk_control.fleet_projection.fabric_health import (
     fabric_down_warning,
     fabric_health_warnings,
@@ -60,7 +65,11 @@ from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeProf
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_update_batches.notice import RECIPE_UPDATE_AVAILABLE
 from vonk_control.strict_json import warn_unreadable_once
-from vonk_control.telemetry.samples import TelemetrySampleView, sustained_low_cpu_clock
+from vonk_control.telemetry.samples import (
+    EngineWindow,
+    TelemetrySampleView,
+    sustained_low_cpu_clock,
+)
 
 if TYPE_CHECKING:
     from vonk_control.fleet_projection.service import FleetProjection
@@ -88,6 +97,7 @@ def _node(
     gpu_clock_desired: GpuClockRange | None = None,
     swap_desired: SwapIntent | None = None,
     oom_kills: int = 0,
+    engine_windows: Mapping[str, EngineWindow] | None = None,
     agent_upgrade_available: bool | None = None,
 ) -> FleetNode:
     warnings: list[ProjectionReason] = list(layout_notices)
@@ -328,6 +338,13 @@ def _node(
                 severity="warning",
             )
         )
+    stall_since = current - ENGINE_STALL_WINDOW
+    warnings.extend(
+        not_progressing_warning(value.title or value.alias or value.run_id)
+        for value in loaded
+        if (window := (engine_windows or {}).get(value.run_id)) is not None
+        and not_progressing(window, stall_since)
+    )
     warnings.extend(
         ProjectionReason(
             code=RECIPE_UPDATE_AVAILABLE,

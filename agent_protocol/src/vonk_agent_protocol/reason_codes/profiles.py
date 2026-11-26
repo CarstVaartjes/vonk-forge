@@ -119,6 +119,9 @@ class ProjectionCode(WireEnum):
     PROFILE_RETRYING = "profile.retrying"
     RECIPE_UPDATE_AVAILABLE = "recipe.update_available"
     RUN_DEGRADED = "run.degraded"
+    #: Requests are pending on a ready run, yet no engine progress reading changed over the window.
+    #: Advice, never a restart.
+    RUN_NOT_PROGRESSING = "run.not-progressing"
     TELEMETRY_DELAYED = "telemetry.delayed"
     TELEMETRY_MISSING = "telemetry.missing"
     TELEMETRY_STALE = "telemetry.stale"

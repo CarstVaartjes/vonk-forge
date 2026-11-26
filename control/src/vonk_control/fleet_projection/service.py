@@ -30,6 +30,7 @@ from vonk_control.fleet_projection.common import (
     RunPresenceRow,
     _utc,
 )
+from vonk_control.fleet_projection.engine_progress import ENGINE_STALL_WINDOW
 from vonk_control.fleet_projection.model_layout_notice import model_layout_notices
 from vonk_control.fleet_projection.nas_transfer_rate import slow_nas_transfers
 from vonk_control.fleet_projection.nodes import (
@@ -184,6 +185,9 @@ class FleetProjection:
             oom_kills = self._telemetry.oom_kills_in_session(
                 session, node_ids, current - HOST_OOM_KILL_WINDOW
             )
+            engine_windows = self._telemetry.engine_windows_in_session(
+                session, node_ids, current - ENGINE_STALL_WINDOW
+            )
             installation_rows = self._installation_rows(session, node_ids)
             run_rows = self._run_rows(session, node_ids)
             mapping_ids = {row[2].id for row in (*installation_rows, *run_rows)}
@@ -249,6 +253,11 @@ class FleetProjection:
                     telemetry_unreadable=node_id in unreadable_telemetry,
                     recent_telemetry=recent_telemetry.get(node_id, ()),
                     oom_kills=oom_kills.get(node_id, 0),
+                    engine_windows={
+                        run_id: window
+                        for (window_node, run_id), window in engine_windows.items()
+                        if window_node == node_id
+                    },
                     installed=installed.get(node_id, ()),
                     loaded=loaded.get(node_id, ()),
                     reservations=reservations.get(node_id, {}),
