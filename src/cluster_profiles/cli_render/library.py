@@ -42,11 +42,13 @@ from cluster_profiles.cli_states_generated import (
 )
 from cluster_profiles.cli_telemetry_render import size as _size
 from cluster_profiles.control_client.errors import ControlMalformedResponse
+from cluster_profiles.generated_control.models.library_model_display import (
+    LibraryModelDisplay,
+)
 from cluster_profiles.generated_control.models.library_resource_projection import (
     LibraryResourceProjection,
 )
 from cluster_profiles.generated_control.models.model_cache_usage import ModelCacheUsage
-from cluster_profiles.generated_control.models.model_display import ModelDisplay
 from cluster_profiles.generated_control.models.published_qualification_status_view import (
     PublishedQualificationStatusView,
 )
@@ -294,7 +296,7 @@ def _recipe_links(detail: object) -> None:
     for model in _records(payload, "model_documents"):
         if model.get("model_display") is None:
             continue
-        display = ModelDisplay.from_dict(
+        display = LibraryModelDisplay.from_dict(
             dict(_object(model["model_display"], "model_display"))
         )
         license_ = display.license_

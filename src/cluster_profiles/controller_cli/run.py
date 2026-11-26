@@ -47,10 +47,12 @@ from cluster_profiles.generated_control.models.fleet_profile_run_effect_action i
     FleetProfileRunEffectAction,
     check_fleet_profile_run_effect_action,
 )
+from cluster_profiles.generated_control.models.library_model_display import (
+    LibraryModelDisplay,
+)
 from cluster_profiles.generated_control.models.library_recipe_projection import (
     LibraryRecipeProjection,
 )
-from cluster_profiles.generated_control.models.model_display import ModelDisplay
 from cluster_profiles.generated_control.types import Unset
 
 
@@ -282,8 +284,8 @@ def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str
                 )
             display = row.get("model_display")
             if display is not None:
-                titles[cast(str, row["selector"])] = ModelDisplay.from_dict(
-                    validate_control_document("ModelDisplay", display)
+                titles[cast(str, row["selector"])] = LibraryModelDisplay.from_dict(
+                    validate_control_document("LibraryModelDisplay", display)
                 ).model_title
     return titles
 

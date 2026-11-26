@@ -346,7 +346,11 @@ release's own words: the Controller stores them at sync and serves
 `GET /api/library/vocabulary`, and the Library page and `vonkctl model|recipe
 library|detail` render them from there. Never type one in a client; a name the
 release does not list shows as the name, and a missing value is `Not reported`
-in both clients.
+in both clients. A capability is served as its name (`LibraryModelDisplay`, the
+open `CapabilityName` in `schemas/vonkctl`), so the sync keeps one a newer
+contract minor added and a new capability needs no Controller or vonkctl
+release; an executed word it cannot keep withholds only that entry, with a
+note.
 
 ## Deployment and fleet safety
 

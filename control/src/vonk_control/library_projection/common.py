@@ -14,7 +14,6 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 from vonk_forge_contracts import (
     ModelDefinition,
-    ModelDisplay,
     RecipeDefinition,
     RecipeDisplay,
 )
@@ -31,6 +30,7 @@ from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.library.contract import (
     LibraryCacheState,
     LibraryLocalState,
+    LibraryModelDisplay,
     LibraryModelIdentity,
     LibraryRecipeSummary,
     ModelLibraryResponse,
@@ -310,7 +310,7 @@ class DocumentText:
 
     title: str
     recipe: RecipeDisplay | None = None
-    model: ModelDisplay | None = None
+    model: LibraryModelDisplay | None = None
 
     @property
     def description(self) -> str:
@@ -321,7 +321,10 @@ class DocumentText:
 def _document_text(row: CatalogDocument) -> DocumentText:
     if row.kind == ReceiptOwner.RECIPE:
         return DocumentText(row.title, recipe=row.readable_recipe_display())
-    return DocumentText(row.title, model=row.readable_model_display())
+    display = row.readable_model_display()
+    return DocumentText(
+        row.title, model=None if display is None else LibraryModelDisplay.of(display)
+    )
 
 
 _note_unreadable = note_unreadable

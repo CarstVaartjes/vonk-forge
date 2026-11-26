@@ -5,14 +5,17 @@ signed index: it verifies every entry's digest, skips an entry it cannot run,
 drops an unreadable optional block and keeps a word a newer minor added. This
 module turns its report into the sync's own terms:
 
-- a skipped entry is a sync problem (it pauses retraction, like any skip);
+- an entry skipped for a word this release does not know where it cannot keep
+  one (a newer executed discriminator) is withheld with a note: it needs a
+  newer platform. The rest applies, and retraction stops offering its older
+  revision; a running revision keeps running;
+- any other skipped entry is a sync problem (it pauses retraction);
 - a dropped block is a note: the entry applies without it;
-- a word this Controller does not know is noted and read without
-  (``known_words``): left out of a list, read as a cautious neutral value, or,
-  failing both, its enclosing object is left out. A block that cannot stand
-  without it is withheld (``None``) and noted. No unknown word reaches what the
-  Controller stores or serves; a stored display stays until a readable one
-  arrives.
+- a word this Controller does not know is noted (``known_words``): a capability
+  is kept by its name; any other word is left out of a list, read as a
+  cautious neutral value, or, failing both, its enclosing object is left out.
+  A block that cannot stand without it is withheld (``None``) and noted. A
+  stored display stays until a readable one arrives.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from vonk_forge_contracts.catalog_reader import (
     CatalogProblem,
     CatalogSection,
     DroppedBlock,
+    FaultReason,
     SkippedEntry,
     UnrecognisedWordReport,
 )
@@ -52,11 +56,20 @@ def report(problems: Iterable[CatalogProblem]) -> ReaderReport:
     """Map the reader's problems to sync problems, notes and unknown-word blocks."""
 
     skipped: list[ManagedCatalogSyncProblem] = []
+    withheld: list[ManagedCatalogSyncProblem] = []
     dropped: dict[tuple[CatalogSection, str, str, str], list[str]] = {}
     words: list[UnrecognisedWordReport] = []
     unknown: dict[tuple[CatalogSection, str], set[str]] = {}
     for problem in problems:
         match problem:
+            case SkippedEntry(reason=FaultReason.UNKNOWN_WORD):
+                withheld.append(
+                    _problem(
+                        f"index {problem.section.value} entry "
+                        f"{_shown(problem.entry)} is withheld: "
+                        f"{_shown(problem.field)} needs a newer platform"
+                    )
+                )
             case SkippedEntry():
                 skipped.append(
                     _problem(
@@ -78,20 +91,24 @@ def report(problems: Iterable[CatalogProblem]) -> ReaderReport:
                 block = problem.field.split(".", 1)[0]
                 for entry in problem.entries:
                     unknown.setdefault((problem.section, entry), set()).add(block)
-    notes = [
-        _problem(
-            f"index {section.value} {block} dropped for {_entries(entries)}: "
-            f"{_shown(field)} is {reason}"
-        )
-        for (section, block, field, reason), entries in dropped.items()
-    ] + [
-        _problem(
-            f"index {word.section.value} {_shown(word.field)} word "
-            f"{_shown(word.word)!r} is unknown to this Controller; read without it "
-            f"for {_entries(word.entries)}"
-        )
-        for word in words
-    ]
+    notes = (
+        withheld
+        + [
+            _problem(
+                f"index {section.value} {block} dropped for {_entries(entries)}: "
+                f"{_shown(field)} is {reason}"
+            )
+            for (section, block, field, reason), entries in dropped.items()
+        ]
+        + [
+            _problem(
+                f"index {word.section.value} {_shown(word.field)} word "
+                f"{_shown(word.word)!r} is unknown to this Controller "
+                f"for {_entries(word.entries)}"
+            )
+            for word in words
+        ]
+    )
     return ReaderReport(
         problems=tuple(skipped),
         notes=tuple(notes),

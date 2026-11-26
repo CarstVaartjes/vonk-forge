@@ -807,7 +807,11 @@ def test_an_envelope_the_contract_refuses_rejects_the_signed_index(
 def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    """Principle 1: the envelope is read through the contract, the entries one by one."""
+    """Principle 1: the envelope is read through the contract, the entries one by one.
+
+    An entry of a kind a newer contract added needs a newer platform: it is
+    withheld with a note, never a problem that holds up the rest.
+    """
     index, _, package = _canonical_package_fixture()
     document = json.loads(index)
     newer = {"kind": "from-a-newer-contract"}
@@ -817,33 +821,34 @@ def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
     client = _client(release, tmp_path / "packages")
     try:
         snapshot = client.list()
-        [problem] = snapshot.problems
-        assert problem.detail.startswith("index catalog_entities entry")
-        assert "is skipped: document" in problem.detail
+        assert snapshot.problems == ()
+        assert any("catalog_entities" in note.detail for note in snapshot.display_notes)
         assert snapshot.items
         assert not snapshot.catalog_entities
     finally:
         client.close()
 
 
-def test_an_unknown_served_capability_is_left_out_not_fatal(
+def test_an_unknown_served_capability_is_kept_by_name(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    """A capability a newer contract adds must not stop the index sync."""
+    """A capability a newer contract adds is served by its name; a word without
+    a capability's shape is left out, and neither stops the index sync."""
     index_bytes, _, package = _canonical_package_fixture()
     index = json.loads(index_bytes)
-    index["recipes"][0]["served_capabilities"] = ["text-generation", "teleportation"]
+    index["recipes"][0]["served_capabilities"] = [
+        "text-generation",
+        "teleportation",
+        "Not A Name!",
+    ]
     release = _release_for(_canonical(index) + b"\n", package)
     client = _client(release, tmp_path / "packages")
     try:
         snapshot = client.list()
-        assert snapshot.items
+        assert snapshot.problems == ()
         assert tuple(snapshot.items[0].served_capabilities or ()) == (
             "text-generation",
-        )
-        assert any(
-            "'teleportation' is unknown to this Controller" in problem.detail
-            for problem in snapshot.display_notes
+            "teleportation",
         )
     finally:
         client.close()
@@ -856,6 +861,14 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
     index_bytes, _, package = _canonical_package_fixture()
     index = json.loads(index_bytes)
     index["catalog_entities"][0]["display"]["capabilities"].append("teleportation")
+    index["vocabulary"]["capabilities"].append(
+        {
+            "name": "teleportation",
+            "label": "Teleportation",
+            "description": "Moves a thing elsewhere.",
+            "category": "other",
+        }
+    )
     recipe_entry = index["recipes"][0]
     del recipe_entry["display"]
     recipe_entry["prebuilt_image"] = {
@@ -912,8 +925,8 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
         assert f"'{word}' is unknown to this Controller" in details
     # What the Library serves: each block read without its unknown word. The
     # recipe is titled by its identity, builds from source, keeps its API facts
-    # minus the endpoint and reads "not yet verified"; the Model keeps its
-    # known capabilities.
+    # minus the endpoint and reads "not yet verified"; the Model keeps every
+    # capability by name, the newer one labelled by the release's vocabulary.
     library = LibraryProjection(sessions, cursors=cursors, clock=lambda: now)
     library.refresh_catalog(observe_storage=False)
     (recipe,) = library.recipe_library(limit=10).recipes
@@ -925,12 +938,82 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
     assert list(recipe.projected.api.api.endpoints) == endpoints
     assert recipe.qualification is not None
     assert recipe.qualification.status == QualificationStatus.NOT_YET_VERIFIED
+    shown = ["image-generation", "teleportation", "text-generation"]
     (model,) = library.models(limit=10).models
     assert model.model_display is not None
-    assert list(model.model_display.capabilities) == [
-        "image-generation",
-        "text-generation",
-    ]
+    assert sorted(model.model_display.capabilities) == shown
+    assert model.usage == shown
+    vocabulary = library.library_vocabulary()
+    assert vocabulary is not None
+    assert {"teleportation": "Teleportation"}.items() <= {
+        word.name: word.label for word in vocabulary.capabilities
+    }.items()
+    # A restart reads the stored display back from the database: the kept
+    # word is still readable, never an unreadable row.
+    engine.dispose()
+    restarted = LibraryProjection(
+        sessionmaker(
+            create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}"),
+            expire_on_commit=False,
+        ),
+        cursors=cursors,
+        clock=lambda: now,
+    )
+    restarted.refresh_catalog(observe_storage=False)
+    (model,) = restarted.models(limit=10).models
+    assert model.model_display is not None
+    assert sorted(model.model_display.capabilities) == shown
+    assert model.usage == shown
+
+
+def test_an_entry_needing_a_newer_platform_is_withheld_and_the_sync_completes(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """A recipe whose document uses an executed kind a newer contract added is
+    left out with a note; every other entry applies and the sync is current."""
+    index_bytes, _, package = _canonical_package_fixture()
+    index = json.loads(index_bytes)
+    newer = deepcopy(index["recipes"][0])
+    newer["source_path"] = "recipes/newer-recipe.json"
+    newer["document"]["identity"]["slug"] = "newer-recipe"
+    newer["document"]["settings"]["kind"] = "teleportation"
+    del newer["display"]
+    digest = document_sha256(newer["document"])
+    newer["content_sha256"] = digest
+    newer["package"]["recipe_content_sha256"] = digest
+    index["recipes"].append(newer)
+    release = _release_for(_canonical(index) + b"\n", package)
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 11, 26, tzinfo=UTC)
+    sync = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=CatalogService(
+            sessions,
+            clock=lambda: now,
+            cursors=TokenCodec(b"s" * 32).cursor_codec(),
+            source_bundles=SourceBundleStore(tmp_path / "bundles"),
+        ),
+        reader=_client(release, tmp_path / "packages"),
+        clock=lambda: now,
+    )
+
+    sync.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
+
+    status = sync.latest()
+    assert status is not None
+    assert status.state == CatalogSyncState.CURRENT
+    assert (status.imported_count, status.skipped_count) == (1, 0)
+    [note] = status.problems
+    assert note.recipe_uri is None
+    assert "fixture/newer-recipe" in note.detail
 
 
 def test_an_unknown_blame_leaves_out_only_its_evidence_record() -> None:
