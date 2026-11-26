@@ -90,7 +90,7 @@ assignment, never whether a test is selected.
 Before signing a `v*` tag, run the read-only preflight:
 
 ```sh
-scripts/stable-preflight --repo CarstVaartjes/vonk-forge --tag vX.Y.Z --sha <sha>
+scripts/release/stable-preflight --repo CarstVaartjes/vonk-forge --tag vX.Y.Z --sha <sha>
 ```
 
 It reads repository switches, the stable environments with their deployment

@@ -9,7 +9,10 @@ from tools.stable_preflight import (
     check,
 )
 
-FACTORY = ("VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID",)
+FACTORY = (
+    "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID",
+    "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET",
+)
 ACCEPTANCE = "VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT"
 AGENT = "VONK_AGENT_RELEASE_KEY_FINGERPRINT"
 
@@ -69,40 +72,40 @@ def test_a_complete_shape_has_no_problems() -> None:
     assert check(complete()) == []
 
 
-def test_the_live_shape_of_2026_11_26_yields_exactly_its_gaps() -> None:
-    live = complete()
-    environments = live["environments"]
+def test_every_gap_kind_is_reported() -> None:
+    gaps = complete()
+    environments = gaps["environments"]
     environments["platform-release"] = None
     environments["installer-acceptance-stable"] = None
-    _live(live, "agent-release")["policies"] = ["branch:v*"]
-    _live(live, "apt-release")["policies"] = ["branch:v*"]
+    _live(gaps, "agent-release")["policies"] = ["branch:v*"]
+    _live(gaps, "apt-release")["policies"] = ["branch:v*"]
     for name in (
         "installer-candidate-stable",
         "installer-canary-stable",
         "installer-promotion-stable",
     ):
-        _live(live, name)["policies"] = []
-    _live(live, "installer-promotion-stable")["variables"] = {}
-    _live(live, "installer-canary-dev")["secrets"] += list(FACTORY)
-    _live(live, "installer-promotion-dev")["variables"] = {ACCEPTANCE: "b" * 64}
+        _live(gaps, name)["policies"] = []
+    _live(gaps, "installer-promotion-stable")["variables"] = {}
+    _live(gaps, "installer-canary-dev")["secrets"] += list(FACTORY)
+    _live(gaps, "installer-promotion-dev")["variables"] = {ACCEPTANCE: "b" * 64}
 
-    problems = check(live)
+    subjects = sorted(problem.subject for problem in check(gaps))
 
-    expected = [
-        ("platform-release",),
-        ("agent-release", "branch:v*"),
-        ("apt-release", "branch:v*"),
-        ("installer-candidate-stable", "[]"),
-        ("installer-acceptance-stable",),
-        ("installer-canary-stable", "[]"),
-        ("installer-promotion-stable", "[]"),
-        (FACTORY[0], "installer-canary-stable"),
-        (ACCEPTANCE, "installer-promotion-stable"),
-        (ACCEPTANCE, "installer-promotion-stable"),
-    ]
-    assert len(problems) == len(expected)
-    for tokens in expected:
-        assert any(all(t in problem for t in tokens) for problem in problems), tokens
+    assert subjects == sorted(
+        [
+            "platform-release",
+            "agent-release",
+            "apt-release",
+            "installer-candidate-stable",
+            "installer-acceptance-stable",
+            "installer-canary-stable",
+            "installer-promotion-stable",
+            f"installer-canary-stable/{FACTORY[0]}",
+            f"installer-canary-stable/{FACTORY[1]}",
+            f"installer-promotion-stable/{ACCEPTANCE}",
+            ACCEPTANCE,
+        ]
+    )
 
 
 def test_allowed_dev_only_names_are_not_problems() -> None:
@@ -122,4 +125,7 @@ def test_each_source_input_is_checked() -> None:
     state["signers_bytes"] = 0
     state["images"]["worker"]["attested"] = False
     state["images"]["litellm"]["digest"] = None
-    assert len(check(state)) == 6
+    subjects = sorted(problem.subject for problem in check(state))
+    assert subjects == sorted(
+        ["tag", "main-ancestry", "release", "image/worker", "image/litellm", "signers"]
+    )

@@ -9,7 +9,14 @@ state.
 from __future__ import annotations
 
 import re
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
+
+
+class Problem(NamedTuple):
+    """One gap: what it is about (an environment, a setting, an image) and why."""
+
+    subject: str
+    detail: str
 
 
 class EnvironmentState(TypedDict):
@@ -91,24 +98,27 @@ def _environment(snapshot: Snapshot, name: str) -> EnvironmentState | None:
     return snapshot["environments"].get(name)
 
 
-def _switches(snapshot: Snapshot) -> list[str]:
+def _switches(snapshot: Snapshot) -> list[Problem]:
     return [
-        f"repository variable {name} is not 'true'"
+        Problem(name, "repository variable is not 'true'")
         for name in SWITCHES
         if snapshot["variables"].get(name) != "true"
     ]
 
 
-def _policies(snapshot: Snapshot) -> list[str]:
-    problems: list[str] = []
+def _policies(snapshot: Snapshot) -> list[Problem]:
+    problems: list[Problem] = []
     for name, expected in POLICIES.items():
         environment = _environment(snapshot, name)
         if environment is None:
-            problems.append(f"environment {name} does not exist")
+            problems.append(Problem(name, "environment does not exist"))
         elif frozenset(environment["policies"]) != expected:
             problems.append(
-                f"environment {name} deployment policies are "
-                f"{sorted(environment['policies'])}, expected {sorted(expected)}"
+                Problem(
+                    name,
+                    f"deployment policies are {sorted(environment['policies'])}, "
+                    f"expected {sorted(expected)}",
+                )
             )
     return problems
 
@@ -117,8 +127,8 @@ def _allowed_dev_only(name: str) -> bool:
     return name in ALLOWED_DEV_ONLY_NAMES or name.startswith(ALLOWED_DEV_ONLY_PREFIXES)
 
 
-def _parity(snapshot: Snapshot) -> list[str]:
-    problems: list[str] = []
+def _parity(snapshot: Snapshot) -> list[Problem]:
+    problems: list[Problem] = []
     for dev, stable in TWINS.items():
         dev_env, stable_env = (
             _environment(snapshot, dev),
@@ -131,15 +141,15 @@ def _parity(snapshot: Snapshot) -> list[str]:
             ("variable", set(dev_env["variables"]), set(stable_env["variables"])),
         ):
             problems.extend(
-                f"{kind} {name} is in {dev} but not in {stable}"
+                Problem(f"{stable}/{name}", f"{kind} is in {dev} but not here")
                 for name in sorted(dev_names - stable_names)
                 if not _allowed_dev_only(name)
             )
     return problems
 
 
-def _fingerprints(snapshot: Snapshot) -> list[str]:
-    problems: list[str] = []
+def _fingerprints(snapshot: Snapshot) -> list[Problem]:
+    problems: list[Problem] = []
     for name, left, right in (
         (ACCEPTANCE_FINGERPRINT, *ACCEPTANCE_FINGERPRINT_ENVIRONMENTS),
         (AGENT_FINGERPRINT, *AGENT_FINGERPRINT_ENVIRONMENTS),
@@ -152,45 +162,65 @@ def _fingerprints(snapshot: Snapshot) -> list[str]:
             )
         ]
         if values[0] is None or values[0] != values[1]:
-            problems.append(f"{name} differs or is missing between {left} and {right}")
+            problems.append(
+                Problem(name, f"differs or is missing between {left} and {right}")
+            )
     return problems
 
 
-def _reviewers(snapshot: Snapshot, owner: str, reviewer_environment: str) -> list[str]:
-    problems: list[str] = []
+def _reviewers(
+    snapshot: Snapshot, owner: str, reviewer_environment: str
+) -> list[Problem]:
+    problems: list[Problem] = []
     for name in ("apt-release", reviewer_environment):
         environment = _environment(snapshot, name)
         if environment is None:
             continue  # reported by the policy check
         if owner not in environment["reviewers"]:
-            problems.append(f"{owner} is not a required reviewer on {name}")
+            problems.append(
+                Problem(f"{name}/reviewer", f"{owner} is not a required reviewer")
+            )
         if environment["prevent_self_review"] is not False:
-            problems.append(f"{name} must set prevent_self_review to false")
+            problems.append(Problem(f"{name}/prevent_self_review", "must be false"))
     return problems
 
 
-def _source(snapshot: Snapshot) -> list[str]:
-    problems: list[str] = []
+def _source(snapshot: Snapshot) -> list[Problem]:
+    problems: list[Problem] = []
     match = _TAG_RE.fullmatch(snapshot["tag"])
     if match is None or snapshot["workspace_version"] != match.group(1):
         problems.append(
-            f"workspace version at the commit is {snapshot['workspace_version']!r}, "
-            f"the tag is {snapshot['tag']!r}"
+            Problem(
+                "tag",
+                f"workspace version at the commit is {snapshot['workspace_version']}, "
+                f"the tag is {snapshot['tag']}",
+            )
         )
     if snapshot["behind_by"] != 0:
-        problems.append("the commit is not an ancestor of main")
+        problems.append(
+            Problem("main-ancestry", "the commit is not an ancestor of main")
+        )
     if snapshot["release_conclusion"] != "success":
         problems.append(
-            f"main Release run for the commit concluded {snapshot['release_conclusion']!r}"
+            Problem(
+                "release",
+                f"main Release run for the commit concluded {snapshot['release_conclusion']}",
+            )
         )
     for name in IMAGES:
         image = snapshot["images"].get(name)
         if image is None or image["digest"] is None:
-            problems.append(f"image {name} has no dev-sha tag for the commit")
+            problems.append(
+                Problem(f"image/{name}", "has no dev-sha tag for the commit")
+            )
         elif not image["attested"]:
-            problems.append(f"image {name} attestation does not verify for the commit")
+            problems.append(
+                Problem(f"image/{name}", "attestation does not verify for the commit")
+            )
     if snapshot["signers_bytes"] <= 0:
-        problems.append(".github/release-allowed-signers on main is empty")
+        problems.append(
+            Problem("signers", ".github/release-allowed-signers on main is empty")
+        )
     return problems
 
 
@@ -199,7 +229,7 @@ def check(
     *,
     owner: str = "CarstVaartjes",
     reviewer_environment: str = "installer-acceptance-stable",
-) -> list[str]:
+) -> list[Problem]:
     """Return every problem the snapshot shows; empty means ready."""
 
     if reviewer_environment not in REVIEWER_ENVIRONMENTS:

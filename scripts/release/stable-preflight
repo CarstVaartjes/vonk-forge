@@ -22,7 +22,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from tools.stable_preflight import (  # noqa: E402 -- the repository import follows the repository root's sys.path entry
     IMAGES,
@@ -42,10 +42,16 @@ SIGNER_WORKFLOW = ".github/workflows/dev-images.yml"
 
 
 class NotFound(Exception):
-    pass
+    """The peer answered that the thing does not exist (or a check said no)."""
 
 
-def run(command: list[str]) -> str:
+def run(
+    command: list[str], *, missing: str | None = None, any_failure_is_no: bool = False
+) -> str:
+    """Run one command. ``missing`` is the stderr text that means "does not exist";
+    ``any_failure_is_no`` makes every non-zero exit a negative answer (a verifier).
+    A timeout, a missing tool or any other failure is RuntimeError: cannot read."""
+
     try:
         result = subprocess.run(
             command, check=False, capture_output=True, text=True, timeout=120
@@ -53,7 +59,7 @@ def run(command: list[str]) -> str:
     except (OSError, subprocess.TimeoutExpired) as error:
         raise RuntimeError(f"{command[0]} failed: {error}") from error
     if result.returncode != 0:
-        if "404" in result.stderr or "Not Found" in result.stderr:
+        if any_failure_is_no or (missing is not None and missing in result.stderr):
             raise NotFound
         raise RuntimeError(f"{' '.join(command[:3])} failed: {result.stderr.strip()}")
     return result.stdout
@@ -61,7 +67,7 @@ def run(command: list[str]) -> str:
 
 def api(path: str) -> Any:
     # An explicit GET: this script never sends any other method.
-    return json.loads(run(["gh", "api", "-X", "GET", path]))
+    return json.loads(run(["gh", "api", "-X", "GET", path], missing="HTTP 404"))
 
 
 def environment_state(repo: str, name: str) -> EnvironmentState | None:
@@ -100,9 +106,10 @@ def image_state(repo: str, name: str, sha: str) -> ImageState:
             [
                 *shlex.split("skopeo inspect --format {{.Digest}}"),
                 f"docker://{image}:dev-sha-{sha}",
-            ]
+            ],
+            missing="manifest unknown",
         ).strip()
-    except (NotFound, RuntimeError):
+    except NotFound:
         return {"digest": None, "attested": False}
     try:
         run(
@@ -115,9 +122,10 @@ def image_state(repo: str, name: str, sha: str) -> ImageState:
                 *("--source-digest", sha),
                 *("--source-ref", "refs/heads/main"),
                 "--deny-self-hosted-runners",
-            ]
+            ],
+            any_failure_is_no=True,
         )
-    except (NotFound, RuntimeError):
+    except NotFound:
         return {"digest": digest, "attested": False}
     return {"digest": digest, "attested": True}
 
@@ -175,7 +183,7 @@ def main(argv: list[str]) -> int:
         return 2
     problems = check(state, owner=owner, reviewer_environment=args.reviewer_environment)
     for problem in problems:
-        print(problem)
+        print(f"{problem.subject}: {problem.detail}")
     print(f"{len(problems)} problem(s)", file=sys.stderr)
     return 1 if problems else 0
 
