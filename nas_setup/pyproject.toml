@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "vonk-nas-setup"
 version = "0.1.1"
 description = "Prepare and recover the private Vonk Forge NAS Compose bundle"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 dependencies = [
   "asn1crypto>=1.5.1",
   "cryptography>=50.0.1",

@@ -7,7 +7,7 @@ and startup behavior; only immutable release identities differ.
 Prepare a complete upload directory on an Intel or ARM Linux or macOS
 workstation with `curl`, `openssl` and installed `uv`. The signed
 installer verifies the portable Python setup wheel and payload before `uv`
-runs it in an isolated Python 3.14 environment:
+runs it in an isolated Python 3.15 environment:
 
 Before running the command, complete the
 [Tailscale fresh-install preflight](tailscale.md#fresh-install-preflight). The

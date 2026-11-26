@@ -13,7 +13,7 @@ local CA and LAN DNS requirements.
 
 Provide `curl`, `openssl` and installed `uv` on the Intel or ARM Linux
 or macOS preparation workstation. `uv` manages the setup wheel's isolated
-Python 3.14 environment. Then run one command as your normal user:
+Python 3.15 environment. Then run one command as your normal user:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/nas | sh

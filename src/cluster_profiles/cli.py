@@ -113,7 +113,10 @@ class _CliParser(argparse.ArgumentParser):
         text, usage, next_step = usage_error(self, message)
         raise _UsageError(text, usage=usage, next_step=next_step)
 
-    def format_help(self) -> str:
+    def format_help(self, formatter: argparse.HelpFormatter | None = None) -> str:
+        del (
+            formatter
+        )  # 3.15 passes the formatter; help text is built by group_help/command_help
         if subcommands(self) is not None:
             return group_help(self)
         return command_help(self)
