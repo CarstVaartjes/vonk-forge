@@ -1458,7 +1458,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.1.1" },
     { name = "uvicorn", specifier = ">=0.54.0" },
     { name = "vonk-agent-protocol", editable = "agent_protocol" },
-    { name = "vonk-forge-public-contracts", git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&rev=fca82a965c4978b259f0ae83771ca0f7c0ac3407" },
+    { name = "vonk-forge-public-contracts", path = "inventory/wheels/vonk_forge_public_contracts-5.8.1-py3-none-any.whl" },
 ]
 
 [package.metadata.requires-dev]
@@ -1478,11 +1478,17 @@ dev = [
 
 [[package]]
 name = "vonk-forge-public-contracts"
-version = "5.7.0"
-source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&rev=fca82a965c4978b259f0ae83771ca0f7c0ac3407#fca82a965c4978b259f0ae83771ca0f7c0ac3407" }
+version = "5.8.1"
+source = { path = "inventory/wheels/vonk_forge_public_contracts-5.8.1-py3-none-any.whl" }
 dependencies = [
     { name = "pydantic" },
 ]
+wheels = [
+    { filename = "vonk_forge_public_contracts-5.8.1-py3-none-any.whl", hash = "sha256:1e3d499e154241053c317e729b09832ee79197dbd423bedbb395aa8cf47f3eb0" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.13,<3" }]
 
 [[package]]
 name = "vonk-nas-setup"

@@ -1,68 +1,289 @@
 #!/usr/bin/env python3
-"""Move the reviewed public-contracts pin to one vonk-forge-recipes commit.
+"""Move the public-contracts pin to one vonk-forge-recipes release, from its signed wheel.
 
-    scripts/dev/refresh-public-contracts <recipes-commit>
+    scripts/dev/refresh-public-contracts (--version X.Y.Z | --latest)
+        [--acceptance-revision SHA | --acceptance-latest]
+    scripts/dev/refresh-public-contracts --check
 
-Builds the wheel from that commit (the build is byte-reproducible), then rewrites
-every place that names the pin: the control/pyproject.toml revision, the workspace
-uv.lock (``uv lock``), control/packaging/public-contracts.lock, the acceptance
-library revision, the wheel in inventory/wheels and the wheel name in the files
-that must spell it. The version is read from the built wheel, never typed. ``scripts/release/verify-supply-chain`` checks
-the result.
+Each recipes release ``vX.Y.Z`` carries its contracts wheel as an immutable asset,
+attested by the recipes ``publish.yml``. This tool is the one ingress of that wheel:
+it downloads it, verifies its attestation (``gh attestation verify``), records its
+sha256 and only then writes. It rewrites ``control/packaging/public-contracts.lock``,
+copies the wheel into ``inventory/wheels``, rewrites every file that spells the
+wheel name, relocks (``uv lock``) and regenerates what the contract feeds: the
+generated clients, the vonkctl schemas and the Python vocabulary. When the
+release's signed ``recipe-library.tar`` lists a ``future-canary-index.json``,
+that vector is checked against the release's attested ``SHA256SUMS`` and copied
+to ``control/tests/fixtures``, only when the pinned version moves (the tar is
+republished in place with every catalog publish; the committed vector stays). Nothing is written until every download verified.
+
+The acceptance pin (``tests/acceptance/recipe-library-revision.txt``, the
+library the suites check out) is a separate input: ``--acceptance-revision``
+names a recipes commit, ``--acceptance-latest`` takes the recipes ``main`` head,
+and neither leaves it as it is. ``--check`` prints whether a newer release than
+the lock exists and writes nothing. ``scripts/release/verify-supply-chain``
+checks the result offline.
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 
 ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
+SIGNER_WORKFLOW = f"{REPOSITORY}/.github/workflows/publish.yml"
 LOCK = "control/packaging/public-contracts.lock"
-# The acceptance suites read the library at the same commit as the contracts.
-LIBRARY_REVISION = "tests/acceptance/recipe-library-revision.txt"
+ACCEPTANCE_REVISION = "tests/acceptance/recipe-library-revision.txt"
+FUTURE_VECTOR = "future-canary-index.json"
+FUTURE_FIXTURE = f"control/tests/fixtures/{FUTURE_VECTOR}"
+LIBRARY = "recipe-library.tar"
+CHECKSUMS = "SHA256SUMS"
+CHECKSUMS_BUNDLE = "SHA256SUMS.sigstore.json"
 WHEELS = "inventory/wheels"
 COMMAND_TIMEOUT = 600
-WHEEL_PREFIX = "vonk_forge_public_contracts-"
-# The files that spell the wheel name; verify-supply-chain checks the Dockerfile
-# and tests/scripts/test_resolve_publication_producer.py checks the producer list.
-SPELLING_FILES = ("control/Dockerfile", "scripts/ci/resolve-publication-producer")
+VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 SHA = re.compile(r"[0-9a-f]{40}")
-PIN = re.compile(
-    r'(?m)^(vonk-forge-public-contracts = \{ git = "[^"]+", rev = ")[0-9a-f]{40}(")'
+WHEEL_NAME = re.compile(
+    r"vonk_forge_public_contracts-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any\.whl"
+)
+# Every file that spells the wheel name; verify-supply-chain checks the
+# Dockerfile and the uv source, tests/scripts/test_resolve_publication_producer.py
+# the producer list.
+SPELLING_FILES = (
+    "control/pyproject.toml",
+    "control/Dockerfile",
+    "scripts/ci/resolve-publication-producer",
+)
+# The argv prefixes of the gh and uv subcommands this tool runs: those CLIs' words.
+GH_DOWNLOAD = shlex.split("gh release download")
+GH_VERIFY = shlex.split("gh attestation verify")
+UV_RUN = shlex.split("uv run")
+REGENERATE = (
+    ("scripts/dev/prepare-generated-contracts",),
+    ("tools/vonkctl_json_contract.py", "schemas/vonkctl"),
+    ("scripts/dev/generate-python-vocabulary",),
 )
 
 
-def build_wheel(source: str, commit: str, work: Path) -> Path:
-    """Build the wheel of ``contracts/`` at ``commit`` from the recipes repository."""
+class RefreshError(Exception):
+    """A release asset did not verify, or the repository does not match the pin layout."""
 
-    checkout = work / "recipes"
-    for command in (
-        ["git", "init", "-q", str(checkout)],
-        ["git", "-C", str(checkout), "fetch", "-q", "--depth", "1", source, commit],
-        ["git", "-C", str(checkout), "checkout", "-q", "FETCH_HEAD"],
-        [
-            "uv",
-            "build",
-            "--wheel",
-            "--out-dir",
-            str(work / "out"),
-            str(checkout / "contracts"),
-        ],
-    ):
-        subprocess.run(
-            command, check=True, stdout=subprocess.DEVNULL, timeout=COMMAND_TIMEOUT
+
+def wheel_name(version: str) -> str:
+    return f"vonk_forge_public_contracts-{version}-py3-none-any.whl"
+
+
+def release_url(version: str) -> str:
+    return f"https://github.com/{REPOSITORY}/releases/tag/v{version}"
+
+
+class Recipes(Protocol):
+    """What the refresh reads from the recipes repository; tests pass a fake."""
+
+    def latest_version(self) -> str: ...
+
+    def download(self, version: str, asset: str, directory: Path) -> Path:
+        """The release asset, downloaded into ``directory``."""
+        ...
+
+    def library_members(self, version: str, names: Iterable[str]) -> dict[str, bytes]:
+        """The named members of the release's ``recipe-library.tar`` that it has."""
+        ...
+
+    def verify(self, path: Path, bundle: Path | None = None) -> None:
+        """Raise ``RefreshError`` unless ``path`` is attested by the recipes publish.yml."""
+        ...
+
+    def main_head(self) -> str: ...
+
+
+def _output(*command: str) -> str:
+    """The command's stdout; its stderr reaches the terminal, a failure is a RefreshError."""
+
+    try:
+        return subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+            timeout=COMMAND_TIMEOUT,
+        ).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        raise RefreshError(f"{' '.join(command[:3])} failed") from error
+
+
+class GitHub:
+    """The recipes repository through the ``gh`` CLI."""
+
+    def latest_version(self) -> str:
+        tag = _output(
+            "gh",
+            "release",
+            "view",
+            "--repo",
+            REPOSITORY,
+            "--json",
+            "tagName",
+            "-q",
+            ".tagName",
         )
-    [wheel] = (work / "out").glob(f"{WHEEL_PREFIX}*-py3-none-any.whl")
-    return wheel
+        version = tag.strip().removeprefix("v")
+        if VERSION.fullmatch(version) is None:
+            raise RefreshError(
+                f"newest recipes release has no X.Y.Z tag: {tag.strip()}"
+            )
+        return version
+
+    def download(self, version: str, asset: str, directory: Path) -> Path:
+        _output(
+            *GH_DOWNLOAD,
+            f"v{version}",
+            "--repo",
+            REPOSITORY,
+            "--pattern",
+            asset,
+            "--dir",
+            str(directory),
+        )
+        return directory / asset
+
+    def library_members(self, version: str, names: Iterable[str]) -> dict[str, bytes]:
+        # Streamed: the members needed sit near the front, so the download stops there.
+        wanted = set(names)
+        found: dict[str, bytes] = {}
+        with subprocess.Popen(
+            [
+                *GH_DOWNLOAD,
+                f"v{version}",
+                "--repo",
+                REPOSITORY,
+                "--pattern",
+                LIBRARY,
+                "--output",
+                "-",
+            ],
+            stdout=subprocess.PIPE,
+        ) as process:
+            assert process.stdout is not None
+            try:
+                with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
+                    for member in archive:
+                        content = (
+                            archive.extractfile(member)
+                            if member.name in wanted
+                            else None
+                        )
+                        if content is not None:
+                            found[member.name] = content.read()
+                        if wanted <= found.keys():
+                            break
+            except tarfile.TarError as error:
+                raise RefreshError(
+                    f"v{version} {LIBRARY} is unreadable: {error}"
+                ) from error
+            finally:
+                process.kill()
+        return found
+
+    def verify(self, path: Path, bundle: Path | None = None) -> None:
+        command = [
+            *GH_VERIFY,
+            str(path),
+            "--repo",
+            REPOSITORY,
+            "--signer-workflow",
+            SIGNER_WORKFLOW,
+            "--source-ref",
+            "refs/heads/main",
+            "--deny-self-hosted-runners",
+        ]
+        if bundle is not None:
+            command += ["--bundle", str(bundle)]
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=COMMAND_TIMEOUT,
+        )
+        if result.returncode != 0:
+            raise RefreshError(
+                f"{path.name} is not attested by {SIGNER_WORKFLOW}: {result.stderr.strip()}"
+            )
+
+    def main_head(self) -> str:
+        return _output(
+            "gh", "api", f"repos/{REPOSITORY}/commits/main", "-q", ".sha"
+        ).strip()
+
+
+@dataclass(frozen=True, slots=True)
+class Verified:
+    """Release content that passed ingress, held outside the repository."""
+
+    version: str
+    wheel: Path
+    sha256: str
+    future_vector: bytes | None
+
+
+def _checksums(text: bytes) -> dict[str, str]:
+    listed: dict[str, str] = {}
+    for line in text.decode("ascii").splitlines():
+        digest, _, name = line.partition("  ")
+        listed[name] = digest
+    return listed
+
+
+def _future_vector(recipes: Recipes, version: str, work: Path) -> bytes | None:
+    """The release's future vector, verified through its attested SHA256SUMS, if it ships one."""
+
+    members = recipes.library_members(
+        version, (CHECKSUMS, CHECKSUMS_BUNDLE, FUTURE_VECTOR)
+    )
+    if CHECKSUMS not in members or CHECKSUMS_BUNDLE not in members:
+        raise RefreshError(f"v{version} {LIBRARY} has no signed {CHECKSUMS}")
+    (work / CHECKSUMS).write_bytes(members[CHECKSUMS])
+    (work / CHECKSUMS_BUNDLE).write_bytes(members[CHECKSUMS_BUNDLE])
+    recipes.verify(work / CHECKSUMS, work / CHECKSUMS_BUNDLE)
+    listed = _checksums(members[CHECKSUMS]).get(FUTURE_VECTOR)
+    if listed is None:
+        return None  # a release from before the vector existed ships none
+    vector = members.get(FUTURE_VECTOR)
+    if vector is None or hashlib.sha256(vector).hexdigest() != listed:
+        raise RefreshError(f"v{version} {FUTURE_VECTOR} does not match its {CHECKSUMS}")
+    return vector
+
+
+def fetch(recipes: Recipes, version: str, work: Path, *, vector: bool) -> Verified:
+    """Download and verify everything the refresh writes; raise before any write.
+
+    The tar is republished in place with every catalog publish, so its vector is
+    read only when asked (``vector``): when the pinned version moves.
+    """
+
+    wheel = recipes.download(version, wheel_name(version), work)
+    if not wheel.is_file():
+        raise RefreshError(f"v{version} has no {wheel_name(version)} asset")
+    recipes.verify(wheel)
+    sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    future = _future_vector(recipes, version, work) if vector else None
+    return Verified(version, wheel, sha256, future)
 
 
 def relock(root: Path) -> None:
@@ -71,58 +292,129 @@ def relock(root: Path) -> None:
     )
 
 
+def regenerate(root: Path) -> None:
+    for command in REGENERATE:
+        subprocess.run(
+            [
+                *UV_RUN,
+                "--project",
+                str(root / "control"),
+                "--frozen",
+                "python",
+                *command,
+            ],
+            check=True,
+            cwd=root,
+            timeout=COMMAND_TIMEOUT,
+        )
+
+
 def apply_pin(
-    root: Path, commit: str, wheel: Path, relock: Callable[[Path], None] = relock
+    root: Path,
+    verified: Verified,
+    *,
+    relock: Callable[[Path], None] = relock,
+    regenerate: Callable[[Path], None] = regenerate,
 ) -> None:
-    """Rewrite the pin files of ``root`` to ``commit`` and its built ``wheel``."""
+    """Write ``verified`` into ``root``: lock, wheel, spellings, uv.lock, generated files."""
 
-    old = tomllib.loads((root / LOCK).read_text())
-    old_name = Path(old["wheel"]).name
-    new_name = wheel.name
-    project = root / "control/pyproject.toml"
-    pinned, count = PIN.subn(rf"\g<1>{commit}\g<2>", project.read_text())
-    if count != 1:
-        raise SystemExit(
-            "Expected one public-contracts source pin in control/pyproject.toml"
-        )
-    project.write_text(pinned)
-    relock(root)
-    version = new_name.removeprefix(WHEEL_PREFIX).removesuffix("-py3-none-any.whl")
-    (root / LOCK).write_text(
-        f"source = {_quote(old['source'])}\n"
-        f"# Resolved from the reviewed recipe contract at {commit}.\n"
-        f"revision = {_quote(commit)}\n"
-        f"subdirectory = {_quote(old['subdirectory'])}\n"
-        f"package = {_quote('vonk-forge-public-contracts==' + version)}\n"
-        f"wheel = {_quote(f'{WHEELS}/{new_name}')}\n"
-        f"sha256 = {_quote(hashlib.sha256(wheel.read_bytes()).hexdigest())}\n"
-    )
-    (root / LIBRARY_REVISION).write_text(f"{commit}\n")
-    for stale in (root / WHEELS).glob(f"{WHEEL_PREFIX}*.whl"):
-        stale.unlink()
-    shutil.copy2(wheel, root / WHEELS / new_name)
+    name = wheel_name(verified.version)
+    spelled: dict[Path, str] = {}
     for relative in SPELLING_FILES:
-        path = root / relative
-        text = path.read_text()
-        if old_name not in text:
-            raise SystemExit(f"{relative} does not name {old_name}")
-        path.write_text(text.replace(old_name, new_name))
+        text, count = WHEEL_NAME.subn(name, (root / relative).read_text())
+        if count == 0:
+            raise RefreshError(f"{relative} does not name the public-contracts wheel")
+        spelled[root / relative] = text
+    for path, text in spelled.items():
+        path.write_text(text)
+    for stale in (root / WHEELS).glob("vonk_forge_public_contracts-*.whl"):
+        stale.unlink()
+    shutil.copy2(verified.wheel, root / WHEELS / name)
+    (root / LOCK).write_text(
+        f'package = "vonk-forge-public-contracts=={verified.version}"\n'
+        f'release = "{release_url(verified.version)}"\n'
+        f'wheel = "{WHEELS}/{name}"\n'
+        f'sha256 = "{verified.sha256}"\n'
+    )
+    if verified.future_vector is not None:
+        (root / FUTURE_FIXTURE).write_bytes(verified.future_vector)
+    relock(root)
+    regenerate(root)
 
 
-def _quote(value: str) -> str:
-    return f'"{value}"'
+def locked_version(root: Path) -> str:
+    package = tomllib.loads((root / LOCK).read_text())["package"]
+    return str(package).removeprefix("vonk-forge-public-contracts==")
 
 
-def main() -> None:
-    if len(sys.argv) != 2 or SHA.fullmatch(sys.argv[1]) is None:
-        raise SystemExit(
-            "usage: scripts/dev/refresh-public-contracts <40-hex recipes commit>"
-        )
-    commit = sys.argv[1]
-    source = tomllib.loads((ROOT / LOCK).read_text())["source"]
+def _newer(candidate: str, current: str) -> bool:
+    return tuple(map(int, candidate.split("."))) > tuple(map(int, current.split(".")))
+
+
+def refresh(
+    root: Path,
+    recipes: Recipes,
+    *,
+    version: str | None,
+    acceptance: str | None,
+    acceptance_latest: bool,
+    relock: Callable[[Path], None] = relock,
+    regenerate: Callable[[Path], None] = regenerate,
+) -> None:
+    """Pin ``version`` (the newest release when ``None``) and, if asked, the acceptance pin."""
+
+    revision = recipes.main_head() if acceptance_latest else acceptance
+    if revision is not None and SHA.fullmatch(revision) is None:
+        raise RefreshError(f"acceptance revision is not a 40-hex commit: {revision}")
+    version = version or recipes.latest_version()
+    # The committed vector stays while the version stays; a missing one heals.
+    vector = version != locked_version(root) or not (root / FUTURE_FIXTURE).is_file()
     with tempfile.TemporaryDirectory() as work:
-        apply_pin(ROOT, commit, build_wheel(source, commit, Path(work)))
+        verified = fetch(recipes, version, Path(work), vector=vector)
+        apply_pin(root, verified, relock=relock, regenerate=regenerate)
+    if revision is not None:
+        (root / ACCEPTANCE_REVISION).write_text(f"{revision}\n")
+
+
+def check(root: Path, recipes: Recipes) -> str:
+    current, latest = locked_version(root), recipes.latest_version()
+    if _newer(latest, current):
+        return f"newer recipes release v{latest} (locked {current})"
+    return f"locked {current} is the newest recipes release"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Move the public-contracts pin to a recipes release."
+    )
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--version", type=str)
+    target.add_argument("--latest", action="store_true")
+    target.add_argument("--check", action="store_true")
+    acceptance = parser.add_mutually_exclusive_group()
+    acceptance.add_argument("--acceptance-revision", type=str)
+    acceptance.add_argument("--acceptance-latest", action="store_true")
+    args = parser.parse_args(argv)
+    recipes = GitHub()
+    if args.check:
+        print(check(ROOT, recipes))
+        return 0
+    if args.version is not None and VERSION.fullmatch(args.version) is None:
+        parser.error("--version takes X.Y.Z")
+    try:
+        refresh(
+            ROOT,
+            recipes,
+            version=args.version,
+            acceptance=args.acceptance_revision,
+            acceptance_latest=args.acceptance_latest,
+        )
+    except (RefreshError, subprocess.CalledProcessError) as error:
+        # A failed uv step has already printed its own error above.
+        print(f"refresh-public-contracts: {error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

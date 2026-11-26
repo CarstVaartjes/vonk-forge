@@ -27,6 +27,10 @@ Document operation, endpoint path, received status, safe canonical code,
 request ID, source classification, and retry/defer/exit decision when those
 values are available. Never document credentials, private keys, cookies,
 authorization headers, token-bearing URLs, or raw request and response bodies.
+Document the public-contracts pin as a recipes release's attested wheel, verified once at
+ingress by `scripts/dev/refresh-public-contracts`; never as a recipes git revision. The
+acceptance library revision is a separate pin.
+
 Keep repository, Controller, and physical Spark evidence boundaries explicit;
 do not claim route-wide or Rust coverage until the owning producer and
 consumer tests have passed.

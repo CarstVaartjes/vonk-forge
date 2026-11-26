@@ -570,19 +570,27 @@ def _chat_api(recipe: _Recipe, library_root: Path) -> object | None:
     return block if isinstance(block, ChatApi) else None
 
 
-def _argument_value(recipe: _Recipe) -> Callable[[str], int | None] | None:
-    """The library contracts' integer reading of the recipe's runtime arguments, as launched.
+def _argument_value(recipe: _Recipe) -> Callable[[str], int | None]:
+    """The integer a runtime argument carries as the platform compiles it, as the gateway reads it.
 
-    A library whose contracts predate it yields none: the check is sent as declared.
+    An argument bound to a setting the recipe lacks is refused, never sent unbounded.
     """
-    try:
-        from vonk_forge_contracts.api_checks import (  # noqa: PLC0415 - optional: older library contracts lack it
-            integer_argument,
-        )
-    except ImportError:
+    from vonk_control.recipe_operations.runtime_specs import (  # noqa: PLC0415 - the platform checkout's compiler, on sys.path since _compile
+        _compiled_arguments,  # the one compiled reading the gateway also uses
+    )
+
+    def value(name: str) -> int | None:
+        try:
+            arguments = _compiled_arguments(recipe.with_option_choices({}), None)  # pyright: ignore[reportArgumentType]  # the library's RecipeDefinition, read through _Recipe
+        except KeyError as error:
+            raise QualificationError("an argument names a setting the recipe lacks") from error
+        for argument in arguments:
+            if argument.name == name:
+                found = argument.value
+                return found if isinstance(found, int) and not isinstance(found, bool) else None
         return None
-    resolved = recipe.with_option_choices({})
-    return lambda name: integer_argument(resolved, name, resolved.settings)  # pyright: ignore[reportArgumentType]  # the library's RecipeDefinition, read through _Recipe
+
+    return value
 
 
 def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Namespace) -> dict[str, object] | None:

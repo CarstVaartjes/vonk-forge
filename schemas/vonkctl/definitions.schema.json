@@ -10700,8 +10700,16 @@
           "type": "string"
         },
         "requires_token": {
-          "title": "Requires Token",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requires Token"
         },
         "source": {
           "anyOf": [
@@ -10720,7 +10728,6 @@
       },
       "required": [
         "identity",
-        "requires_token",
         "dependencies",
         "source",
         "format",
@@ -11587,7 +11594,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -11646,7 +11653,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -11718,7 +11725,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -11780,7 +11787,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -11839,7 +11846,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -11898,7 +11905,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -11957,7 +11964,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -12016,7 +12023,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -12075,7 +12082,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -12134,7 +12141,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -15018,7 +15025,7 @@
           "$ref": "#/$defs/LibraryResourceProjection"
         },
         "schema_version": {
-          "const": 4,
+          "const": 5,
           "title": "Schema Version",
           "type": "integer"
         },

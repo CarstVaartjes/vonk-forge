@@ -22,6 +22,7 @@ INPUTS = (
     "control/web/package-lock.json",
     "control/packaging/public-contracts.lock",
     "control/Dockerfile",
+    "control/pyproject.toml",
     "agent_protocol/pyproject.toml",
     "deploy/compose/images.lock.json",
     "deploy/compose/compose.yaml",
@@ -155,22 +156,38 @@ def test_lock_change_generates_updated_sbom_instead_of_stale_source_failure(
 
 
 @pytest.mark.parametrize(
-    ("field", "replacement"), [("revision", "0" * 40), ("sha256", "0" * 64)]
+    ("field", "replacement"),
+    [
+        (
+            "release",
+            "https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v0.0.1",
+        ),
+        ("sha256", "0" * 64),
+    ],
 )
 def test_reviewed_third_party_contract_wheel_pin_fails_closed(
     tmp_path: Path, field: str, replacement: str
 ) -> None:
     repository = _copy(tmp_path)
     lock = repository / "control/packaging/public-contracts.lock"
-    source = lock.read_text()
     changed, count = re.subn(
-        rf"(?m)^{field} = \"[0-9a-f]+\"$",
-        f'{field} = "{replacement}"',
-        source,
-        count=1,
+        rf'(?m)^{field} = "[^"]+"$', f'{field} = "{replacement}"', lock.read_text()
     )
     assert count == 1
     lock.write_text(changed)
+
+    result = _run(repository)
+
+    assert result.returncode != 0
+    assert "public contract" in " ".join(_errors(result))
+
+
+def test_a_contract_lock_pinned_to_a_git_revision_fails_closed(tmp_path: Path) -> None:
+    """The pin is a release asset by its digest; a source revision is not a pin."""
+
+    repository = _copy(tmp_path)
+    lock = repository / "control/packaging/public-contracts.lock"
+    lock.write_text(lock.read_text() + f'revision = "{"1" * 40}"\n')
 
     result = _run(repository)
 
