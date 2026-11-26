@@ -64,13 +64,13 @@ fn launch_shared_memory_as_declared(arguments: &mut [String], image_index: usize
 /// a run started before this change is still adopted as is, and agent and
 /// helper upgrade in either order. Validation proved the flag and its exact
 /// value come before the image.
-fn launch_tmp_on_disk(arguments: &mut [String], image_index: usize, outputs: &Path) {
+fn launch_tmp_on_disk(arguments: &mut [String], image_index: usize, tmp: &Path) {
     if let Some(index) = arguments[..image_index]
         .iter()
         .position(|argument| argument == "--tmpfs")
     {
         "--mount".clone_into(&mut arguments[index]);
-        arguments[index + 1] = format!("type=bind,src={},dst=/tmp", outputs.join("tmp").display());
+        arguments[index + 1] = format!("type=bind,src={},dst=/tmp", tmp.display());
     }
 }
 
@@ -267,7 +267,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // as a validation marker; Docker already receives it via --entrypoint.
         let mut compiled = validated.docker_arguments()?;
         launch_shared_memory_as_declared(&mut compiled, validated.image_index);
-        launch_tmp_on_disk(&mut compiled, validated.image_index, &validated.outputs);
+        // The same directory `TMPDIR` names, that the reset emptied and that
+        // `prepare_runtime_access` granted to the workload user.
+        let tmp = validated
+            .tmp_root
+            .parent()
+            .ok_or(OperationError::UnsafePath)?;
+        launch_tmp_on_disk(&mut compiled, validated.image_index, tmp);
         let image_index = omit_container_memory_limit(&mut compiled, validated.image_index);
         compiled[image_index] = operational_image;
         // Helper-owned launch policy also covers accepted images built before
