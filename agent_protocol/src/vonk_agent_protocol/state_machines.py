@@ -86,6 +86,16 @@ class RoutePublicationState(WireEnum):
     FAILED = "failed"
 
 
+class ExternalPublicationState(WireEnum):
+    """Where an external model deployment stands on its way into, and out of, the gateway."""
+
+    PENDING = "pending"
+    PUBLISHED = "published"
+    BLOCKED = "blocked"
+    WITHDRAWING = "withdrawing"
+    WITHDRAWN = "withdrawn"
+
+
 class CertificateState(WireEnum):
     """The standing of a node's client certificate, as the fleet projection shows it."""
 
@@ -219,6 +229,7 @@ MACHINES: Mapping[str, type[WireEnum]] = {
     "run": RunState,
     "route": RouteState,
     "route-publication": RoutePublicationState,
+    "external-publication": ExternalPublicationState,
     "certificate": CertificateState,
     "enrollment-grant": EnrollmentGrantState,
     "model-file": ModelFileState,
@@ -312,6 +323,7 @@ __all__ = [
     "DistributionAssignmentState",
     "EndpointState",
     "EnrollmentGrantState",
+    "ExternalPublicationState",
     "InstallationNodeState",
     "InstallationState",
     "ModelCacheOperatorStatus",
