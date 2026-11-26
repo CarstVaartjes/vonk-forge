@@ -869,7 +869,9 @@ checks the bundle's digest and its keyless attestation from
 `installer-publication.yml`, and runs the bundle's
 `scripts/recipes/validate-recipe-checkout`. It only reads, and a failed job is
 the alarm; the fix is a contract fix in the repository that drifted, never a
-gate on unrelated pull requests. The bundle is described in
+gate on unrelated pull requests. Recipes CI no longer calls forge for image planning or a reusable
+validation workflow: it plans its own builds (`tools/build-plan`) and validates
+only through the bundle. The bundle is described in
 [Recipe-tools bundle](runbooks/platform-release-publication.md#recipe-tools-bundle).
 
 ### Fuzzing

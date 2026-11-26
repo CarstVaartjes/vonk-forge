@@ -11,9 +11,10 @@ with the same build flags and platform adaptation stage a Spark uses, pushes
 it to GHCR (public), and pins the pushed manifest digest beside the recipe in
 the signed catalog index (`prebuilt_image: {reference, build_key}`). The
 pinned manifest digest is the image's identity. The `build_key` is the recipes
-CI's own handle for finding or skipping a build; the Controller never derives
-or reads it (the `prebuilt-key` added-line guard), so a change to how recipes
-CI keys its builds never re-plans an installed revision.
+CI's own handle for finding or skipping a build, planned and derived in the
+recipes repository (`tools/build-plan`); forge ships no image planner. The
+Controller never derives or reads it (the `prebuilt-key` added-line guard), so
+a change to how recipes CI keys its builds never re-plans an installed revision.
 
 Runtime images live in one content-addressed OCI layout in
 `image-cache/oci/` on the Controller. Images share layers there: a recipe

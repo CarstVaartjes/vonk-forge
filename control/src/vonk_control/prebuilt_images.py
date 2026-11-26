@@ -19,41 +19,30 @@ a prebuilt image and a Spark-built image for the same inputs are
 interchangeable.  A missing or failed prebuilt image falls back to the Spark
 build, and the fallback is never silent: every plan carries a
 :class:`PrebuiltDecision` that names why the image was or was not used.
-
-:func:`executable_build_key` and :func:`write_library_image_plan` remain the
-recipes CI's planner until that repository plans its own builds.
 """
 
 from __future__ import annotations
 
-import hashlib
-import io
 import json
 import logging
 import re
-import tarfile
 import threading
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select, true, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_forge_contracts import RecipeDefinition, read_recipe, read_recipe_display
+from vonk_forge_contracts import read_recipe_display
 from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
 
 from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
-from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
+from vonk_agent_protocol.build_import import RecipeBuildEvidence
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
-from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.catalog.revision_contract import (
-    BuildSecurityProjection,
-    build_policy_projection,
-)
 from vonk_control.image_store.collection import GRACE
 from vonk_control.image_store.oci import (
     IMAGE_CACHE_DIRECTORY,
@@ -67,8 +56,6 @@ from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_builds.cancellation import build_cancellation
 from vonk_control.recipe_builds.common import (
-    canonical_build,
-    derive_build_input_identity,
     inspect_package_source_policy,
 )
 from vonk_control.recipe_operations.execution_contract import (
@@ -79,20 +66,12 @@ from vonk_control.recipe_operations.execution_contract import (
 from vonk_control.recipe_operations.observation_helpers import record_build_evidence
 from vonk_control.recipe_packages.client import load_recipe_package
 from vonk_control.recipe_packages.library_types import RecipeLibraryItem
-from vonk_control.runtime.adapters import (
-    RUNTIME_ADAPTER_DIGEST_LABEL,
-    RUNTIME_ADAPTER_LABEL,
-    RUNTIME_INTERFACE_LABEL,
-    RUNTIME_INTERFACE_LABEL_VALUE,
-    resolve_runtime_adapter,
-)
 from vonk_control.source_bundles import GeneratedSourceBundle, parse_source_bundle
-from vonk_control.source_policy import SourcePolicyError, dockerfile_base_images
+from vonk_control.source_policy import SourcePolicyError
 from vonk_control.stored.states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)
 
-PREBUILT_KEY_SCHEMA_VERSION = 1
 PREBUILT_BUILD_KIND = "recipe.build.v1"
 # A Controller pull of one image; renewed while the pull runs.
 _CLAIM_LEASE = timedelta(minutes=5)
@@ -105,266 +84,6 @@ _CONVERSION_BACKOFF_CAP = timedelta(hours=2)
 _REFERENCE = re.compile(PREBUILT_REFERENCE_PATTERN)
 
 PREBUILT_NOT_PINNED = PrebuiltImageCode.NOT_PINNED
-
-
-def executable_build_key(identity: Mapping[str, object]) -> str:
-    """Name the build inputs that produce the image bytes.
-
-    ``identity`` is a build input identity from
-    :func:`vonk_control.recipe_builds.common.derive_build_input_identity`.  The key
-    keeps the inputs a build consumes (source bundle, Dockerfile, pinned base
-    images, build options and capabilities, runtime adapter) and drops the
-    ones that only scope reuse (builder binary, egress hosts, rebuild
-    settings, topology, model artifacts).  Two recipes that build the same
-    adapter directory the same way therefore share one prebuilt image.
-    """
-
-    execution = identity.get("execution_build")
-    if not isinstance(execution, Mapping):
-        raise TypeError("build identity has no executable build")
-    document = {
-        "schema_version": PREBUILT_KEY_SCHEMA_VERSION,
-        "artifact_format": identity.get("artifact_format"),
-        "source_bundle_sha256": identity.get("source_bundle_sha256"),
-        "base_images": identity.get("base_images"),
-        "base_image": execution.get("base_image"),
-        "dockerfile": execution.get("dockerfile"),
-        "options": execution.get("options"),
-        "security": execution.get("security"),
-        "runtime_adapter": identity.get("runtime_adapter"),
-    }
-    return hashlib.sha256(
-        json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-
-
-def package_build_intent(
-    document: Mapping[str, object] | RecipeDefinition,
-    *,
-    source_bundle_sha256: str,
-    dockerfile_payload: bytes,
-) -> dict[str, object]:
-    """Derive the build input identity CI builds from, without a database.
-
-    This is the same derivation :meth:`RecipeBuildService.resolve` applies to
-    a stored revision, fed from a recipe package instead.  Only the fields
-    :func:`executable_build_key` reads matter for a prebuilt image.
-    """
-
-    recipe = (
-        document if isinstance(document, RecipeDefinition) else read_recipe(document)
-    )
-    raw = document if isinstance(document, Mapping) else recipe.model_dump(mode="json")
-    policy = build_policy_projection(recipe)
-    build = canonical_build(
-        raw,
-        options=RecipeBuildOptions.model_validate_json(
-            canonical_message(policy["build_options"])
-        ),
-        security=BuildSecurityProjection.model_validate_json(
-            canonical_message(policy["build_security"])
-        ),
-    )
-    adapter = resolve_runtime_adapter(recipe.runtime.engine, recipe.topology)
-    return derive_build_input_identity(
-        build,
-        source_bundle_sha256=source_bundle_sha256,
-        builder_binary_digest=None,
-        base_images=list(dockerfile_base_images(dockerfile_payload)),
-        runtime_adapter=adapter.document(),
-    )
-
-
-def _scalar(value: object) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, str) and "\0" not in value:
-        return value
-    raise ValueError("build environment value is not a scalar")
-
-
-def podman_build_arguments(
-    options: RecipeBuildOptions,
-    *,
-    capabilities: Sequence[str],
-    processes: int,
-    dockerfile: str,
-    context: str,
-) -> list[str]:
-    """The ``podman build`` arguments a Spark builder uses for these options.
-
-    Mirrors ``rust/crates/vonk-agent/src/recipe_builder.rs`` (the build
-    stage), so an image built in CI is produced under the same flags as a
-    Spark build.  Paths are relative to the caller's working directory.
-    """
-
-    arguments = [
-        "--no-cache",
-        "--pull=never",
-        "--platform",
-        "linux/arm64",
-        "--file",
-        f"{context}/{dockerfile}",
-        "--cap-drop=all",
-        "--security-opt=no-new-privileges",
-        f"--ulimit=nproc={processes}:{processes}",
-        f"--format={options.format}",
-        f"--identity-label={_scalar(options.identity_label)}",
-        f"--jobs={options.jobs}",
-        f"--disable-compression={_scalar(options.layer_compression == 'disabled')}",
-        f"--layers={_scalar(options.layers)}",
-        f"--no-hostname={_scalar(options.no_hostname)}",
-        f"--no-hosts={_scalar(options.no_hosts)}",
-        f"--omit-history={_scalar(options.omit_history)}",
-        f"--shm-size={options.shm_bytes}",
-        f"--skip-unused-stages={_scalar(options.skip_unused_stages)}",
-    ]
-    for item in options.additional_contexts:
-        arguments += ["--build-context", f"{item.name}={context}/{item.path}"]
-    for flag, entries in (
-        ("--annotation", options.annotations),
-        ("--label", options.labels),
-        ("--layer-label", options.layer_labels),
-    ):
-        for entry in entries:
-            arguments += [flag, f"{entry.name}={entry.value}"]
-    for variable in options.environment:
-        arguments += ["--env", f"{variable.name}={_scalar(variable.value)}"]
-    if options.ignorefile is not None:
-        arguments += ["--ignorefile", f"{context}/{options.ignorefile}"]
-    for feature in options.os_features:
-        arguments += ["--os-feature", str(feature)]
-    if options.os_version is not None:
-        arguments += ["--os-version", str(options.os_version)]
-    if options.squash == "new":
-        arguments.append("--squash")
-    elif options.squash == "all":
-        arguments.append("--squash-all")
-    if options.timestamp is not None:
-        arguments.append(f"--timestamp={options.timestamp}")
-    for name in options.unset_environment:
-        arguments += ["--unsetenv", str(name)]
-    for name in options.unset_labels:
-        arguments += ["--unsetlabel", str(name)]
-    arguments += [f"--cap-add={capability}" for capability in capabilities]
-    return arguments
-
-
-def write_library_image_plan(library_root: Path, output: Path) -> dict[str, object]:
-    """Plan one image per distinct build key for a built recipe library.
-
-    ``library_root`` is a recipe checkout after ``tools/build-catalog-index``
-    wrote ``catalog-index.json`` and ``packages/``.  For every distinct key
-    this writes ``<output>/<key>/context/`` (the exact build context a Spark
-    receives) and returns the build arguments, the adapter stage and the
-    recipes that share the image.  Recipes whose package cannot be planned
-    are listed under ``skipped`` with the reason; they simply get no
-    prebuilt image.
-    """
-
-    index = json.loads((library_root / "catalog-index.json").read_text("utf-8"))
-    images: dict[str, dict[str, object]] = {}
-    skipped: list[dict[str, str]] = []
-    for entry in index.get("recipes", []):
-        document = entry.get("document", {})
-        identity = document.get("identity", {}) if isinstance(document, Mapping) else {}
-        slug = str(identity.get("slug", ""))
-        try:
-            item, bundle = _library_recipe(library_root, index, entry)
-            # The Controller refuses a recipe its source policy rejects, so an
-            # image for it could never be pulled: do not build one.
-            _require_source_policy(item.document, bundle, item.source_bundle_sha256)
-            recipe = read_recipe(item.document)
-            files = dict(bundle.files)
-            intent = package_build_intent(
-                item.document,
-                source_bundle_sha256=bundle.sha256,
-                dockerfile_payload=files[
-                    _bundle_relative(
-                        recipe.execution.build.dockerfile,
-                        recipe.execution.build.context.path,
-                    )
-                ],
-            )
-            key = executable_build_key(intent)
-        except UnknownOutcomeError as error:
-            # End only this plan entry; a later invocation observes it anew.
-            skipped.append({"slug": slug, "reason": _reason(error)})
-            continue
-        except Exception as error:  # noqa: BLE001 - one recipe never blocks the others
-            skipped.append({"slug": slug, "reason": _reason(error)})
-            continue
-        recipe_entry = {
-            "publisher": recipe.identity.publisher,
-            "slug": recipe.identity.slug,
-            "version": recipe.release.version if recipe.release else None,
-            "content_sha256": item.content_sha256,
-            "source_path": item.source_path,
-            "context": recipe.execution.build.context.path,
-        }
-        if key in images:
-            images[key]["recipes"].append(recipe_entry)  # type: ignore[union-attr]
-            continue
-        policy = build_policy_projection(recipe)
-        options = RecipeBuildOptions.model_validate_json(
-            canonical_message(policy["build_options"])
-        )
-        resources = policy["build_resources"]
-        security = policy["build_security"]
-        assert isinstance(resources, Mapping)
-        assert isinstance(security, Mapping)
-        adapter = resolve_runtime_adapter(recipe.runtime.engine, recipe.topology)
-        directory = output / key / "context"
-        directory.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(fileobj=io.BytesIO(bundle.archive)) as archive:
-            archive.extractall(directory, filter="data")
-        execution = intent["execution_build"]
-        assert isinstance(execution, Mapping)
-        images[key] = {
-            "build_key": key,
-            "recipes": [recipe_entry],
-            "base_images": [
-                str(image["reference"])
-                for image in intent["base_images"]  # type: ignore[union-attr]
-            ],
-            "recipe_build_arguments": podman_build_arguments(
-                options,
-                capabilities=list(security["capabilities"]),
-                processes=int(resources["processes"]),
-                dockerfile=str(execution["dockerfile"]),
-                context="context",
-            ),
-            "adapter_containerfile": adapter.containerfile,
-            "adapter_build_argument": "VONK_RECIPE_IMAGE",
-            "adapter_labels": dict(adapter.labels()),
-            "adapter_build_arguments": [
-                "--network=none",
-                "--no-cache",
-                "--pull=never",
-                "--platform",
-                "linux/arm64",
-                "--cap-drop=all",
-                "--security-opt=no-new-privileges",
-                f"--format={options.format}",
-                *(
-                    f"--label={name}={value}"
-                    for name, value in (
-                        (RUNTIME_INTERFACE_LABEL, RUNTIME_INTERFACE_LABEL_VALUE),
-                        (RUNTIME_ADAPTER_LABEL, adapter.adapter_id),
-                        (RUNTIME_ADAPTER_DIGEST_LABEL, adapter.digest),
-                    )
-                ),
-                *(f"--cap-add={item}" for item in security["capabilities"]),
-            ],
-        }
-    return {
-        "schema_version": 1,
-        "source_commit": index.get("source_commit"),
-        "images": sorted(images.values(), key=lambda value: str(value["build_key"])),
-        "skipped": skipped,
-    }
 
 
 def _library_recipe(
@@ -435,10 +154,6 @@ def library_source_policy_failures(library_root: Path) -> dict[str, str]:
         except Exception as error:  # noqa: BLE001 - report every recipe, not the first
             failures[slug] = _reason(error)
     return failures
-
-
-def _bundle_relative(dockerfile: str, context: str) -> str:
-    return dockerfile.removeprefix(context.rstrip("/") + "/")
 
 
 def prebuilt_reference(job: Job) -> str | None:
@@ -849,14 +564,9 @@ class PrebuiltImageImporter:
 
 
 __all__ = [
-    "PREBUILT_KEY_SCHEMA_VERSION",
     "PREBUILT_NOT_PINNED",
     "PrebuiltImageImporter",
-    "executable_build_key",
     "library_source_policy_failures",
-    "package_build_intent",
-    "podman_build_arguments",
     "policy_prebuilt_reference",
     "prebuilt_reference",
-    "write_library_image_plan",
 ]
