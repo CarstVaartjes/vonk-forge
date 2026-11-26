@@ -37,7 +37,7 @@ jobs:
           shopt -s nullglob
           wheels=("$output/"vonk_nas_setup-*-py3-none-any.whl)
           test "${#wheels[@]}" -eq 1
-          uv run --project control --frozen python scripts/verify-nas-setup-wheel "${wheels[0]}"
+          uv run --project control --frozen python scripts/release/verify-nas-setup-wheel "${wheels[0]}"
           (cd "$output" && sha256sum -- *.whl > SHA256SUMS)
       - name: Upload accepted portable NAS setup
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -2,9 +2,9 @@
 
 Every code the Controller shows an operator as *why* something is waiting, refused,
 blocked or degraded is a member of one of these enums, grouped by the domain that
-raises it.  ``scripts/export-agent-wire-schema`` publishes them through
-:class:`ReasonCodeVocabulary`, ``scripts/generate-agent-wire`` turns that into Rust
-types and ``scripts/generate-control-clients`` into OpenAPI and TypeScript, so no
+raises it.  ``scripts/dev/export-agent-wire-schema`` publishes them through
+:class:`ReasonCodeVocabulary`, ``scripts/dev/generate-agent-wire`` turns that into Rust
+types and ``scripts/dev/generate-control-clients`` into OpenAPI and TypeScript, so no
 consumer spells a code by hand.  The vocabulary ratchet
 (``control/tests/vocabulary_literals.py``) fails a string literal that equals a
 member and a string constant in any code position of the Controller.

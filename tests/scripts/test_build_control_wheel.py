@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.protocol_wheel import protocol_wheel_name
+from scripts.release.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/build-control-wheel"

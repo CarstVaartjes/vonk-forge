@@ -20,9 +20,9 @@ runs:
     - name: Sync the locked protocol member
       # Inexact on purpose: a bare `uv sync --package` removes other members.
       shell: bash
-      run: scripts/retry-dependency-fetch uv sync --inexact --package vonk-agent-protocol --frozen --no-dev
+      run: scripts/ci/retry-dependency-fetch uv sync --inexact --package vonk-agent-protocol --frozen --no-dev
     - name: Record the prepared protocol environment
-      # The exporter calls scripts/check_environment.py, which resyncs unless
+      # The exporter calls scripts/dev/check_environment.py, which resyncs unless
       # its stamp matches the lock.
       shell: bash
       run: |
@@ -31,7 +31,7 @@ runs:
         import sys
         from pathlib import Path
 
-        sys.path.insert(0, "scripts")
+        sys.path.insert(0, "scripts/dev")
         from check_environment import DEFAULT_ENVIRONMENT, ensure_protocol
 
         root = Path.cwd().resolve()

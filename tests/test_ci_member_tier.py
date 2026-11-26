@@ -3,7 +3,7 @@
 A member pull request runs only the quick tier (the selector, lint, the web
 check, Rust fmt/clippy when Rust changed, and a gate that cannot satisfy the
 required check); its integration pull request runs every suite and
-proof once. `full` from scripts/select-ci-areas owns that rule,
+proof once. `full` from scripts/ci/select-ci-areas owns that rule,
 so a new heavy job cannot run on every member again, no proof runs outside the
 CI gate, and no workflow re-derives the rule from the branch name.
 """

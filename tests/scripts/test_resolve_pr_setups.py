@@ -33,7 +33,7 @@ def _run(tmp_path: Path, names: list[str], built_tree: str):
     )
     gh.chmod(gh.stat().st_mode | stat.S_IEXEC)
     return subprocess.run(
-        [str(ROOT / "scripts/resolve-pr-setups"), "42", TREE],
+        [str(ROOT / "scripts/ci/resolve-pr-setups"), "42", TREE],
         capture_output=True,
         text=True,
         check=False,

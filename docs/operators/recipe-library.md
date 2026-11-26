@@ -193,7 +193,7 @@ export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 
 scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
 "$VONK_PLATFORM_ROOT/.venv/bin/python" \
-  "$VONK_PLATFORM_ROOT/scripts/validate-recipe-library" \
+  "$VONK_PLATFORM_ROOT/scripts/recipes/validate-recipe-library" \
   --library-root "$VONK_RECIPE_LIBRARY_ROOT" \
   --platform-root "$VONK_PLATFORM_ROOT" \
   --json
@@ -204,7 +204,7 @@ scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
 taken from the checkout's `HEAD` (pass both after the path for a tree without
 history), which writes the ignored `catalog-index.json`,
 `qualification/qualification-index.json` and `packages/` build outputs in
-place. Platform CI, the reusable recipe validator, `scripts/qualify-recipe`,
+place. Platform CI, the reusable recipe validator, `scripts/dev/qualify-recipe`,
 the campaign runner and the tests read those outputs; run the command again
 after changing the checkout.
 
@@ -217,7 +217,7 @@ Record both exact commits and the recipe content digest with the result.
 To run structural qualification for one recipe from the external checkout:
 
 ```bash
-./scripts/qualify-recipe \
+./scripts/dev/qualify-recipe \
   --recipe "$VONK_RECIPE_LIBRARY_ROOT/recipes/deepseek-v4-flash-0731-ds4-single.json" \
   --library-root "$VONK_RECIPE_LIBRARY_ROOT" \
   --platform-root . \

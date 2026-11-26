@@ -145,9 +145,10 @@ def test_failed_report_cannot_be_signed_as_release_evidence(
         del report["failure"]
         module._atomic_write(arguments.output, report)
     root = Path(__file__).resolve().parents[1]
-    monkeypatch.syspath_prepend(str(root / "scripts"))
+    monkeypatch.syspath_prepend(str(root / "scripts/release"))
     loader = importlib.machinery.SourceFileLoader(
-        "acceptance_report_signer", str(root / "scripts/install-release-publication")
+        "acceptance_report_signer",
+        str(root / "scripts/release/install-release-publication"),
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None

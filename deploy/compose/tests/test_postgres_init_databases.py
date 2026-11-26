@@ -107,7 +107,7 @@ def test_database_initializer_rejects_an_invalid_password(tmp_path: Path) -> Non
 
 @pytest.fixture(scope="module")
 def postgres_image() -> str:
-    """The pinned image, pulled beforehand by scripts/pull-test-images."""
+    """The pinned image, pulled beforehand by scripts/ci/pull-test-images."""
     if shutil.which("docker") is None:
         _docker_unavailable("Docker is required for the fresh PostgreSQL test")
     docker_info = subprocess.run(
@@ -127,10 +127,10 @@ def postgres_image() -> str:
         timeout=15,
     )
     if present.returncode != 0:
-        # Tests never download: CI and scripts/test-local pull pinned images
+        # Tests never download: CI and scripts/dev/test-local pull pinned images
         # once, with retries, before the suite starts.
         _docker_unavailable(
-            f"{POSTGRES_IMAGE} is not present; run scripts/pull-test-images postgres"
+            f"{POSTGRES_IMAGE} is not present; run scripts/ci/pull-test-images postgres"
         )
     return POSTGRES_IMAGE
 

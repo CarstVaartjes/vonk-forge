@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-RELEASE = ROOT / "scripts/reconcile-github-release"
+RELEASE = ROOT / "scripts/release/reconcile-github-release"
 SHA = "a" * 40
 REPOSITORY = "CarstVaartjes/vonk-forge"
 

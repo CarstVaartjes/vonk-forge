@@ -15,7 +15,7 @@ from retry_dependency_fetch import acquisition_prefix, locked_pip_shape
 
 ROOT = Path(__file__).resolve().parents[1]
 
-WRAPPER = "scripts/retry-dependency-fetch"
+WRAPPER = "scripts/ci/retry-dependency-fetch"
 
 
 def wrapped_commands(script: str) -> list[tuple[str, ...]]:

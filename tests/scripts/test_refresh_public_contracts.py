@@ -1,4 +1,4 @@
-"""A pin refresh leaves the files `scripts/verify-supply-chain` checks agreeing."""
+"""A pin refresh leaves the files `scripts/release/verify-supply-chain` checks agreeing."""
 
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ FILES = (
     "control/pyproject.toml",
     "tests/acceptance/recipe-library-revision.txt",
     "control/Dockerfile",
-    "scripts/resolve-publication-producer",
+    "scripts/ci/resolve-publication-producer",
 )
 
 
 def _tool():
     loader = importlib.machinery.SourceFileLoader(
-        "refresh_public_contracts", str(ROOT / "scripts/refresh-public-contracts")
+        "refresh_public_contracts", str(ROOT / "scripts/dev/refresh-public-contracts")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
@@ -54,7 +54,7 @@ def test_a_new_pin_replaces_the_wheel_and_every_spelling_of_it(tmp_path: Path) -
     revision = repository / "tests/acceptance/recipe-library-revision.txt"
     assert revision.read_text() == commit + "\n"
     assert f'rev = "{commit}"' in (repository / "control/pyproject.toml").read_text()
-    for relative in ("control/Dockerfile", "scripts/resolve-publication-producer"):
+    for relative in ("control/Dockerfile", "scripts/ci/resolve-publication-producer"):
         text = (repository / relative).read_text()
         assert new.name in text
         assert Path(old).name not in text

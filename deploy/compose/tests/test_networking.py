@@ -3,7 +3,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from scripts.image_policy import FLOATING_TAGS
+from scripts.release.image_policy import FLOATING_TAGS
 
 
 def _rendered() -> dict:

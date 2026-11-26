@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/verify-agent-binaries"
+SCRIPT = ROOT / "scripts/agent/verify-agent-binaries"
 BUILD_DIGEST = "sha256:" + "a" * 64
 SEMANTIC_VERSION = "0.1.0"
 

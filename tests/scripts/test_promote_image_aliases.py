@@ -5,7 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts/promote-image-aliases"
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts/images/promote-image-aliases"
 ROLES = ("api", "worker", "litellm")
 IMAGES = tuple(f"ghcr.io/carstvaartjes/vonk-forge-{role}" for role in ROLES)
 DIGESTS = tuple(f"sha256:{letter * 64}" for letter in "abcde")

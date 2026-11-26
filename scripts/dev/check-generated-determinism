@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""Generate twice and compare bytes, independent of Git's index."""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from tools.generated_contracts import (  # noqa: E402 -- the repository imports follow the repository root's sys.path entry
+    CLIENT_OUTPUTS,
+    WIRE_OUTPUTS,
+)
+
+
+def snapshot(outputs: tuple[str, ...]) -> dict[str, bytes]:
+    result = {}
+    for name in outputs:
+        path = ROOT / name
+        files = sorted(path.rglob("*.py")) if path.is_dir() else [path]
+        for file in files:
+            result[str(file.relative_to(ROOT))] = file.read_bytes()
+    return result
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--wire", action="store_true", help="check Rust wire instead of control clients"
+    )
+    args = parser.parse_args()
+    generator = "generate-agent-wire" if args.wire else "generate-control-clients"
+    outputs = WIRE_OUTPUTS if args.wire else CLIENT_OUTPUTS
+    subprocess.run(
+        [str(ROOT / "scripts/dev" / generator)], cwd=ROOT, check=True, timeout=1200
+    )
+    first = snapshot(outputs)
+    subprocess.run(
+        [str(ROOT / "scripts/dev" / generator)], cwd=ROOT, check=True, timeout=1200
+    )
+    second = snapshot(outputs)
+    changed = sorted(
+        name
+        for name in first.keys() | second.keys()
+        if first.get(name) != second.get(name)
+    )
+    if changed:
+        raise SystemExit("Nondeterministic generation: " + ", ".join(changed))
+    print(f"Deterministic {generator}: {len(first)} files")
+
+
+if __name__ == "__main__":
+    main()

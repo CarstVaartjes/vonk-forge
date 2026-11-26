@@ -105,7 +105,7 @@ alternative reviewer placement. The checks are `tools/stable_preflight.py`.
 ## Local verification
 
 ```sh
-scripts/verify-supply-chain --json
+scripts/release/verify-supply-chain --json
 uv run --project control --frozen \
   pytest -q 'tests/scripts/test_install_release_publication_*.py'
 ```
