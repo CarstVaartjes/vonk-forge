@@ -84,8 +84,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !stopped.success {
             return Err(CommandFailure::exit(&stopped).into());
         }
-        let removed =
-            self.run_docker_with_timeout(&["rm".to_owned(), name], Duration::from_secs(15))?;
+        let removed = self.run_docker_with_timeout(
+            &["rm".to_owned(), "--volumes".to_owned(), name],
+            Duration::from_secs(15),
+        )?;
         if !removed.success {
             return Err(CommandFailure::exit(&removed).into());
         }
