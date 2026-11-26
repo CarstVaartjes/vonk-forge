@@ -4406,7 +4406,7 @@ def test_a_controller_prebuilt_key_read_is_flagged() -> None:
     ):
         assert check_source(path, source, {1}, modes=("prebuilt-key",))
     assert check_source(
-        "scripts/recipes/plan",
+        "scripts/recipes/plan.py",
         "key = pinned['build_key']\n",
         {1},
         modes=("prebuilt-key",),
