@@ -1,7 +1,6 @@
 """Catalog prebuilt images retain their accepted content through retries.
 
-These run the real producer and consumer seams: the CI planner keys a real
-recipe package, the signed index carries the pushed digest, catalog sync
+These run the real producer and consumer seams: the signed index carries the pushed digest, catalog sync
 records it, build planning prefers it without admitting any Spark resources,
 the build job is executed by the Controller importer, and the result is the
 same reusable build receipt a Spark upload leaves.
@@ -33,7 +32,7 @@ from vonk_control.auth import TokenCodec
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
-from vonk_control.bounded_json import require_mapping, require_sequence
+from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.image_store.oci import (
@@ -53,7 +52,6 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.prebuilt_images import (
     PrebuiltImageImporter,
-    write_library_image_plan,
 )
 from vonk_control.recipe_builds.cancellation import request_build_cancellation
 from vonk_control.recipe_builds.common import RecipeBuildUnknown
@@ -102,21 +100,6 @@ def _one_recipe_index() -> dict[str, Any]:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     index["recipes"] = index["recipes"][:1]
     return index
-
-
-def _planned_key(tmp_path: Path) -> str:
-    """The key the CI planner computes for the real package."""
-
-    library = tmp_path / "library"
-    library.mkdir()
-    (library / "catalog-index.json").write_text(
-        json.dumps(_one_recipe_index()), encoding="utf-8"
-    )
-    (library / "packages").symlink_to(ROOT / "packages")
-    plan = write_library_image_plan(library, tmp_path / "plan")
-    assert plan["skipped"] == []
-    (image,) = require_sequence(plan["images"], "planned images")
-    return str(require_mapping(image, "planned image")["build_key"])
 
 
 def _library_snapshot(
@@ -181,20 +164,14 @@ def _sync(
 
 
 def _published_library(
-    tmp_path: Path, *, build_key: str | None = None, pinned: bool = True
+    tmp_path: Path, *, pinned: bool = True
 ) -> tuple[sessionmaker[Session], str]:
     """Sync a one-recipe signed library whose index pins a prebuilt image.
 
-    The key comes from the CI planner run over the real package, exactly as
-    the recipe repository's image workflow computes it, unless a test
-    supplies a different one.
+    The pin carries an arbitrary key; the Controller never reads it.
     """
 
-    pin = (
-        {"reference": REFERENCE, "build_key": build_key or _planned_key(tmp_path)}
-        if pinned
-        else None
-    )
+    pin = {"reference": REFERENCE, "build_key": "a" * 64} if pinned else None
     engine = create_engine(f"sqlite:///{tmp_path / 'controller.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -320,7 +297,7 @@ def _start(
     return plan, job
 
 
-def test_a_recipe_the_controller_refuses_gets_no_image_and_says_why(
+def test_a_recipe_the_controller_refuses_is_reported_with_the_finding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
@@ -331,18 +308,17 @@ def test_a_recipe_the_controller_refuses_gets_no_image_and_says_why(
         return SourcePolicyReport(False, bundle.sha256, "Dockerfile", (finding,))
 
     monkeypatch.setattr(prebuilt_images, "inspect_package_source_policy", refuse)
-    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
-    index["recipes"] = index["recipes"][:1]
     library = tmp_path / "library"
     library.mkdir()
-    (library / "catalog-index.json").write_text(json.dumps(index), encoding="utf-8")
+    (library / "catalog-index.json").write_text(
+        json.dumps(_one_recipe_index()), encoding="utf-8"
+    )
     (library / "packages").symlink_to(ROOT / "packages")
 
-    plan = write_library_image_plan(library, tmp_path / "plan")
+    failures = prebuilt_images.library_source_policy_failures(library)
 
-    assert plan["images"] == []
-    (skipped,) = require_sequence(plan["skipped"], "skipped recipes")
-    assert "dockerfile.heredoc_forbidden Dockerfile:23" in str(skipped)
+    (reason,) = failures.values()
+    assert "dockerfile.heredoc_forbidden Dockerfile:23" in reason
 
 
 def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
@@ -356,6 +332,8 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
     plan, job = _start(builds, operations, revision_id)
     assert plan.policy_report is not None
     assert plan.policy_report["prebuilt_image"] == REFERENCE
+    decision = require_mapping(plan.policy_report["prebuilt_decision"], "decision")
+    assert decision["code"] == PrebuiltImageCode.USED
     with sessions() as session:
         assert session.scalars(select(AgentOperation)).all() == []
         assert session.scalars(select(ResourceReservation)).all() == []
@@ -389,26 +367,6 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
     resolution = builds.resolve(revision_id)
     assert resolution.cached
     assert resolution.build_id == plan.build_id
-
-
-def test_a_pin_whose_key_forge_never_computed_is_pulled(tmp_path: Path) -> None:
-    # Wrong implementation: the Controller re-derives the key and falls back to
-    # a Spark build (here: refused for missing inventory) whenever recipes CI
-    # keyed the image differently, so an older Controller never finds the
-    # image a newer catalog pins.
-    sessions, revision_id = _published_library(tmp_path, build_key="0" * 64)
-    builds, operations = _services(sessions, tmp_path)
-
-    plan, _job = _start(builds, operations, revision_id)
-
-    assert plan.policy_report is not None
-    assert plan.policy_report["prebuilt_image"] == REFERENCE
-    decision = require_mapping(plan.policy_report["prebuilt_decision"], "decision")
-    assert decision["code"] == PrebuiltImageCode.USED
-    assert plan.policy_report["builder_binary_digest"] == ADDRESS
-    with sessions() as session:
-        assert session.scalars(select(AgentOperation)).all() == []
-        assert session.scalars(select(ResourceReservation)).all() == []
 
 
 def test_a_pin_recorded_for_other_content_is_never_used(tmp_path: Path) -> None:

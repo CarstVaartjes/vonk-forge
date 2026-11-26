@@ -623,7 +623,7 @@ provenance comparisons, security refusals outside ingress owners, unbounded wait
 read refusals, a captured Docker listing or ranged inspection in the helper (read it line by line),
 anti-principle
 test assertions, vonkctl tests that assert wording in printed output (`printed-output`), short wall-clock limits on test work, and the existing
-coordination syntax violations. The `job-limits` guard refuses an added `MAX_INPUT_*`, `MAX_OUTPUT_*` or `MAX_TIMEOUT_SECONDS` assignment outside `agent_protocol/src/vonk_agent_protocol/job_limits.py`, the one owner of artifact-job limits. The `prebuilt-key` guard refuses an added `executable_build_key(` call or `build_key` read (attribute, subscript or `.get`) in `control/src/` outside `control/src/vonk_control/catalog/` ingest: the Controller trusts the signed pin's digest. The retry guard also rejects attempt/repetition
+coordination syntax violations. The `job-limits` guard refuses an added `MAX_INPUT_*`, `MAX_OUTPUT_*` or `MAX_TIMEOUT_SECONDS` assignment outside `agent_protocol/src/vonk_agent_protocol/job_limits.py`, the one owner of artifact-job limits. The `prebuilt-key` guard refuses an added `executable_build_key(` call or `build_key` read (attribute, subscript or `.get`) in `control/src/`, `src/` or `scripts/` outside `control/src/vonk_control/catalog/` ingest: the Controller trusts the signed pin's digest. The retry guard also rejects attempt/repetition
 comparisons that end standing intent or remove its next action; explicit
 cancellation and request-local retries remain valid. A broad handler that parks
 or defers work must consult `disposition()` or `is_definite()` first
@@ -869,7 +869,9 @@ checks the bundle's digest and its keyless attestation from
 `installer-publication.yml`, and runs the bundle's
 `scripts/recipes/validate-recipe-checkout`. It only reads, and a failed job is
 the alarm; the fix is a contract fix in the repository that drifted, never a
-gate on unrelated pull requests. The bundle is described in
+gate on unrelated pull requests. Recipes CI no longer calls forge for image planning or a reusable
+validation workflow: it plans its own builds (`tools/build-plan`) and validates
+only through the bundle. The bundle is described in
 [Recipe-tools bundle](runbooks/platform-release-publication.md#recipe-tools-bundle).
 
 ### Fuzzing

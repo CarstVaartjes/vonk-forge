@@ -4405,6 +4405,12 @@ def test_a_controller_prebuilt_key_read_is_flagged() -> None:
         'key = projected["prebuilt_image"].get("build_key")\n',
     ):
         assert check_source(path, source, {1}, modes=("prebuilt-key",))
+    assert check_source(
+        "scripts/recipes/plan.py",
+        "key = pinned['build_key']\n",
+        {1},
+        modes=("prebuilt-key",),
+    )
     assert not check_source(
         path, "digest = image.digest\n", {1}, modes=("prebuilt-key",)
     )

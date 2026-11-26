@@ -241,7 +241,7 @@ text of this section:
   that import a sibling module stay in the same group; scripts addressed by
   path from other commits or repos stay at the scripts root
   (`render-accepted-compose-overlay`, `build-recipe-library`,
-  `recipe-image-plan`, `build-control-wheel`); a script's repository
+  `build-control-wheel`); a script's repository
   root is `parents[2]`.
 - Every test names a wrong implementation it catches; prefer behavioural
   boundaries and real producer/store/consumer seams. A bug fix ships with a
@@ -260,7 +260,9 @@ text of this section:
   a serving kind, adapter or source provider without a handler fails
   `control/tests/test_platform_features.py`); never type a feature value by hand.
   Recipes CI addresses the bundle's `scripts/recipes/validate-recipe-checkout`,
-  `platform-features.json` and `.tool-versions` by path: move them only together with the recipes reader. Release acceptance runs the extracted
+  `platform-features.json` and `.tool-versions` by path (recipes plans its own
+  image builds with `tools/build-plan` and a recipe-owned key; forge ships no
+  planner, and recipes CI neither checks out forge nor builds its control wheel): move them only together with the recipes reader. Release acceptance runs the extracted
   bundle against the pinned library, and promotion writes its pointer last; see
   [Recipe-tools bundle](docs/runbooks/platform-release-publication.md#recipe-tools-bundle).
 - The public contracts are the attested wheel asset of one recipes release
