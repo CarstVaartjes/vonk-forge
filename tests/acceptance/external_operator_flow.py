@@ -15,7 +15,7 @@ PostgreSQL, the real maintenance pass, the real supervisor and LiteLLM:
 
 Acceptance-only trust: a throwaway CA, mounted into the gateway container by a
 Compose overlay that sets ``SSL_CERT_FILE`` (certificate checks stay on), and a
-partner stub on ``cluster-egress`` under a dotted alias. The secret is a file in
+partner stub that runs inside the gateway container under a dotted name resolved to itself. The secret is a file in
 NAS custody, written before the stack starts. No Spark is enrolled, so there is no
 local alias on this NAS: the local-model-keeps-serving leg is proven against the
 built image by ``litellm_external_proof.py``.
@@ -35,16 +35,18 @@ PARTNER_HOST = "partner.test.example"
 PARTNER_PORT = 8443
 ALIAS = "acceptance-partner"
 SECRET = "acceptance-partner-secret"
-CONTAINER = "vonk-acceptance-partner"
+PARTNER_LOG_SCRIPT = "import os; p = '/tmp/partner.log'; print(open(p).read() if os.path.exists(p) else '')"
 
 PARTNER_STUB = """
 import json, ssl
+EXPECTED = "Bearer " + open("/acceptance/expected").read().strip()
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length", "0")))
-        print("REQUEST", self.headers.get("Authorization") == "Bearer " + %(secret)r, flush=True)
+        with open("/tmp/partner.log", "a") as log:
+            log.write("REQUEST " + str(self.headers.get("Authorization") == EXPECTED) + chr(10))
         answer = json.dumps({
             "id": "chatcmpl-acceptance", "object": "chat.completion", "created": 0,
             "model": "partner-large",
@@ -62,9 +64,11 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-context.load_cert_chain("/proof/leaf.pem", "/proof/leaf.key")
-server = ThreadingHTTPServer(("0.0.0.0", %(port)d), Handler)
+context.load_cert_chain("/acceptance/leaf.pem", "/acceptance/leaf.key")
+server = ThreadingHTTPServer(("127.0.0.1", 8443), Handler)
 server.socket = context.wrap_socket(server.socket, server_side=True)
+with open("/tmp/partner.log", "a") as log:
+    log.write("listening" + chr(10))
 server.serve_forever()
 """
 
@@ -215,21 +219,26 @@ def prepare(bundle: Path, work: Path) -> Path:
     """Before the stack starts: the secret in custody, the CA, and the gateway overlay."""
     work.mkdir(parents=True, exist_ok=True)
     _openssl(work)
-    (work / "partner.py").write_text(
-        PARTNER_STUB % {"secret": SECRET, "port": PARTNER_PORT}
-    )
+    (work / "expected").write_text(SECRET + "\n")
     custody = bundle / "secrets" / "gateway-credentials"
     custody.mkdir(parents=True, exist_ok=True)
     (custody / "PARTNER").write_text(SECRET + "\n")
     (custody / "PARTNER").chmod(0o600)
     overlay = work / "trust-overlay.yml"
     overlay.write_text(
-        "services:\n"
-        "  litellm:\n"
-        "    environment:\n"
-        "      SSL_CERT_FILE: /acceptance/ca.pem\n"
-        "    volumes:\n"
-        f"      - {work / 'ca.pem'}:/acceptance/ca.pem:ro\n"
+        "\n".join(
+            [
+                "services:",
+                "  litellm:",
+                "    environment:",
+                "      SSL_CERT_FILE: /acceptance/ca.pem",
+                "    extra_hosts:",
+                f"      - {PARTNER_HOST}:127.0.0.1",
+                "    volumes:",
+                f"      - {work}:/acceptance:ro",
+                "",
+            ]
+        )
     )
     return overlay
 
@@ -253,64 +262,31 @@ def _text(command: Sequence[str], *, cwd: Path, stdin: str | None = None) -> str
     return result.stdout
 
 
-def _start_partner(compose: Sequence[str], bundle: Path, work: Path) -> None:
-    container = _text([*compose, "ps", "-q", "litellm"], cwd=bundle).strip()
-    networks = json.loads(
-        _text(
-            [
-                "docker",
-                "inspect",
-                container,
-                "--format",
-                "{{json .NetworkSettings.Networks}}",
-            ],
-            cwd=bundle,
-        )
-    )
-    network = next((name for name in networks if name.endswith("cluster-egress")), None)
-    image = _text(
-        [
-            "docker",
-            "inspect",
-            _text([*compose, "ps", "-q", "control-api"], cwd=bundle).strip(),
-            "--format",
-            "{{.Config.Image}}",
-        ],
-        cwd=bundle,
-    ).strip()
-    if network is None:
-        raise AcceptanceError("the gateway is not on the cluster-egress network")
-    subprocess.run(["docker", "rm", "-f", CONTAINER], check=False, capture_output=True)
+def _start_partner(compose: Sequence[str], bundle: Path) -> None:
+    """The partner runs inside the gateway container, which resolves its name to itself."""
     _text(
-        [
-            "docker",
-            "run",
-            "--detach",
-            "--name",
-            CONTAINER,
-            "--network",
-            network,
-            "--network-alias",
-            PARTNER_HOST,
-            "--volume",
-            f"{work}:/proof:ro",
-            "--entrypoint",
-            "python",
-            image,
-            "/proof/partner.py",
-        ],
+        [*compose, "exec", "-d", "-T", "litellm", "python", "-c", PARTNER_STUB],
+        cwd=bundle,
+    )
+    deadline = time.monotonic() + 30
+    while "listening" not in _partner_log(compose, bundle):
+        if time.monotonic() > deadline:
+            raise AcceptanceError("the partner stub did not start")
+        time.sleep(1)
+
+
+def _partner_log(compose: Sequence[str], bundle: Path) -> str:
+    return _text(
+        [*compose, "exec", "-T", "litellm", "python", "-c", PARTNER_LOG_SCRIPT],
         cwd=bundle,
     )
 
 
-def _partner_requests() -> tuple[int, int]:
+def _partner_requests(compose: Sequence[str], bundle: Path) -> tuple[int, int]:
     """How many requests the partner saw, and how many carried the bound credential."""
-    logs = subprocess.run(
-        ["docker", "logs", CONTAINER], text=True, capture_output=True, check=False
-    )
     lines = [
         line
-        for line in (logs.stdout + logs.stderr).splitlines()
+        for line in _partner_log(compose, bundle).splitlines()
         if line.startswith("REQUEST")
     ]
     return len(lines), sum(line.endswith("True") for line in lines)
@@ -329,7 +305,7 @@ def _gateway(compose: Sequence[str], bundle: Path, key: str) -> dict[str, object
 def exercise(compose: Callable[[], Sequence[str]], bundle: Path, work: Path) -> None:
     """After the stack is healthy: add, publish, call with a client key, remove."""
     command = list(compose())
-    _start_partner(command, bundle, work)
+    _start_partner(command, bundle)
     base = f"https://{PARTNER_HOST}:{PARTNER_PORT}"
     entry = {
         "model_name": ALIAS,
@@ -385,7 +361,7 @@ def exercise(compose: Callable[[], Sequence[str]], bundle: Path, work: Path) -> 
     if reservations != "0":
         raise AcceptanceError("an external model made a Spark reservation")
     served = _gateway(command, bundle, key)
-    seen, authorised = _partner_requests()
+    seen, authorised = _partner_requests(command, bundle)
     if served != {"listed": True, "secret_listed": False, "chat": 200}:
         raise AcceptanceError(
             f"the client key did not reach the external model: {served}"
@@ -408,9 +384,5 @@ def exercise(compose: Callable[[], Sequence[str]], bundle: Path, work: Path) -> 
         if time.monotonic() > deadline:
             raise AcceptanceError("the removed alias still answers")
         time.sleep(5)
-    if _partner_requests()[0] != seen:
+    if _partner_requests(command, bundle)[0] != seen:
         raise AcceptanceError("a request reached the partner after removal")
-
-
-def cleanup() -> None:
-    subprocess.run(["docker", "rm", "-f", CONTAINER], check=False, capture_output=True)

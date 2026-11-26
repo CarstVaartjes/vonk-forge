@@ -1718,7 +1718,6 @@ def exercise_compose(
             service_addresses=service_addresses,
         )
     finally:
-        external_operator_flow.cleanup()
         run(
             [
                 *reference_compose(),

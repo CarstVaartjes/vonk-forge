@@ -37,6 +37,7 @@ INSTALLED_CONTROLLER = {
 # Only the candidate's own Controller: forms are still read, surface is free.
 CANDIDATE_ONLY = {
     "test_fresh_nas_install.py": "clean NAS install and reinstall of the candidate; asserts VONK_ACCEPTANCE_SOURCE_SHA",
+    "external_operator_flow.py": "the candidate's external-model routes on its own fresh NAS bundle",
 }
 
 # Module -> names a program may import. Each one exists, with the same call
