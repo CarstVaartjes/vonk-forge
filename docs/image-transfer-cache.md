@@ -78,7 +78,8 @@ manifest, and the helper's `image-pull` action requires the pulled image to
 be the pinned config for linux/arm64 before tagging it
 `localhost/vonk/compiled-runtime-<manifest hex>` and writing its receipt. Image labels and the image's own `USER` never authorize a pull or a start: the
 signed plan's digest does, and the launch forces the plan's numeric user, a
-read-only rootfs with a `/tmp` tmpfs, `--cap-drop=ALL` and
+read-only rootfs with `/tmp` bound to the run's disk temp directory,
+`--cap-drop=ALL` and
 `no-new-privileges`. The helper starts every workload in `/tmp`
 (`--workdir /tmp`, outside the run identity digest), the directory the
 platform adaptation stage sets, so an image built without that stage runs the

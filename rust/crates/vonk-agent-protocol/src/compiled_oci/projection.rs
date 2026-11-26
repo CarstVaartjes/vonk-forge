@@ -11,6 +11,9 @@ use super::{
     OciNetworkMode, OciSecurityOptions,
 };
 
+/// Signed for the run identity digest only: the helper launches `/tmp` as a
+/// bind of the run's disk temp directory instead. Changing it would make
+/// running workloads unadoptable and refuse a mixed agent/helper start.
 const TMPFS_SPEC: &str = "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824";
 /// The runtime cache mount. It nests inside the `/outputs` bind, so the
 /// container runtime leaves its mountpoint in the host output root.

@@ -452,8 +452,8 @@ derives or reads the pin's `build_key`, the recipes CI's own handle (the
 `build_key` read in `control/src/` outside catalog ingest). The privileged
 helper authorizes an image by the signed plan's digest and its Linux/ARM64
 platform, never by an image label or the image's own `USER`; the launch forces
-the plan's numeric user, the read-only rootfs with its `/tmp` tmpfs,
-`--cap-drop=ALL`, `no-new-privileges` and `--workdir /tmp`. A forge change to
+the plan's numeric user, the read-only rootfs with `/tmp` bound to the run's
+disk temp directory, `--cap-drop=ALL`, `no-new-privileges` and `--workdir /tmp`. A forge change to
 the Spark-local adaptation stage, `runtime/writable_paths.py` or the harness
 wrapper table still changes installed revisions' `build_input_sha256` and so
 re-plans them locally; such a change needs a Carry-lane run.

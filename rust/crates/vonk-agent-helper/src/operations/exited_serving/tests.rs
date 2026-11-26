@@ -134,7 +134,7 @@ fn a_job_container_is_never_selected() {
 #[test]
 fn every_container_kind_the_helper_creates_is_collected_once_unowned() {
     assert!(
-        crate::runtime_preflight::run_arguments("vonk-preflight", "image")
+        crate::runtime_preflight::run_arguments("vonk-preflight", "image", Path::new("/tmp"))
             .iter()
             .any(|argument| argument == "--rm")
     );
