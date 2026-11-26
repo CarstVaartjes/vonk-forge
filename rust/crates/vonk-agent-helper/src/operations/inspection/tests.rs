@@ -18,6 +18,9 @@ fn a_process_exit_always_carries_logs_or_a_typed_reason_none_were_read() {
         exit_code: Some(137),
         oom_killed: Some(true),
         error: String::new(),
+        started_at: None,
+        finished_at: None,
+        gpu_xid: None,
         host_memory: None,
     };
     let logs: Vec<Result<CommandOutput, String>> = vec![
@@ -75,6 +78,9 @@ fn exited(code: i32) -> crate::runtime_logs::ContainerExit {
         exit_code: Some(code),
         oom_killed: Some(false),
         error: String::new(),
+        started_at: None,
+        finished_at: None,
+        gpu_xid: None,
         host_memory: None,
     }
 }
@@ -747,4 +753,30 @@ fn installation_ownership_uses_running_containers_and_mounts_not_metadata() {
     assert!(check(docker_output(false, "", 1), absent.clone()).is_err());
     assert!(check(absent.clone(), docker_output(false, "", 1)).is_err());
     assert!(check(docker_output(true, "invalid", 0), absent).is_err());
+}
+
+#[test]
+fn the_first_xid_of_the_containers_lifetime_is_in_its_exit_summary() {
+    // Xid 79 came before the start and 43 after 31: only the first one inside
+    // the lifetime is the root cause. Lines are NVIDIA-catalog shaped.
+    let started = chrono::DateTime::parse_from_rfc3339(STARTED_AT)
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let host = Host::with(&[job("run-1", "target-1", "exited")]);
+    let (_temp, executor) = host_executor(&host);
+    let xids = crate::host_memory_guard::XidLog::default();
+    let executor = executor.with_xid_log(xids.clone());
+    let summary = |executor: &OperationExecutor<Host>| {
+        let (logs, exit) = executor.container_exit_evidence("vonk-target-1");
+        let OperationError::RuntimeProcessExited { exit_summary, .. } = process_exited(logs, exit)
+        else {
+            panic!("a process exit must stay a process exit");
+        };
+        exit_summary
+    };
+    xids.record(started - chrono::Duration::minutes(5), 79);
+    assert!(!summary(&executor).contains("gpu_xid"));
+    xids.record(started + chrono::Duration::minutes(1), 31);
+    xids.record(started + chrono::Duration::minutes(2), 43);
+    assert!(summary(&executor).contains("gpu_xid=31"));
 }
