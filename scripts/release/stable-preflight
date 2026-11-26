@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import platform
 import shlex
 import subprocess
 import sys
@@ -76,7 +77,11 @@ def environment_state(repo: str, name: str) -> EnvironmentState | None:
         environment = api(base)
     except NotFound:
         return None
-    policies = api(f"{base}/deployment-branch-policies")
+    try:
+        policies = api(f"{base}/deployment-branch-policies")
+    except NotFound:
+        # GitHub answers 404 for an environment without a custom branch policy.
+        policies = {"branch_policies": []}
     secrets = api(f"{base}/secrets?per_page=100")
     variables = api(f"{base}/variables?per_page=100")
     reviewers: list[str] = []
@@ -99,12 +104,20 @@ def file_text(repo: str, path: str, ref: str) -> str:
     return base64.b64decode(content["content"]).decode()
 
 
+def image_platform() -> list[str]:
+    """Read the platform of this host's own Linux image: skopeo otherwise
+    resolves the index for the host OS and fails on macOS."""
+    arch = "arm64" if platform.machine() in ("arm64", "aarch64") else "amd64"
+    return ["--override-os", "linux", "--override-arch", arch]
+
+
 def image_state(repo: str, name: str, sha: str) -> ImageState:
     image = f"{IMAGE_PREFIX}{name}"
     try:
         digest = run(
             [
                 *shlex.split("skopeo inspect --format {{.Digest}}"),
+                *image_platform(),
                 f"docker://{image}:dev-sha-{sha}",
             ],
             missing="manifest unknown",

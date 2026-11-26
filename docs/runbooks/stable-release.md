@@ -49,7 +49,9 @@ the tagged commit.
 
    It needs `gh` (logged in with read access to the repository, its
    environments and Actions variables) and `skopeo` on the PATH; a missing tool
-   or unreadable state exits 2, not 1.
+   or unreadable state exits 2, not 1. An environment with no custom
+   branch policy reads as having none, and `skopeo` is asked for the linux
+   image of the host's architecture, so it also runs on macOS.
 
    It checks the release switches, the stable environments and their deployment
    policies, name parity with the dev twins, the acceptance and agent key
