@@ -86,7 +86,8 @@ Text64 = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 #: contract minor added is served as published (the reader keeps only a word of
 #: this shape). Its own schema definition keeps the published ``$ref`` target.
 type CapabilityName = Annotated[
-    str, StringConstraints(max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    str,
+    StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$"),
 ]
 Text80 = Annotated[str, StringConstraints(min_length=1, max_length=80)]
 Text128 = Annotated[str, StringConstraints(min_length=1, max_length=128)]
