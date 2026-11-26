@@ -424,6 +424,43 @@ def bundled(published: JsonSchema, definitions: JsonSchema) -> JsonSchema:
     return {**schema, "$defs": definitions["$defs"]}
 
 
+def _refs(schema: object) -> list[str]:
+    if isinstance(schema, dict):
+        found = [
+            value.removeprefix(_DEFS_PREFIX)
+            for key, value in schema.items()
+            if key == "$ref" and isinstance(value, str)
+        ]
+        return found + [
+            name
+            for key, value in schema.items()
+            if key != "$defs"
+            for name in _refs(value)
+        ]
+    if isinstance(schema, list):
+        return [name for item in schema for name in _refs(item)]
+    return []
+
+
+def reachable(schema: JsonSchema) -> JsonSchema:
+    """A bundled kind with only the definitions its root reaches.
+
+    The shared definitions file holds every kind's definitions; a client of one
+    kind relies only on those its documents can contain.
+    """
+
+    definitions = schema["$defs"]
+    kept: dict[str, JsonSchema] = {}
+    pending = _refs(schema)
+    while pending:
+        name = pending.pop()
+        if name in kept or name not in definitions:
+            continue
+        kept[name] = definitions[name]
+        pending.extend(_refs(definitions[name]))
+    return {**schema, "$defs": kept}
+
+
 def schema_registry(directory: Path) -> Any:
     """A ``referencing`` registry holding every published file by file name."""
 
@@ -564,7 +601,9 @@ def write_schemas(directory: Path) -> None:
             old = json.loads(target.read_text())
             if "$defs" not in old and old_definitions is not None:
                 old = bundled(old, old_definitions)
-            problems = incompatibilities(old, bundled(document_schema(kind), shared))
+            problems = incompatibilities(
+                reachable(old), bundled(document_schema(kind), shared)
+            )
             if problems:
                 raise SystemExit(
                     f"{target.name}: incompatible change without a version bump:\n"

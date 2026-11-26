@@ -397,6 +397,29 @@ def test_a_ref_to_the_old_definition_plus_optional_fields_keeps_the_version() ->
     assert incompatibilities(old, dropped)
 
 
+def test_a_kind_is_compared_only_on_the_definitions_it_reaches() -> None:
+    """The shared definitions hold every kind's; another kind's break is not this kind's."""
+
+    def kind(other: dict[str, Any]) -> Any:
+        return {
+            "properties": {"a": {"$ref": "#/$defs/Used"}},
+            "$defs": {
+                "Used": {"properties": {"b": {"$ref": "#/$defs/Nested"}}},
+                "Nested": {"properties": {"c": {"type": "string"}}, "required": ["c"]},
+                "Other": other,
+            },
+        }
+
+    old = kind({"properties": {"x": {"type": "string"}}, "required": ["x"]})
+    assert set(_contract.reachable(old)["$defs"]) == {"Used", "Nested"}
+    elsewhere = kind({"properties": {"x": {"type": "string"}}})
+    assert incompatibilities(old, elsewhere)
+    assert incompatibilities(_contract.reachable(old), elsewhere) == []
+    nested = kind(old["$defs"]["Other"])
+    nested["$defs"]["Nested"] = {"properties": {"c": {"type": "string"}}}
+    assert incompatibilities(_contract.reachable(old), nested)
+
+
 def test_schema_version_is_required_and_owned_by_one_model() -> None:
     shared = _contract.definitions_schema()["$defs"]
     for kind in DOCUMENTS:
