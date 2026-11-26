@@ -3,12 +3,16 @@ import os
 import re
 import struct
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"][
+    "version"
+]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
 RELEASE_WORKFLOW = ROOT / ".github/workflows/installer-publication.yml"
 UNIFIED_WORKFLOW = ROOT / ".github/workflows/stable-release.yml"
@@ -239,7 +243,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         struct.pack_into("<H", raw, 18, 183)
         marker = f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode()
         raw[128 : 128 + len(marker)] = marker
-        semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.1"
+        semantic_marker = f"VONK_AGENT_SEMANTIC_VERSION={VERSION}".encode()
         raw[256 : 256 + len(semantic_marker)] = semantic_marker
         if name in {"vonk-build-egress", "vonk-runtime-probe"}:
             struct.pack_into("<Q", raw, 32, 320)
@@ -257,7 +261,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         [
             ROOT / "scripts/agent/build-agent-deb",
             "--version",
-            "0.1.1",
+            VERSION,
             "--architecture",
             "linux-arm64",
             "--build-digest",
@@ -282,7 +286,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         [
             "/usr/bin/dpkg-deb",
             "--extract",
-            output / "vonk-forge-agent_0.1.1_arm64.deb",
+            output / f"vonk-forge-agent_{VERSION}_arm64.deb",
             payload,
         ],
         check=False,
@@ -294,7 +298,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
     assert not (payload / "etc/vonk-forge-agent/agent.toml").exists()
     assert (
         b"vonkforge.invalid"
-        not in (output / "vonk-forge-agent_0.1.1_arm64.deb").read_bytes()
+        not in (output / f"vonk-forge-agent_{VERSION}_arm64.deb").read_bytes()
     )
 
 
