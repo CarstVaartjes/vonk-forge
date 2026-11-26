@@ -7,7 +7,7 @@ from email.message import Message
 from pathlib import Path
 from typing import Self
 
-from httpx import Response
+from httpx2 import Response
 from httpx2 import Response as Response2
 
 from cluster_profiles.control_client.transfers import ControlClient

@@ -7,7 +7,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-typify = { version = "=0.10.1", default-features = false }
+typify = { version = "=0.8.0", default-features = false }
 schemars = "=0.8.22"
 serde_json.workspace = true
 syn = { version = "=3.0.9", features = ["full", "visit-mut"] }
