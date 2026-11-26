@@ -16,7 +16,7 @@ permissions:
   packages: read
 
 # Dependency fetches retry transient network failures inside the tool; the
-# pre-sync steps below additionally run under scripts/retry-dependency-fetch.
+# pre-sync steps below additionally run under scripts/ci/retry-dependency-fetch.
 # Cargo's own settings live in .cargo/config.toml: rust-cache hashes CARGO* env.
 env:
   UV_HTTP_TIMEOUT: "60"
@@ -38,7 +38,7 @@ env:
 # its required check on pull requests that legitimately skip it.
 # A member pull request's gate is renamed too ("CI gate (member PR)"): only a
 # full run reports the required "CI gate", so every change lands through an
-# integration pull request (scripts/select-ci-areas, `full`).
+# integration pull request (scripts/ci/select-ci-areas, `full`).
 # A Dependabot pull request runs nothing, not even the selector or the gate:
 # its update lands through an integration pull request, which runs CI once.
 # Its skipped gate keeps the raw name, so it never reports "CI gate".
@@ -65,7 +65,7 @@ jobs:
       generated: ${{ steps.areas.outputs.generated }}
       nas_install: ${{ steps.areas.outputs.nas_install }}
       agent_package: ${{ steps.areas.outputs.agent_package }}
-      # The one owner of the member/integration rule (scripts/select-ci-areas):
+      # The one owner of the member/integration rule (scripts/ci/select-ci-areas):
       # a member pull request runs only the quick tier (lint, web check, Rust
       # fmt/clippy when Rust changed) and the gate;
       # every other run, including an integration pull request, runs every
@@ -100,11 +100,11 @@ jobs:
             git fetch --no-tags --depth=1 origin "$BASE_SHA"
             git diff --name-only --no-renames "$BASE_SHA" "$GITHUB_SHA" \
               > "$RUNNER_TEMP/changed-paths.txt"
-            scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" \
+            scripts/ci/select-ci-areas --event "$GITHUB_EVENT_NAME" \
               --event-payload "$GITHUB_EVENT_PATH" --github-output \
               < "$RUNNER_TEMP/changed-paths.txt" >> "$GITHUB_OUTPUT"
           else
-            scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" \
+            scripts/ci/select-ci-areas --event "$GITHUB_EVENT_NAME" \
               --event-payload "$GITHUB_EVENT_PATH" \
               --github-output </dev/null >> "$GITHUB_OUTPUT"
           fi
@@ -180,7 +180,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
           git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
             control agent_protocol src scripts rust deploy packaging tests .github tools nas_setup |
-            scripts/check-added-lines
+            scripts/dev/check-added-lines
 
       - name: Run Ruff
         shell: bash
@@ -190,7 +190,7 @@ jobs:
           uv run --project control --frozen ruff format --check .
       - name: Check Python types
         shell: bash
-        run: scripts/check-python-types
+        run: scripts/dev/check-python-types
 
   # The member tier: a few minutes on standard runners, so a member PR gets
   # feedback without the full suites (`lint` above is its Python check, and
@@ -217,7 +217,7 @@ jobs:
         with:
           cli-dependencies: "false"
       - name: Install locked admin web dependencies
-        run: scripts/retry-dependency-fetch npm ci --prefix control/web
+        run: scripts/ci/retry-dependency-fetch npm ci --prefix control/web
       - name: Check TypeScript lint, formatting and types
         uses: ./.github/actions/web-quality
 
@@ -245,9 +245,9 @@ jobs:
       - name: Include protocol wheel with generated release evidence
         run: |
           mkdir -p "$RUNNER_TEMP/supply-chain"
-          cp "inventory/wheels/$(scripts/protocol-wheel-name)" "$RUNNER_TEMP/supply-chain/"
+          cp "inventory/wheels/$(scripts/release/protocol-wheel-name)" "$RUNNER_TEMP/supply-chain/"
       - name: Verify supply-chain evidence
-        run: scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json
+        run: scripts/release/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json
       - name: Preserve verified SBOMs and manifest
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -274,7 +274,7 @@ jobs:
         with:
           shared-key: linux-amd64
       - name: Fetch locked crates
-        run: scripts/retry-dependency-fetch cargo fetch --locked
+        run: scripts/ci/retry-dependency-fetch cargo fetch --locked
       - name: Verify Rust formatting
         run: cargo fmt --all --check
       - name: Lint Rust workspace
@@ -296,9 +296,9 @@ jobs:
         with:
           shared-key: linux-amd64
       - name: Fetch locked crates
-        run: scripts/retry-dependency-fetch cargo fetch --locked
+        run: scripts/ci/retry-dependency-fetch cargo fetch --locked
       - name: Check deterministic wire generation
-        run: scripts/check-generated-determinism --wire
+        run: scripts/dev/check-generated-determinism --wire
       # A full disk kills the runner without a log (runs 41772276715 and
       # 41784505516); these reports keep the margin visible in every run.
       - name: Report free disk before the Rust build
@@ -324,7 +324,7 @@ jobs:
           test_binary=$(cargo test --locked -p vonk-agent --lib --no-run --message-format=json |
             python3 -c 'import json,sys; print(next(row["executable"] for line in sys.stdin if (row := json.loads(line)).get("reason") == "compiler-artifact" and row["target"]["name"] == "vonk_agent" and row.get("executable")))')
           image=$(python3 -c 'import json; print(json.load(open("deploy/compose/images.lock.json"))["ci_tools"]["ubuntu"])')
-          scripts/retry-dependency-fetch docker pull "$image"
+          scripts/ci/retry-dependency-fetch docker pull "$image"
           docker run --rm --network none --read-only --tmpfs /tmp:rw,exec,nosuid \
             --mount "type=bind,src=$test_binary,dst=/retention-tests,readonly" \
             --entrypoint /retention-tests "$image" \
@@ -353,9 +353,9 @@ jobs:
         with:
           shared-key: linux-amd64
       - name: Fetch locked crates
-        run: scripts/retry-dependency-fetch cargo fetch --locked
+        run: scripts/ci/retry-dependency-fetch cargo fetch --locked
       - name: Generate the Rust wire peers for the installed protocol tests
-        run: scripts/generate-agent-wire
+        run: scripts/dev/generate-agent-wire
       - name: Build the protocol wheel the adapter consumes
         run: scripts/build-control-wheel
       - name: Exercise the installed protocol wheel on adapter Python
@@ -364,7 +364,7 @@ jobs:
           consumer="$RUNNER_TEMP/protocol-consumer"
           uv venv --python 3.12 "$consumer"
           uv pip install --python "$consumer/bin/python" \
-            "inventory/wheels/$(scripts/protocol-wheel-name)" \
+            "inventory/wheels/$(scripts/release/protocol-wheel-name)" \
             'pytest==9.1.1'
           "$consumer/bin/python" -c 'import pathlib, sys, vonk_agent_protocol; assert pathlib.Path(vonk_agent_protocol.__file__).is_relative_to(sys.prefix)'
           # Disable the producer's source pythonpath: these checks must consume
@@ -421,7 +421,7 @@ jobs:
         with:
           shared-key: linux-amd64
       - name: Fetch locked crates
-        run: scripts/retry-dependency-fetch cargo fetch --locked
+        run: scripts/ci/retry-dependency-fetch cargo fetch --locked
       - name: Install Spark-compatible rootless Podman
         uses: ./.github/actions/apt-install
         with:
@@ -447,7 +447,7 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 0755 artifacts
-          scripts/verify-agent-systemd --json \
+          scripts/agent/verify-agent-systemd --json \
             | tee artifacts/vonk-forge-systemd-security.json
       - name: Exercise build egress from the hardened agent service
         shell: bash
@@ -528,7 +528,7 @@ jobs:
           cache: npm
           cache-dependency-path: tools/openapi-client/package-lock.json
       - name: Check deterministic control client generation
-        run: scripts/check-generated-determinism
+        run: scripts/dev/check-generated-determinism
 
   compose-integration:
     name: Compose integration
@@ -553,7 +553,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Pull the pinned test images once
-        run: scripts/pull-test-images postgres caddy tailscale
+        run: scripts/ci/pull-test-images postgres caddy tailscale
       - name: Run the complete Compose suite
         run: scripts/test compose
 
@@ -601,7 +601,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Prepare digest-pinned CI dependency mirrors
-        run: scripts/pull-test-images postgres --dockerfile control/Dockerfile --dockerfile deploy/compose/litellm/Dockerfile
+        run: scripts/ci/pull-test-images postgres --dockerfile control/Dockerfile --dockerfile deploy/compose/litellm/Dockerfile
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Name the dependency layer day
@@ -634,7 +634,7 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: Verify the locked LiteLLM base signature
-        run: scripts/verify-litellm-base-signature
+        run: scripts/images/verify-litellm-base-signature
       - name: Build the LiteLLM image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -655,17 +655,25 @@ jobs:
           tests/acceptance/litellm_router_proof.py
           --image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
           --work "$RUNNER_TEMP/router-proof"
+      - name: Check the LiteLLM surface against the pinned image
+        run: |
+          set -euo pipefail
+          image=$(python3 -c 'import json; print(json.load(open("deploy/compose/images.lock.json"))["build_bases"]["litellm"])')
+          docker run --rm -i -e "VONK_LITELLM_IMAGE_DIGEST=${image##*@}" \
+            --entrypoint python "$image" - < tools/litellm_surface.py \
+            > "$RUNNER_TEMP/litellm-surface.json"
+          diff -u deploy/compose/litellm/surface.json "$RUNNER_TEMP/litellm-surface.json"
       - name: Render the installer payload and the local image overlay
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/nas-local"
           install -d -m 0700 "$out"
-          scripts/render-dev-compose --channel pinned \
+          scripts/release/render-dev-compose --channel pinned \
             --output "$out/docker-compose.pinned.yml" \
             --api-image "$IMAGE_PREFIX-api:$IMAGE_TAG" \
             --worker-image "$IMAGE_PREFIX-worker:$IMAGE_TAG" \
             --litellm-image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
-          uv run --project control --frozen python scripts/build-nas-compose-bundle \
+          uv run --project control --frozen python scripts/release/build-nas-compose-bundle \
             --compose "$out/docker-compose.pinned.yml" --channel dev \
             --output "$out/payload.json"
           # The payload follows the :dev channel and pulls its Vonk images.
@@ -716,7 +724,7 @@ jobs:
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge
           VONK_ACCEPTANCE_TAILSCALE_MODE: disabled
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
-        run: scripts/run-with-nas-secret-group uv run --project control --frozen python tests/acceptance/test_fresh_nas_install.py
+        run: scripts/fleet/run-with-nas-secret-group uv run --project control --frozen python tests/acceptance/test_fresh_nas_install.py
 
   agent-package:
     # The package lifecycle script only ran after merge, on push to main.
@@ -747,14 +755,14 @@ jobs:
         with:
           packages: crun fuse-overlayfs iproute2 iptables podman shellcheck slirp4netns uidmap
       - name: Materialize pinned package tools
-        run: scripts/materialize-agent-tools --output-root target
+        run: scripts/agent/materialize-agent-tools --output-root target
       - name: Build the baseline and candidate packages
         run: |
           set -euo pipefail
           while IFS='=' read -r name value; do
             declare "$name=$value"
-          done < <(scripts/agent-package-metadata development branch main \
-            "$GITHUB_SHA" "$(scripts/dev-publication-sequence "$GITHUB_SHA")")
+          done < <(scripts/agent/agent-package-metadata development branch main \
+            "$GITHUB_SHA" "$(scripts/images/dev-publication-sequence "$GITHUB_SHA")")
           key="$RUNNER_TEMP/throwaway-agent-key.pem"
           openssl genpkey -algorithm ed25519 -out "$key"
           # These packages are never published, so their bytes need not be
@@ -767,11 +775,11 @@ jobs:
           }
           export VONK_SOURCE_REVISION="$GITHUB_SHA"
           export VONK_SOURCE_REPOSITORY="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
-          scripts/build-agent-deb --version "$version" --architecture linux-arm64 \
+          scripts/agent/build-agent-deb --version "$version" --architecture linux-arm64 \
             --build-digest "sha256:$(digest vonk-agent-build-v2 "$version")" \
             --release-private-key "$key" --source-date-epoch "$epoch" \
             --output-dir dist
-          scripts/build-agent-deb --acceptance-baseline \
+          scripts/agent/build-agent-deb --acceptance-baseline \
             --version "$baseline_version" --architecture linux-arm64 \
             --build-digest "sha256:$(digest vonk-agent-acceptance-baseline-v1 "$baseline_version")" \
             --release-private-key "$key" --source-date-epoch "$epoch" \
@@ -800,7 +808,7 @@ jobs:
       - name: Run the native package lifecycle
         run: |
           set -euo pipefail
-          sudo scripts/test-agent-package-native-lifecycle linux-arm64 \
+          sudo scripts/agent/test-agent-package-native-lifecycle linux-arm64 \
             "$(realpath "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb")" \
             "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
             "$BASELINE_VERSION" "$VERSION"
@@ -860,7 +868,7 @@ jobs:
         run: |
           set -euo pipefail
           guard_list="$RUNNER_TEMP/repository-guards.txt"
-          python3 scripts/repository-guards > "$guard_list"
+          python3 scripts/ci/repository-guards > "$guard_list"
           mapfile -t guards < "$guard_list"
           uv run --project control --frozen python -m pytest -q -p no:cacheprovider -n auto "${guards[@]}"
 
@@ -901,7 +909,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
           git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
             tests control/tests deploy/compose/tests |
-            uv run --project control --frozen scripts/changed-tests > "$RUNNER_TEMP/changed-tests.txt"
+            uv run --project control --frozen scripts/dev/changed-tests > "$RUNNER_TEMP/changed-tests.txt"
       - name: Run complete repository suite
         shell: bash
         env:
@@ -969,8 +977,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/retry-dependency-fetch cargo fetch --locked
-          uv run --project control --frozen python scripts/generate-agent-wire
+          scripts/ci/retry-dependency-fetch cargo fetch --locked
+          uv run --project control --frozen python scripts/dev/generate-agent-wire
           cargo build --locked --package vonk-agent --example consumer_corpus_probe
       - name: Run the consumer corpus boundaries against the actual probe
         env:
@@ -1017,7 +1025,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Pull the pinned test images once
-        run: scripts/pull-test-images postgres python
+        run: scripts/ci/pull-test-images postgres python
       - name: List the tests this change adds or touches
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         shell: bash
@@ -1028,7 +1036,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
           git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
             tests control/tests deploy/compose/tests |
-            uv run --project control --frozen scripts/changed-tests > "$RUNNER_TEMP/changed-tests.txt"
+            uv run --project control --frozen scripts/dev/changed-tests > "$RUNNER_TEMP/changed-tests.txt"
       - name: Run complete control suite
         shell: bash
         env:
@@ -1099,7 +1107,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Pull the pinned test images once
-        run: scripts/pull-test-images postgres python
+        run: scripts/ci/pull-test-images postgres python
       - name: Run the corpus acceptance tests alone
         run: scripts/test acceptance
 
@@ -1143,7 +1151,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Prepare digest-pinned CI dependency mirrors
-        run: scripts/pull-test-images --dockerfile control/Dockerfile
+        run: scripts/ci/pull-test-images --dockerfile control/Dockerfile
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Name the dependency layer day
@@ -1214,7 +1222,7 @@ jobs:
         with:
           cli-dependencies: "false"
       - name: Install locked admin web dependencies
-        run: scripts/retry-dependency-fetch npm ci --prefix control/web
+        run: scripts/ci/retry-dependency-fetch npm ci --prefix control/web
       - name: Emit the actual producer corpus and observation transfers
         shell: bash
         run: |
@@ -1233,7 +1241,7 @@ jobs:
           path: artifacts/json-schema-suite
           persist-credentials: false
       - name: Install the locked schema compiler dependencies
-        run: scripts/retry-dependency-fetch npm ci --prefix tools/openapi-client
+        run: scripts/ci/retry-dependency-fetch npm ci --prefix tools/openapi-client
       - name: Compile pinned official schemas with the production compiler
         run: python3 scripts/tests/prepare_official_schema_consumers.py --suite artifacts/json-schema-suite
       - name: Check TypeScript lint, formatting and types
@@ -1340,14 +1348,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/ensure-project-venv "$RUNNER_TEMP/signed-update-dependencies"
+          scripts/dev/ensure-project-venv "$RUNNER_TEMP/signed-update-dependencies"
           UV_CACHE_DIR="$RUNNER_TEMP/signed-update-cache" \
           UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/signed-update-dependencies" \
-            scripts/retry-dependency-fetch uv sync --project . --frozen --no-dev --no-install-project
+            scripts/ci/retry-dependency-fetch uv sync --project . --frozen --no-dev --no-install-project
           uv export --project . --frozen --no-dev --no-emit-project \
             --output-file "$RUNNER_TEMP/signed-update-requirements.txt"
           UV_CACHE_DIR="$RUNNER_TEMP/signed-update-cache" \
-            scripts/retry-dependency-fetch uv pip install \
+            scripts/ci/retry-dependency-fetch uv pip install \
               --python "$RUNNER_TEMP/signed-update-dependencies/bin/python" \
               --reinstall --require-hashes -r "$RUNNER_TEMP/signed-update-requirements.txt"
           test -d "$RUNNER_TEMP/signed-update-cache"
@@ -1414,7 +1422,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Pull pinned disposable PostgreSQL
-        run: scripts/pull-test-images postgres
+        run: scripts/ci/pull-test-images postgres
       - name: Prove shared manifest identity and unknown expiry through fresh admission
         run: >-
           uv run --project control --frozen pytest -q -n 0
@@ -1446,9 +1454,9 @@ jobs:
             tools/openapi-client/package-lock.json
       - name: Generate consumers from the current cancellation owner
         run: |
-          scripts/retry-dependency-fetch npm ci --prefix tools/openapi-client
-          scripts/generate-control-clients
-          scripts/retry-dependency-fetch npm ci --prefix control/web
+          scripts/ci/retry-dependency-fetch npm ci --prefix tools/openapi-client
+          scripts/dev/generate-control-clients
+          scripts/ci/retry-dependency-fetch npm ci --prefix control/web
       - name: Consume actual PostgreSQL/API cancellation observations in browser
         run: |
           npm exec -- vitest run src/components/library/model-cache-cancellation-consumer.test.tsx --reporter=junit --outputFile="$RUNNER_TEMP/model-cache-browser.xml"
@@ -1484,8 +1492,8 @@ jobs:
           shared-key: linux-amd64
       - name: Generate canonical wire and compile the exact test
         run: |
-          scripts/retry-dependency-fetch cargo fetch --locked
-          uv run --project control --frozen python scripts/generate-agent-wire
+          scripts/ci/retry-dependency-fetch cargo fetch --locked
+          uv run --project control --frozen python scripts/dev/generate-agent-wire
           cargo test --locked --package vonk-agent --lib --no-run
       - name: Mount only the owned model-store fixture and exercise the production hardlink fault
         shell: bash
@@ -1548,7 +1556,7 @@ jobs:
           set -euo pipefail
           test "$(uname -m)" = aarch64
           test "$(dpkg --print-architecture)" = arm64
-          scripts/ci-apt-install \
+          scripts/ci/ci-apt-install \
             acl adduser ca-certificates curl systemd-container
           docker info
       - name: Verify canonical installation access under the packaged helper filesystem policy
@@ -1611,7 +1619,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Pull pinned disposable PostgreSQL
-        run: scripts/pull-test-images postgres
+        run: scripts/ci/pull-test-images postgres
       - name: Exercise connected producer and consumer
         env:
           VONK_RECIPE_EFFECT_CONSUMER_SOURCE: ${{ github.workspace }}/.recipe-library
@@ -1686,7 +1694,7 @@ jobs:
       - name: Require selector and selected jobs
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: scripts/verify-ci-gate --needs-env NEEDS
+        run: scripts/ci/verify-ci-gate --needs-env NEEDS
 
       - name: Record the exact source and successful check selection
         # A merge-queue run tests the commit main will carry; its receipt lets
@@ -1697,7 +1705,7 @@ jobs:
           (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         env:
           SELECTED_AREAS: ${{ toJSON(needs.changes.outputs) }}
-        run: scripts/resolve-tested-ci write-receipt --output "$RUNNER_TEMP/ci-tested-source/receipt.json"
+        run: scripts/ci/resolve-tested-ci write-receipt --output "$RUNNER_TEMP/ci-tested-source/receipt.json"
       - name: Upload successful source check evidence
         if: >-
           needs.changes.outputs.full == 'true' && (github.event_name == 'merge_group' ||

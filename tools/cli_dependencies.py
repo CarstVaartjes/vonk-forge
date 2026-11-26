@@ -6,7 +6,7 @@ and the OrbStack ``vonk-ci`` VM share files), so one fixed directory would be
 rebuilt by whichever OS ran last and then linked into a venv of the other.
 
 The environment therefore lives in a directory keyed by OS and architecture,
-and ``scripts/sync-cli-dependencies`` stamps it with the platform and
+and ``scripts/dev/sync-cli-dependencies`` stamps it with the platform and
 interpreter it was built for. Consumers accept an environment only when the
 stamp matches the running interpreter; a mismatch is never used, only
 rebuilt by the sync script.
@@ -79,7 +79,7 @@ def site_packages(root: Path) -> tuple[Path | None, str | None]:
     env = environment(root)
     reason = mismatch(env)
     if reason:
-        return None, f"{reason}; run scripts/sync-cli-dependencies"
+        return None, f"{reason}; run scripts/dev/sync-cli-dependencies"
     return next(env.glob("lib/python3.*/site-packages")), None
 
 

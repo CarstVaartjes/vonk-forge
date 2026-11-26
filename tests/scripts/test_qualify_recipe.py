@@ -18,7 +18,7 @@ import pytest
 from vonk_forge_contracts import read_recipe
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "qualify-recipe"
+SCRIPT = ROOT / "scripts" / "dev" / "qualify-recipe"
 
 
 def _library_root() -> Path:

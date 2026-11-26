@@ -1,6 +1,6 @@
 """Keep the local Linux wire lane honest about mirroring the CI job.
 
-``scripts/dev-agent-wire-linux`` runs the ``controller-spark-wire`` command, but
+``scripts/dev/dev-agent-wire-linux`` runs the ``controller-spark-wire`` command, but
 a developer convenience that silently runs a different toolchain or a
 paraphrased command produces evidence nobody can trust. These tests fail when
 the workflow and the lane drift apart, so a CI change that forgets the lane is
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "dev_agent_wire_linux.py"
+SCRIPT = ROOT / "scripts" / "dev" / "dev_agent_wire_linux.py"
 
 
 def _module():

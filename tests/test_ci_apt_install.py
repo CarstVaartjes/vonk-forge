@@ -25,7 +25,7 @@ def direct_apt_calls(root: Path) -> list[str]:
             and path.read_bytes().startswith(b"#!/")
         )
     for path in paths:
-        if path == root / "scripts/ci-apt-install":
+        if path == root / "scripts/ci/ci-apt-install":
             continue
         for number, line in enumerate(
             path.read_text().replace("\\\n", " ").splitlines(), 1
@@ -121,7 +121,7 @@ esac
             count.write_text("0")
             log.write_text("")
             result = subprocess.run(
-                ["bash", str(ROOT / "scripts/ci-apt-install"), "curl"],
+                ["bash", str(ROOT / "scripts/ci/ci-apt-install"), "curl"],
                 env=env,
                 capture_output=True,
                 text=True,
@@ -150,7 +150,7 @@ esac
                 assert "sleep 4" in log.read_text()
                 mode.write_text("success")
                 fresh = subprocess.run(
-                    ["bash", str(ROOT / "scripts/ci-apt-install"), "curl"],
+                    ["bash", str(ROOT / "scripts/ci/ci-apt-install"), "curl"],
                     env=env,
                     capture_output=True,
                     text=True,

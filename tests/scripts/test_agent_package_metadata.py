@@ -4,19 +4,32 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SHA = "0123456789abcdef0123456789abcdef01234567"
+VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+_MAJOR, _MINOR, _PATCH = (int(part) for part in VERSION.split("."))
+NEXT_PATCH = f"{_MAJOR}.{_MINOR}.{_PATCH + 1}"
+# The acceptance baseline is the next lower release (no lower one is a script error).
+_LOWER = (
+    f"{_MAJOR}.{_MINOR}.{_PATCH - 1}"
+    if _PATCH
+    else f"{_MAJOR}.{_MINOR - 1}.0"
+    if _MINOR
+    else f"{_MAJOR - 1}.0.0"
+)
+BASELINE = f"{_LOWER}~acceptance.1+g{SHA[:12]}"
 
 
 def run_metadata(
     *arguments: str, root: Path = ROOT
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, root / "scripts/agent-package-metadata", *arguments],
+        [sys.executable, root / "scripts/agent/agent-package-metadata", *arguments],
         cwd=root,
         check=False,
         capture_output=True,
@@ -32,7 +45,7 @@ def metadata_workspace(tmp_path: Path) -> Path:
         "pyproject.toml",
         "control/pyproject.toml",
         "nas_setup/pyproject.toml",
-        "scripts/agent-package-metadata",
+        "scripts/agent/agent-package-metadata",
     ):
         source = ROOT / relative
         target = workspace / relative
@@ -46,32 +59,32 @@ def test_development_metadata_emits_canonical_debian_outputs() -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "version=0.1.1~dev.417+g0123456789ab",
-        "next_version=0.1.1~dev.418+g0123456789ab",
-        "baseline_version=0.1.0~acceptance.1+g0123456789ab",
-        "arm64_package=vonk-forge-agent_0.1.1~dev.417+g0123456789ab_arm64.deb",
-        "arm64_baseline_package=vonk-forge-agent_0.1.0~acceptance.1+g0123456789ab_arm64.deb",
+        f"version={VERSION}~dev.417+g0123456789ab",
+        f"next_version={VERSION}~dev.418+g0123456789ab",
+        f"baseline_version={BASELINE}",
+        f"arm64_package=vonk-forge-agent_{VERSION}~dev.417+g0123456789ab_arm64.deb",
+        f"arm64_baseline_package=vonk-forge-agent_{BASELINE}_arm64.deb",
         f"artifact_name=vonk-agent-development-{SHA}",
         f"baseline_artifact_name=vonk-agent-development-{SHA}-acceptance-baseline",
         "channel=dev",
-        "snapshot=dev-0.1.1~dev.417+g0123456789ab",
+        f"snapshot=dev-{VERSION}~dev.417+g0123456789ab",
     ]
 
 
 def test_production_metadata_emits_canonical_stable_outputs() -> None:
-    result = run_metadata("production", "tag", "v0.1.1", SHA, "0")
+    result = run_metadata("production", "tag", f"v{VERSION}", SHA, "0")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "version=0.1.1",
-        "next_version=0.1.1+lifecycle.1",
-        "baseline_version=0.1.0~acceptance.1+g0123456789ab",
-        "arm64_package=vonk-forge-agent_0.1.1_arm64.deb",
-        "arm64_baseline_package=vonk-forge-agent_0.1.0~acceptance.1+g0123456789ab_arm64.deb",
+        f"version={VERSION}",
+        f"next_version={VERSION}+lifecycle.1",
+        f"baseline_version={BASELINE}",
+        f"arm64_package=vonk-forge-agent_{VERSION}_arm64.deb",
+        f"arm64_baseline_package=vonk-forge-agent_{BASELINE}_arm64.deb",
         f"artifact_name=vonk-agent-production-{SHA}",
         f"baseline_artifact_name=vonk-agent-production-{SHA}-acceptance-baseline",
         "channel=stable",
-        "snapshot=stable-0.1.1",
+        f"snapshot=stable-{VERSION}",
     ]
 
 
@@ -82,7 +95,7 @@ def test_production_metadata_emits_canonical_stable_outputs() -> None:
         ("development", "branch", "release", SHA, "417"),
         ("production", "branch", "v0.1.0", SHA, "0"),
         ("production", "tag", "0.1.0", SHA, "0"),
-        ("production", "tag", "v0.1.2", SHA, "0"),
+        ("production", "tag", f"v{NEXT_PATCH}", SHA, "0"),
         ("development", "branch", "main", SHA.upper(), "417"),
         ("development", "branch", "main", SHA[:-1], "417"),
         ("development", "branch", "main", SHA, "0"),
@@ -91,7 +104,7 @@ def test_production_metadata_emits_canonical_stable_outputs() -> None:
         ("development", "branch", "main", SHA, "not-a-sequence"),
         ("development", "branch", "main", SHA, "9999999999999999999"),
         ("development", "branch", "main", SHA, "10000000000000000000"),
-        ("production", "tag", "v0.1.1", SHA, "417"),
+        ("production", "tag", f"v{VERSION}", SHA, "417"),
     ],
 )
 def test_metadata_rejects_noncanonical_release_inputs(
@@ -101,7 +114,7 @@ def test_metadata_rejects_noncanonical_release_inputs(
 
     assert result.returncode == 64
     assert result.stdout == ""
-    repaired = run_metadata("production", "tag", "v0.1.1", SHA, "0")
+    repaired = run_metadata("production", "tag", f"v{VERSION}", SHA, "0")
     assert repaired.returncode == 0, repaired.stderr
     assert repaired.stdout
 
@@ -110,17 +123,23 @@ def test_metadata_rejects_mismatched_workspace_versions(tmp_path: Path) -> None:
     workspace = metadata_workspace(tmp_path)
     control_project = workspace / "control/pyproject.toml"
     control_project.write_text(
-        control_project.read_text().replace('version = "0.1.1"', 'version = "0.1.2"')
+        control_project.read_text().replace(
+            f'version = "{VERSION}"', f'version = "{NEXT_PATCH}"'
+        )
     )
 
-    result = run_metadata("production", "tag", "v0.1.1", SHA, "0", root=workspace)
+    result = run_metadata("production", "tag", f"v{VERSION}", SHA, "0", root=workspace)
 
     assert result.returncode == 64
     assert result.stdout == ""
     control_project.write_text(
-        control_project.read_text().replace('version = "0.1.2"', 'version = "0.1.1"')
+        control_project.read_text().replace(
+            f'version = "{NEXT_PATCH}"', f'version = "{VERSION}"'
+        )
     )
-    repaired = run_metadata("production", "tag", "v0.1.1", SHA, "0", root=workspace)
+    repaired = run_metadata(
+        "production", "tag", f"v{VERSION}", SHA, "0", root=workspace
+    )
     assert repaired.returncode == 0, repaired.stderr
     assert repaired.stdout
 

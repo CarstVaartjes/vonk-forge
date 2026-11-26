@@ -13355,6 +13355,7 @@
     "ProfileReasonCode": {
       "description": "Reasons a fleet profile cannot be applied or is waiting.",
       "enum": [
+        "profile.alias_taken",
         "profile.admission_busy",
         "profile.admission_defect",
         "profile.admission_effect_busy",

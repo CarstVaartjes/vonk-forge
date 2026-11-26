@@ -26,7 +26,7 @@ PINNED_VERSION = re.compile(
 
 
 def _canonical_model() -> dict[str, object]:
-    script = ROOT / "scripts/render-dev-compose"
+    script = ROOT / "scripts/release/render-dev-compose"
     loader = importlib.machinery.SourceFileLoader(
         "fresh_runtime_contract_renderer", str(script)
     )

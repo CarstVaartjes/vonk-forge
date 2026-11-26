@@ -15,9 +15,9 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_upload_timeout_adopts_exact_completed_object_without_reupload(
     tmp_path, monkeypatch, capsys
 ):
-    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    monkeypatch.syspath_prepend(str(ROOT / "scripts/release"))
     loader = importlib.machinery.SourceFileLoader(
-        "bounded_publication", str(ROOT / "scripts/install-release-publication")
+        "bounded_publication", str(ROOT / "scripts/release/install-release-publication")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None

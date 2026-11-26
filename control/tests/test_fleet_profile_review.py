@@ -35,6 +35,10 @@ from vonk_control.fleet_profiles.contracts import (
 )
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.gateway.external_contract import (
+    ExternalDeploymentSpec,
+    ExternalDestination,
+)
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
     InstallationNode,
@@ -50,6 +54,7 @@ from vonk_control.models.fleet import (
     FleetProfileApplication,
     User,
 )
+from vonk_control.models.gateway import GatewayExternalDeployment
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.preparation_contract import RolloutPreparation
 from vonk_control.recipe_operations.execution_contract import (
@@ -200,6 +205,65 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
     assert "Next attempt" in (parked.status_reason or "")
     with sessions() as session:
         assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
+
+
+def test_a_review_naming_an_external_model_name_is_blocked_not_refused(tmp_path):
+    # Break caught: raising here answers 500 and hides every other blocker; the
+    # review must stay readable and say which name is taken.
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
+    planner = RunSwitchOperationService(
+        sessions,
+        memory_floor_bytes=0,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=lifecycle._clock, run_switch_operations=planner
+    )
+    with sessions() as session:
+        recipe = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        )
+        assert recipe is not None
+        selector = f"{recipe.publisher}/{recipe.slug}"
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "External name",
+                "assignments": [
+                    {
+                        "recipe_selector": selector,
+                        "spark_ids": list(nodes),
+                        "assignment_name": "partner-large",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    now = lifecycle._clock()
+    with sessions.begin() as session:
+        session.add(
+            GatewayExternalDeployment(
+                alias="partner-large",
+                desired_revision=1,
+                desired_spec=ExternalDeploymentSpec(
+                    alias="partner-large",
+                    litellm_params={"model": "openai/partner-large"},
+                    destination=ExternalDestination(origins=["provider:openai"]),
+                ),
+                request_id=str(uuid4()),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    reviewed = service.preview(profile.id)
+    assert not reviewed.allowed
+    assert ProfileReasonCode.ALIAS_TAKEN in {item.code for item in reviewed.reasons}
 
 
 def _replace_run(sessions, run_id: str) -> str:

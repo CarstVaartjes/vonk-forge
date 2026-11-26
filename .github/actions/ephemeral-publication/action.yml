@@ -29,7 +29,7 @@ runs:
         # release authority is passed explicitly, never installed in production.
         sudo install -m 0644 "$tls/cert.pem" /usr/local/share/ca-certificates/vonk-acceptance.crt
         sudo update-ca-certificates
-        python3 scripts/serve-acceptance-objects --root "$root/objects" \
+        python3 scripts/ci/serve-acceptance-objects --root "$root/objects" \
           --certificate "$tls/cert.pem" --key "$tls/key.pem" \
           > "$RUNNER_TEMP/ephemeral-server.log" 2>&1 &
         printf '%s\n' "$!" > "$RUNNER_TEMP/ephemeral-server.pid"

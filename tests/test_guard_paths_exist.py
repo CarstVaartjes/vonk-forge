@@ -23,7 +23,7 @@ GUARD_FILES = (
     "control/tests/added_line_guards/scans.py",
     "control/tests/principle_guards.py",
     "tests/repository_guards.py",
-    "scripts/select-ci-areas",
+    "scripts/ci/select-ci-areas",
     "control/tests/document_read_boundaries.py",
     "control/tests/untyped_mapping_boundaries.py",
     "control/tests/whole_collection_readers.py",
@@ -82,6 +82,35 @@ def test_every_path_a_guard_names_exists() -> None:
         if dangling(ROOT, path)
     }
     assert not names, sorted(names)
+
+
+SCRIPT_PATH = re.compile(r"(?<![\w/.-])scripts/[\w./-]*\w")
+SCRIPT_ROOT_USE = re.compile(r"\$\{?script_root\}?/([\w./-]*\w)")
+
+
+def test_every_script_a_workflow_dockerfile_or_shell_script_names_exists() -> None:
+    """A moved script must not leave a stale path in the files that run it."""
+    files = [
+        *ROOT.glob(".github/workflows/*.yml"),
+        *ROOT.glob("**/Dockerfile*"),
+        *ROOT.glob("scripts/**/*.sh"),
+    ]
+    stale = set()
+    for file in files:
+        for line in file.read_text().splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            stale.update(
+                f"{file.relative_to(ROOT)}: {path}"
+                for path in SCRIPT_PATH.findall(line)
+                if not (ROOT / path).exists()
+            )
+            stale.update(
+                f"{file.relative_to(ROOT)}: $script_root/{name}"
+                for name in SCRIPT_ROOT_USE.findall(line)
+                if not (ROOT / "scripts" / name).exists()
+            )
+    assert not stale, sorted(stale)
 
 
 def test_a_missing_path_and_a_matching_prefix_are_told_apart(tmp_path: Path) -> None:

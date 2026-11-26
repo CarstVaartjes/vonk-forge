@@ -57,7 +57,7 @@ def prerequisite_unavailable(message: str) -> NoReturn:
 def cli_dependency_site_packages() -> Path:
     """site-packages of the CLI's locked runtime dependencies.
 
-    scripts/sync-cli-dependencies prepares it (CI does so before the suites).
+    scripts/dev/sync-cli-dependencies prepares it (CI does so before the suites).
     A scratch venv links it instead of resolving or downloading anything.
     """
 
