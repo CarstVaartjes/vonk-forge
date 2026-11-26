@@ -623,7 +623,7 @@ provenance comparisons, security refusals outside ingress owners, unbounded wait
 read refusals, a captured Docker listing or ranged inspection in the helper (read it line by line),
 anti-principle
 test assertions, vonkctl tests that assert wording in printed output (`printed-output`), short wall-clock limits on test work, and the existing
-coordination syntax violations. The `job-limits` guard refuses an added `MAX_INPUT_*`, `MAX_OUTPUT_*` or `MAX_TIMEOUT_SECONDS` assignment outside `agent_protocol/src/vonk_agent_protocol/job_limits.py`, the one owner of artifact-job limits. The retry guard also rejects attempt/repetition
+coordination syntax violations. The `job-limits` guard refuses an added `MAX_INPUT_*`, `MAX_OUTPUT_*` or `MAX_TIMEOUT_SECONDS` assignment outside `agent_protocol/src/vonk_agent_protocol/job_limits.py`, the one owner of artifact-job limits. The `prebuilt-key` guard refuses an added `executable_build_key(` call or `.build_key` read in `control/src/` outside `control/src/vonk_control/catalog/` ingest: the Controller trusts the signed pin's digest. The retry guard also rejects attempt/repetition
 comparisons that end standing intent or remove its next action; explicit
 cancellation and request-local retries remain valid. A broad handler that parks
 or defers work must consult `disposition()` or `is_definite()` first

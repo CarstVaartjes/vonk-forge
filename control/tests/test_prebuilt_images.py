@@ -18,7 +18,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import PrebuiltImage, RecipeDefinition
 
 from tests.recipe_builds_support import RecordingQueue
 from tests.recipe_library_source import recipe_library_root
@@ -28,7 +28,6 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.images import ImageStoreCode, PrebuiltImageCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
-from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import prebuilt_images
 from vonk_control.auth import TokenCodec
 from vonk_control.availability_production.production import (
@@ -45,10 +44,6 @@ from vonk_control.image_store.oci import (
     StoreUnknown,
 )
 from vonk_control.install_admission.service import InstallAdmissionService
-from vonk_control.inventory.repository import (
-    InventoryRepository,
-    NodeInventoryReport,
-)
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
@@ -103,38 +98,49 @@ class _Reader:
         return next(item for item in self.snapshot.items if item.uri == uri)
 
 
-def _published_library(
-    tmp_path: Path, *, build_key: str | None = None
-) -> tuple[sessionmaker[Session], str]:
-    """Sync a one-recipe signed library whose index pins a prebuilt image.
-
-    The key comes from the CI planner run over the real package, exactly as
-    the recipe repository's image workflow computes it, unless a test
-    supplies a different one.
-    """
-
+def _one_recipe_index() -> dict[str, Any]:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     index["recipes"] = index["recipes"][:1]
+    return index
+
+
+def _planned_key(tmp_path: Path) -> str:
+    """The key the CI planner computes for the real package."""
+
     library = tmp_path / "library"
     library.mkdir()
-    (library / "catalog-index.json").write_text(json.dumps(index), encoding="utf-8")
+    (library / "catalog-index.json").write_text(
+        json.dumps(_one_recipe_index()), encoding="utf-8"
+    )
     (library / "packages").symlink_to(ROOT / "packages")
     plan = write_library_image_plan(library, tmp_path / "plan")
     assert plan["skipped"] == []
     (image,) = require_sequence(plan["images"], "planned images")
-    image = require_mapping(image, "planned image")
-    index["recipes"][0]["prebuilt_image"] = {
-        "reference": REFERENCE,
-        "build_key": build_key or image["build_key"],
-    }
-    client = SignedRecipeRelease.from_library(index, ROOT).client(tmp_path / "packages")
+    return str(require_mapping(image, "planned image")["build_key"])
+
+
+def _library_snapshot(
+    tmp_path: Path,
+    pin: dict[str, str] | None,
+    *,
+    commit: str | None = None,
+    cache: str = "packages",
+) -> RecipeLibrarySnapshot:
+    """A one-recipe signed library as the Controller reads it."""
+
+    index = _one_recipe_index()
+    if commit is not None:
+        index["source_commit"] = commit
+    if pin is not None:
+        index["recipes"][0]["prebuilt_image"] = pin
+    client = SignedRecipeRelease.from_library(index, ROOT).client(tmp_path / cache)
     listed = client.list()
     item = client.fetch(listed.items[0].uri)
     recipe = RecipeDefinition.model_validate(item.document)
     selected = {
         (selection.model.publisher, selection.model.slug) for selection in recipe.models
     }
-    snapshot = RecipeLibrarySnapshot(
+    return RecipeLibrarySnapshot(
         listed.commit,
         (item,),
         listed.repository,
@@ -150,18 +156,49 @@ def _published_library(
         version=listed.version,
         updated_at=listed.updated_at,
     )
-    engine = create_engine(f"sqlite:///{tmp_path / 'controller.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    catalog = CatalogService(
+
+
+def _catalog(sessions: sessionmaker[Session], tmp_path: Path) -> CatalogService:
+    return CatalogService(
         sessions,
         clock=lambda: NOW,
         cursors=TokenCodec(b"s" * 32).cursor_codec(),
         source_bundles=SourceBundleStore(tmp_path / "bundles"),
     )
+
+
+def _sync(
+    sessions: sessionmaker[Session], tmp_path: Path, snapshot: RecipeLibrarySnapshot
+) -> None:
+    """One automatic catalog sync by a freshly started Controller."""
+
     ManagedRecipeCatalogSyncService(
-        sessions, catalog=catalog, reader=_Reader(snapshot), clock=lambda: NOW
+        sessions,
+        catalog=_catalog(sessions, tmp_path),
+        reader=_Reader(snapshot),
+        clock=lambda: NOW,
     ).automatic()
+
+
+def _published_library(
+    tmp_path: Path, *, build_key: str | None = None, pinned: bool = True
+) -> tuple[sessionmaker[Session], str]:
+    """Sync a one-recipe signed library whose index pins a prebuilt image.
+
+    The key comes from the CI planner run over the real package, exactly as
+    the recipe repository's image workflow computes it, unless a test
+    supplies a different one.
+    """
+
+    pin = (
+        {"reference": REFERENCE, "build_key": build_key or _planned_key(tmp_path)}
+        if pinned
+        else None
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'controller.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    _sync(sessions, tmp_path, _library_snapshot(tmp_path, pin))
     with sessions.begin() as session:
         # A Spark with no inventory at all: any Spark build admission fails.
         session.add(
@@ -191,9 +228,17 @@ def _published_library(
             )
         )
         assert revision is not None
-        pinned = require_mapping(revision.projected["prebuilt_image"], "prebuilt")
-        assert pinned["reference"] == REFERENCE
+        if pinned:
+            stored = require_mapping(revision.projected["prebuilt_image"], "prebuilt")
+            assert stored["reference"] == REFERENCE
         return sessions, revision.id
+
+
+def _stored_pin(sessions: sessionmaker[Session], revision_id: str) -> object:
+    with sessions() as session:
+        revision = session.get(CatalogDocumentRevision, revision_id)
+        assert revision is not None
+        return revision.projected.get("prebuilt_image")
 
 
 def _services(sessions: sessionmaker[Session], tmp_path: Path):
@@ -346,19 +391,93 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
     assert resolution.build_id == plan.build_id
 
 
-def test_prebuilt_image_for_old_build_inputs_is_never_reused(tmp_path: Path) -> None:
-    # A signed pin authorizes these image bytes, but a stale build key does not
-    # prove those bytes contain the repaired adapter. Missing builder capacity
-    # must wait rather than laundering the old image into the new build key.
+def test_a_pin_whose_key_forge_never_computed_is_pulled(tmp_path: Path) -> None:
+    # Wrong implementation: the Controller re-derives the key and falls back to
+    # a Spark build (here: refused for missing inventory) whenever recipes CI
+    # keyed the image differently, so an older Controller never finds the
+    # image a newer catalog pins.
     sessions, revision_id = _published_library(tmp_path, build_key="0" * 64)
+    builds, operations = _services(sessions, tmp_path)
+
+    plan, _job = _start(builds, operations, revision_id)
+
+    assert plan.policy_report is not None
+    assert plan.policy_report["prebuilt_image"] == REFERENCE
+    decision = require_mapping(plan.policy_report["prebuilt_decision"], "decision")
+    assert decision["code"] == PrebuiltImageCode.USED
+    assert plan.policy_report["builder_binary_digest"] == ADDRESS
+    with sessions() as session:
+        assert session.scalars(select(AgentOperation)).all() == []
+        assert session.scalars(select(ResourceReservation)).all() == []
+
+
+def test_a_pin_recorded_for_other_content_is_never_used(tmp_path: Path) -> None:
+    # Wrong implementation: a pin follows the slug rather than the exact
+    # content digest, so a changed recipe runs the image built for its
+    # previous bytes.
+    sessions, revision_id = _published_library(tmp_path, pinned=False)
+    with sessions() as session:
+        revision = session.get(CatalogDocumentRevision, revision_id)
+        assert revision is not None
+        publisher, slug = revision.publisher, revision.slug
+    _catalog(sessions, tmp_path).record_published_facts(
+        {
+            (publisher, slug, "f" * 64): PrebuiltImage(
+                reference=REFERENCE, build_key="0" * 64
+            )
+        },
+        {},
+    )
     builds, _operations = _services(sessions, tmp_path)
+
     with pytest.raises(RecipeBuildUnknown) as refused:
         builds.prepare_plan(revision_id, NODE, now=NOW)
+
+    assert _stored_pin(sessions, revision_id) is None
     assert refused.value.code == RecipeBuildCode.INVENTORY_MISSING
+    assert refused.value.prebuilt_unused is not None
+    assert refused.value.prebuilt_unused.code == PrebuiltImageCode.NOT_PINNED
+
+
+def test_a_republished_key_keeps_the_pulled_image_across_a_restart(
+    tmp_path: Path,
+) -> None:
+    # Wrong implementation: a new build key for the same digest re-plans the
+    # revision (a fallback Spark build, a new build input identity, a re-pull)
+    # under a workload that already runs the image.
+    sessions, revision_id = _published_library(tmp_path)
+    builds, operations = _services(sessions, tmp_path)
+    plan, _job = _start(builds, operations, revision_id)
+    registry = _Registry(tmp_path)
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: NOW, store=registry
+    )
+    assert importer.run_pending() == 1
+
+    # Recipes CI republishes the same image under its new key; a restarted
+    # Controller ingests that catalog.
+    republished = {"reference": REFERENCE, "build_key": "f" * 64}
+    _sync(
+        sessions,
+        tmp_path,
+        _library_snapshot(tmp_path, republished, commit="f" * 40, cache="packages-2"),
+    )
+    assert _stored_pin(sessions, revision_id) == republished
+
+    restarted, _restarted_operations = _services(sessions, tmp_path)
+    resolution = restarted.resolve(revision_id)
+    assert resolution.cached
+    assert resolution.build_id == plan.build_id
+    replanned = restarted.prepare_plan(revision_id, NODE, now=NOW)
+    assert replanned.build_input_sha256 == plan.build_input_sha256
+    assert replanned.policy_report is not None
+    decision = require_mapping(replanned.policy_report["prebuilt_decision"], "decision")
+    assert decision["code"] == PrebuiltImageCode.USED
+    assert importer.run_pending() == 0
+    assert registry.copied == [REFERENCE]
     with sessions() as session:
-        assert not tuple(session.scalars(select(RecipeBuild)))
-        assert not tuple(session.scalars(select(ResourceReservation)))
-        assert not tuple(session.scalars(select(AgentOperation)))
+        assert len(session.scalars(select(Job)).all()) == 1
+        assert session.scalars(select(AgentOperation)).all() == []
 
 
 def test_failed_pull_ends_and_a_fresh_request_recovers_the_pinned_image(
@@ -535,69 +654,6 @@ def test_image_preparation_pulls_the_prebuilt_image_without_a_spark_build(
     assert completed.result["image_digest"] == REFERENCE.rsplit("@", 1)[1]
     with sessions() as session:
         assert session.scalars(select(AgentOperation)).all() == []
-    production.close()
-
-
-def test_prebuilt_key_mismatch_builds_fresh_instead_of_reusing_old_image(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A Spark that can build still reports the fallback; it is never silent."""
-
-    sessions, revision_id = _published_library(tmp_path, build_key="0" * 64)
-    now = [NOW]
-    production, _builds = _availability(sessions, tmp_path, monkeypatch, lambda: now[0])
-    # This Spark has room to build, so the fallback plan is admitted and runs.
-    InventoryRepository(sessions, clock=lambda: now[0]).record(
-        NodeInventoryReport.model_validate_json(
-            canonical_message(
-                {
-                    "node_id": NODE,
-                    "observed_at": NOW,
-                    "disk_total_bytes": 2 * 1024**4,
-                    "disk_free_bytes": 1 * 1024**4,
-                    "host_memory_total_bytes": 512 * 1024**3,
-                    "host_memory_free_bytes": 480 * 1024**3,
-                    "gpu_memory_total_bytes": 512 * 1024**3,
-                    "gpu_memory_free_bytes": 480 * 1024**3,
-                    "gpu_count": 1,
-                    "artifact_store_read_only": False,
-                    "capabilities": (
-                        "recipe.build.v1",
-                        "recipe.build.egress-proxy.v1",
-                        "recipe.image.import.v1",
-                        "runtime.vonk.v1",
-                        "recipe.image.pull.v1",
-                    ),
-                    "memory_pool": "separate",
-                    "schema_version": 1,
-                    "nvidia_driver_version": "unknown",
-                    "container_runtime_version": "unknown",
-                }
-            )
-        )
-    )
-
-    operation = production.service.start(
-        revision_id,
-        actor="operator",
-        request_id="00000000-0000-4000-8000-00000000a003",
-    )
-    assert production.service.run_pending() == 1
-
-    with sessions() as session:
-        (build,) = session.scalars(select(RecipeBuild)).all()
-        assert build.policy_report.get("prebuilt_image") is None
-        assert (
-            cast(dict[str, Any], build.policy_report)["prebuilt_decision"]["code"]
-            == PrebuiltImageCode.BUILD_KEY_MISMATCH
-        )
-        assert tuple(session.scalars(select(AgentOperation)))
-        assert tuple(session.scalars(select(ResourceReservation)))
-
-    view = production.service.get(operation.id)
-    assert view.state == LifecycleState.QUEUED
-    assert view.next_attempt_at is not None
-
     production.close()
 
 

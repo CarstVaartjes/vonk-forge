@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -21,11 +21,7 @@ from vonk_control.gpu.health import gpu_health_reason
 from vonk_control.inventory.items import runtime_value
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode
-from vonk_control.prebuilt_images import (
-    PREBUILT_KEY_MISMATCH,
-    PREBUILT_NOT_PINNED,
-    executable_build_key,
-)
+from vonk_control.prebuilt_images import PREBUILT_NOT_PINNED
 from vonk_control.recipe_builds.common import (
     _BUILD_OBSERVATION_DELAYS,
     _LOGGER,
@@ -58,7 +54,6 @@ from vonk_control.recipe_operations.execution_contract import (
     build_policy_document,
 )
 from vonk_control.reservations.disk import outstanding_disk_reservation_bytes
-from vonk_control.runtime.adapters import RuntimeAdapter
 from vonk_control.source_policy import (
     dockerfile_base_images,
     inspect_build_source_policy,
@@ -141,40 +136,22 @@ def _admit_spark_build(
 
 
 def _usable_prebuilt(
-    recipe_revision_id: str,
-    projected: RecipeRevisionProjection,
-    *,
-    build: Mapping[str, object],
-    source_sha256: str,
-    base_images: Sequence[Mapping[str, object]],
-    adapter: RuntimeAdapter,
+    recipe_revision_id: str, projected: RecipeRevisionProjection
 ) -> tuple[PrebuiltImage | None, PrebuiltDecision]:
-    """Use a signed image only when its key binds these executable inputs.
+    """Use the image the signed catalog pins for this revision's content.
 
-    Historical pull failures belong to their request. A new request observes
-    the same matching pinned digest again; changed source requires a new build.
+    The pin is recorded per exact content digest at catalog sync, so it names
+    the image recipes CI built and published for these recipe bytes. Its
+    ``build_key`` is the recipes CI's own handle and is never read here: the
+    manifest digest is the identity, whatever key derivation produced it.
+    Historical pull failures belong to their request; a new request observes
+    the same pinned digest again.
     """
     image = projected.prebuilt_image
     if image is None:
         decision = PrebuiltDecision(
             PREBUILT_NOT_PINNED,
             "the signed catalog pins no prebuilt image for this revision",
-        )
-        _LOGGER.info("recipe revision %s: %s", recipe_revision_id, decision)
-        return None, decision
-    identity = derive_build_input_identity(
-        build,
-        source_bundle_sha256=source_sha256,
-        builder_binary_digest=None,
-        base_images=base_images,
-        runtime_adapter=adapter.document(),
-    )
-    expected_key = executable_build_key(identity)
-    if image.build_key != expected_key:
-        decision = PrebuiltDecision(
-            PREBUILT_KEY_MISMATCH,
-            f"published image build key {image.build_key} differs from "
-            f"current inputs {expected_key} (source {source_sha256})",
         )
         _LOGGER.info("recipe revision %s: %s", recipe_revision_id, decision)
         return None, decision
@@ -256,14 +233,7 @@ def _prepare_plan_once(
             RecipeBuildCode.SOURCE_UNAVAILABLE,
             "exact Dockerfile base authorities are unavailable",
         ) from error
-    prebuilt, prebuilt_decision = self._usable_prebuilt(
-        revision.id,
-        projected,
-        build=build,
-        source_sha256=source_sha256,
-        base_images=base_images,
-        adapter=adapter,
-    )
+    prebuilt, prebuilt_decision = self._usable_prebuilt(revision.id, projected)
     if prebuilt is not None:
         builder_binary_digest = prebuilt.digest.removeprefix("sha256:")
         # The persisted receipt has an enrollment foreign key, but this pull

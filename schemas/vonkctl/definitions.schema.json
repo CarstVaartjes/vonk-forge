@@ -13266,7 +13266,6 @@
         "prebuilt.not_pinned",
         "prebuilt_image_pull_failed",
         "prebuilt_image_evidence_invalid",
-        "prebuilt.pull_failed_recently",
         "prebuilt.used"
       ],
       "title": "PrebuiltImageCode",

@@ -79,6 +79,28 @@ fn image_pull_accepts_the_containerd_store_naming_the_image_by_manifest() {
 }
 
 #[test]
+fn image_pull_accepts_an_unadapted_image_whatever_user_it_names() {
+    // Wrong implementation: the pull still requires the platform's runtime
+    // label or a numeric non-root image user, so a bare recipe image the
+    // signed plan pins by digest is refused. The launch forces the user.
+    for image_user in ["", "root", "0:0"] {
+        let temp = tempfile::tempdir().unwrap();
+        let (manifest, config) = ("a".repeat(64), "c".repeat(64));
+        let runner = PullRunner {
+            pulled_config: format!("sha256:{config}"),
+            image_user: image_user.to_owned(),
+            ..PullRunner::default()
+        };
+        let executor =
+            OperationExecutor::new(ManagedRoots::under(temp.path()), &[0; 32], runner, None)
+                .unwrap();
+        executor
+            .runtime_image_pull(&pull_arguments(&manifest, &config))
+            .unwrap();
+    }
+}
+
+#[test]
 fn image_pull_refuses_another_image_a_failed_pull_and_foreign_registries() {
     let temp = tempfile::tempdir().unwrap();
     let (manifest, config) = ("a".repeat(64), "c".repeat(64));

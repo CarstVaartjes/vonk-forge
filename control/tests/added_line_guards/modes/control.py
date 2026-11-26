@@ -39,6 +39,9 @@ from ..scans import (
     NAS_COVERAGE_READER,
     NEWEST_SNAPSHOT_KIND,
     NEWEST_SNAPSHOT_SCAN,
+    PREBUILT_KEY_INGEST,
+    PREBUILT_KEY_KIND,
+    PREBUILT_KEY_READ,
     RANK_INSTALLED_COPY,
     RANK_INSTALLED_KIND,
     START_BUDGET_VERDICTS,
@@ -764,6 +767,21 @@ def check_rank_installed(ctx: CheckContext) -> None:
             (number, RANK_INSTALLED_KIND)
             for number, text in enumerate(source.splitlines(), 1)
             if RANK_INSTALLED_COPY.search(text)
+        )
+
+
+def check_prebuilt_key(ctx: CheckContext) -> None:
+    if (
+        ctx.python
+        and not ctx.is_test
+        and "prebuilt-key" in ctx.modes
+        and ctx.path.startswith("control/src/")
+        and not ctx.path.startswith(PREBUILT_KEY_INGEST)
+    ):
+        ctx.hits.extend(
+            (number, PREBUILT_KEY_KIND)
+            for number, text in enumerate(ctx.source.splitlines(), 1)
+            if PREBUILT_KEY_READ.search(text)
         )
 
 

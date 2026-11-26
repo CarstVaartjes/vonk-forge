@@ -84,6 +84,7 @@ MODES = (
     "fixture-closures",
     "contract-constants",
     "rank-installed",
+    "prebuilt-key",
     "live-reservation",
     "newest-snapshot",
     "retry-dispositions",
@@ -189,6 +190,22 @@ RANK_INSTALLED_COPY = re.compile(r"[!=]=\s*InstallationNodeState\.INSTALLED\b")
 
 RANK_INSTALLED_KIND = (
     "rank INSTALLED test spelled inline; use machine_states.rank_installed"
+)
+
+
+# The Controller trusts the signed catalog's pin for a revision's content
+# digest; a prebuilt image is identified by its manifest digest. The build key
+# is the recipes CI's handle: nothing in the Controller derives or reads it,
+# except catalog ingest, which stores the published field as it is.
+PREBUILT_KEY_READ = re.compile(r"\bexecutable_build_key\(|\.build_key\b")
+
+
+PREBUILT_KEY_INGEST = "control/src/vonk_control/catalog/"
+
+
+PREBUILT_KEY_KIND = (
+    "prebuilt build key derived or read; use the pinned digest the signed "
+    "catalog records for the content"
 )
 
 

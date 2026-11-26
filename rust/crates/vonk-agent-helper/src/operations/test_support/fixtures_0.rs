@@ -202,6 +202,32 @@ pub(in crate::operations) struct PullRunner {
     pub(in crate::operations) container_query_fails: Arc<Mutex<bool>>,
     /// References a container uses: Docker refuses to remove them.
     pub(in crate::operations) in_use: Arc<Mutex<std::collections::BTreeSet<String>>>,
+    /// The user the image configures (`USER`); empty when it sets none.
+    pub(in crate::operations) image_user: String,
+}
+
+/// Docker's answer to `image inspect --format <template>` for a linux/arm64
+/// image `id` that carries no labels and configures `user`. Every field the
+/// helper may ask for is rendered as Docker renders it (a label lookup on an
+/// image without labels is empty), so a check of a label or of the image's
+/// own user sees what a bare recipe image gives it.
+pub(in crate::operations) fn rendered_inspection(template: &str, id: &str, user: &str) -> Vec<u8> {
+    let mut segments = template.split("{{");
+    let mut rendered = segments.next().unwrap_or_default().to_owned();
+    for segment in segments {
+        let (field, rest) = segment.split_once("}}").expect("a closed template field");
+        rendered.push_str(match field {
+            ".Id" => id,
+            ".Os" => "linux",
+            ".Architecture" => "arm64",
+            ".Config.User" => user,
+            label if label.starts_with("index .Config.Labels ") => "",
+            other => panic!("unrendered inspect field {other}"),
+        });
+        rendered.push_str(rest);
+    }
+    rendered.push('\n');
+    rendered.into_bytes()
 }
 
 impl CommandRunner for PullRunner {
@@ -254,10 +280,8 @@ impl CommandRunner for PullRunner {
                 images.insert((*reference).to_owned(), self.pulled_config.clone());
                 ok(Vec::new())
             }
-            ["image", "inspect", _, _, reference] => match images.get(*reference) {
-                Some(config) => {
-                    ok(format!("{config}\tlinux\tarm64\tv1\t10001:10001\n").into_bytes())
-                }
+            ["image", "inspect", _, template, reference] => match images.get(*reference) {
+                Some(config) => ok(rendered_inspection(template, config, &self.image_user)),
                 None => missing,
             },
             ["tag", source, target] => {

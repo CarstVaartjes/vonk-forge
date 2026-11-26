@@ -71,6 +71,7 @@ BLOCKS: tuple[Callable[[CheckContext], None], ...] = (
     rust.check_loopback_bind,
     general.check_git_free_tests,
     control.check_rank_installed,
+    control.check_prebuilt_key,
     control.check_live_reservation,
     control.check_newest_snapshot,
     general.check_printed_output,

@@ -68,9 +68,11 @@ impl CommandRunner for LaunchRunner {
         let missing =
             first == Some("container") && args.get(1).map(String::as_str) == Some("inspect");
         let stdout = match first {
-            Some("image") => {
-                format!("{}\tlinux\tarm64\tv1\t10001:10001\n", self.config).into_bytes()
-            }
+            Some("image") => rendered_inspection(
+                args.get(3).map_or("{{.Id}}", String::as_str),
+                &self.config,
+                "",
+            ),
             Some("run") if matches!(self.run, RunAnswer::Id) => "f".repeat(64).into_bytes(),
             // The run's managed containers by id; each id's labels follow.
             Some("container")
@@ -470,6 +472,35 @@ fn a_workload_is_launched_with_shared_memory_as_declared_and_an_unchanged_identi
     assert!(run.contains(&identity), "{run:?}");
 }
 
+/// An image the platform did not adapt (no labels, no `USER`, its creator's
+/// `WORKDIR`) starts in the tmpfs `/tmp` as the signed numeric user. The
+/// identity label is computed from the signed argv alone, so a run launched
+/// before `--workdir` existed is still recognised and adopted as is.
+#[test]
+fn an_unadapted_image_starts_in_tmp_as_the_signed_user_with_an_unchanged_identity() {
+    for plan in [
+        recipe_start_plan_for_authority(1),
+        job_plan(recipe_start_plan_for_authority(1)),
+    ] {
+        let (signed, run) = launched(plan);
+        let image = image_after_intact_options(&run);
+        let named = |flag: &str, value: &str| {
+            run[..image]
+                .windows(2)
+                .filter(|pair| pair[0] == flag && pair[1] == value)
+                .count()
+        };
+        assert_eq!(named("--workdir", "/tmp"), 1, "{run:?}");
+        assert_eq!(named("--user", "10001:10001"), 1, "{run:?}");
+        assert!(!signed.iter().any(|a| a == "--workdir"), "{signed:?}");
+        let identity = format!(
+            "ai.vonkforge.runtime-request-sha256={}",
+            hex_sha256(&canonical_json(&signed[4..].to_vec()).unwrap())
+        );
+        assert!(run.contains(&identity), "{run:?}");
+    }
+}
+
 /// A Docker host whose one container answers every inspection with its line.
 #[derive(Clone)]
 struct InspectedRunner(String);
@@ -789,11 +820,16 @@ impl CommandRunner for StartWithStrays {
                     return self.host.run(executable, args);
                 }
                 Some("image") => {
-                    return Ok(docker_output(
-                        true,
-                        &format!("{}\tlinux\tarm64\tv1\t10001:10001\n", self.config),
-                        0,
-                    ));
+                    return Ok(CommandOutput {
+                        success: true,
+                        stdout: rendered_inspection(
+                            args.get(3).map_or("{{.Id}}", String::as_str),
+                            &self.config,
+                            "",
+                        ),
+                        stderr: Vec::new(),
+                        exit_code: Some(0),
+                    });
                 }
                 Some("run") => {
                     self.host.calls.lock().unwrap().push(args.to_vec());

@@ -4396,6 +4396,24 @@ def test_an_inline_rank_installed_test_is_flagged() -> None:
     )
 
 
+def test_a_controller_prebuilt_key_read_is_flagged() -> None:
+    path = "control/src/vonk_control/recipe_builds/planning.py"
+    for source in (
+        "key = executable_build_key(identity)\n",
+        "if image.build_key != expected:\n",
+    ):
+        assert check_source(path, source, {1}, modes=("prebuilt-key",))
+    assert not check_source(
+        path, "digest = image.digest\n", {1}, modes=("prebuilt-key",)
+    )
+    assert not check_source(
+        "control/src/vonk_control/catalog/entities.py",
+        "stored = image.build_key\n",
+        {1},
+        modes=("prebuilt-key",),
+    )
+
+
 def test_an_inline_live_reservation_test_is_flagged() -> None:
     path = "control/src/vonk_control/other.py"
     source = "q = q.where(ResourceReservation.state != ReservationState.RELEASED)\n"
