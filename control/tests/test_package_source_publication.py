@@ -11,10 +11,13 @@ import pytest
 import yaml
 from agent_package_source_publication import package_source
 from test_agent_deb import (
+    BASELINE_SEMANTIC,
     PACKAGE_BINARIES,
+    VERSION,
     _aarch64_fixture,
     _build,
     _release_key,
+    baseline_version,
 )
 
 from vonk_control.agent_upgrades.package_source import load_package_source
@@ -37,14 +40,14 @@ class PackageSourcePublicationTests(unittest.TestCase):
                 binary.chmod(0o644)
                 binary.write_bytes(
                     binary.read_bytes().replace(
-                        b"VONK_AGENT_SEMANTIC_VERSION=0.1.1",
-                        b"VONK_AGENT_SEMANTIC_VERSION=0.1.0",
+                        f"VONK_AGENT_SEMANTIC_VERSION={VERSION}".encode(),
+                        f"VONK_AGENT_SEMANTIC_VERSION={BASELINE_SEMANTIC}".encode(),
                     )
                 )
                 binary.chmod(0o555)
             key = root / "release.pem"
             _release_key(key)
-            version = "0.1.0~acceptance.1+g0123456789ab"
+            version = baseline_version("0123456789ab")
             built = _build(
                 root / "baseline",
                 binaries,

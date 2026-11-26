@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import runpy
 import shlex
 import stat
 import struct
@@ -22,6 +23,16 @@ ROOT = Path(__file__).resolve().parents[2]
 VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"][
     "version"
 ]
+
+
+def baseline_version(sha12: str) -> str:
+    """The acceptance baseline for this workspace, from the rule's owner."""
+
+    owner = runpy.run_path(str(ROOT / "scripts/agent/agent-package-metadata"))
+    return owner["acceptance_baseline_version"](VERSION, sha12)
+
+
+BASELINE_SEMANTIC = baseline_version("0" * 12).split("~")[0]
 BUILD = ROOT / "scripts/agent/build-agent-deb"
 VERIFY = ROOT / "scripts/agent/verify-agent-deb"
 POSTRM = ROOT / "packaging/debian/postrm"
@@ -337,14 +348,14 @@ def test_main_recovers_exactly_the_packages_a_pull_request_accepted(
     agent.write_bytes(
         agent.read_bytes().replace(
             f"VONK_AGENT_SEMANTIC_VERSION={VERSION}".encode(),
-            b"VONK_AGENT_SEMANTIC_VERSION=0.1.0",
+            f"VONK_AGENT_SEMANTIC_VERSION={BASELINE_SEMANTIC}".encode(),
         )
     )
     agent.chmod(0o555)
     key = tmp_path / "pull-request.pem"
     _release_key(key)
     version = f"{VERSION}~dev.1792000000+gabcdefabcdef"
-    baseline = "0.1.0~acceptance.1+gabcdefabcdef"
+    baseline = baseline_version("abcdefabcdef")
     pr = tmp_path / "pr"
     assert _build(pr / "package", binaries, key, version=version).returncode == 0
     assert (
@@ -857,13 +868,13 @@ def test_builder_allows_only_an_explicit_lower_acceptance_baseline(
     agent.write_bytes(
         agent.read_bytes().replace(
             f"VONK_AGENT_SEMANTIC_VERSION={VERSION}".encode(),
-            b"VONK_AGENT_SEMANTIC_VERSION=0.1.0",
+            f"VONK_AGENT_SEMANTIC_VERSION={BASELINE_SEMANTIC}".encode(),
         )
     )
     agent.chmod(0o555)
     key = tmp_path / "release.pem"
     _release_key(key)
-    version = "0.1.0~acceptance.1+g0123456789ab"
+    version = baseline_version("0123456789ab")
 
     result = _build(
         tmp_path / "dist",
