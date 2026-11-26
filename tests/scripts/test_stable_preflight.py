@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import ModuleType
@@ -153,18 +155,17 @@ def test_an_environment_without_a_branch_policy_reads_as_no_policies(
     script = _script()
     answers = {
         "": {"protection_rules": []},
-        "/deployment-branch-policies": None,
         "/secrets?per_page=100": {"secrets": []},
         "/variables?per_page=100": {"variables": []},
     }
 
-    def api(path: str) -> Any:
-        answer = answers[path.removeprefix("repos/o/r/environments/e")]
-        if answer is None:
-            raise script.NotFound
-        return answer
+    def run(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        suffix = command[-1].removeprefix("repos/o/r/environments/e")
+        if suffix == "/deployment-branch-policies":
+            return subprocess.CompletedProcess(command, 1, "", "gh: HTTP 404")
+        return subprocess.CompletedProcess(command, 0, json.dumps(answers[suffix]), "")
 
-    monkeypatch.setattr(script, "api", api)
+    monkeypatch.setattr(script.subprocess, "run", run)
 
     state = script.environment_state("o/r", "e")
 
@@ -176,6 +177,7 @@ def test_the_image_digest_is_read_for_linux_whatever_the_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     script = _script()
+    monkeypatch.setattr(script.platform, "machine", lambda: "arm64")
     commands: list[list[str]] = []
 
     def run(command: list[str], **_: Any) -> str:
@@ -192,4 +194,4 @@ def test_the_image_digest_is_read_for_linux_whatever_the_host(
     inspect = commands[0]
     assert inspect[:2] == ["skopeo", "inspect"]
     assert inspect[inspect.index("--override-os") + 1] == "linux"
-    assert inspect[inspect.index("--override-arch") + 1] in ("amd64", "arm64")
+    assert inspect[inspect.index("--override-arch") + 1] == "arm64"
