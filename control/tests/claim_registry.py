@@ -113,6 +113,8 @@ CLAIMS: dict[str, Claim] = {
 
 
 NOT_CLAIMS: dict[str, str] = {
+    "gateway_external_deployments": "operator configuration, not a claim",
+    "gateway_credential_bindings": "operator configuration, not a claim",
     "agent_nodes": "the node identity itself",
     "agent_certificates": "issued credentials of a node; identity, not a reservation",
     "agent_node_profiles": "the observed hardware of a node",

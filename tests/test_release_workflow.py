@@ -360,9 +360,10 @@ def test_pr_image_references_pass_the_publication_ingress_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Catches a publisher that mistakes run-scoped tags for content identity."""
-    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    monkeypatch.syspath_prepend(str(ROOT / "scripts/release"))
     loader = importlib.machinery.SourceFileLoader(
-        "install_release_publication", str(ROOT / "scripts/install-release-publication")
+        "install_release_publication",
+        str(ROOT / "scripts/release/install-release-publication"),
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
@@ -390,7 +391,7 @@ def test_ephemeral_publication_leaves_controller_listener_available() -> None:
     compose = yaml.safe_load((ROOT / "deploy/compose/compose.yaml").read_text())
     controller_ports = compose["services"]["caddy"]["ports"]
     assert publication_port not in {int(port["published"]) for port in controller_ports}
-    server = ast.parse((ROOT / "scripts/serve-acceptance-objects").read_text())
+    server = ast.parse((ROOT / "scripts/ci/serve-acceptance-objects").read_text())
     defaults = [
         keyword.value.value
         for call in ast.walk(server)
@@ -568,7 +569,7 @@ def test_main_reuses_the_images_of_the_pull_request_that_tested_its_tree() -> No
     steps = images["jobs"]["publish-development-images"]["steps"]
     by_id = {step.get("id"): step for step in steps}
     reuse = by_id["pr_images"]
-    assert "scripts/reuse-pr-candidate-images" in reuse["run"]
+    assert "scripts/images/reuse-pr-candidate-images" in reuse["run"]
     order = [step.get("id") for step in steps]
     for role in ("api", "worker", "litellm"):
         build = by_id[f"build_{role}"]
@@ -597,7 +598,7 @@ def _image_steps() -> list[dict[str, Any]]:
 @pytest.mark.parametrize("pr_proof", [True, False])
 def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -> None:
     """Catches main re-verifying or deep-scanning the digests the pull request
-    verified (scripts/reuse-pr-candidate-images prints reused=true only when it
+    verified (scripts/images/reuse-pr-candidate-images prints reused=true only when it
     holds them; a missing or other digest builds instead), dropping a proof the
     pull request does not hold (fresh security evidence), or skipping
     publication or signing under main's identity."""
@@ -659,7 +660,7 @@ def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -
     )
     collected = subprocess.run(
         [
-            ROOT / "scripts/dev-image-acceptance-receipt",
+            ROOT / "scripts/images/dev-image-acceptance-receipt",
             "collect",
             tmp_path,
             commit,
@@ -750,7 +751,7 @@ def ship_component_image(
             if uses.startswith("actions/cache@") and not hit:
                 post_save.append(key)
         elif step.get("id") == f"reuse_{role}" and stored:
-            # scripts/reuse-development-image revalidates the cached entry.
+            # scripts/images/reuse-development-image revalidates the cached entry.
             context[f"steps.reuse_{role}.outputs.digest"] = stored
         elif step.get("id") == f"build_{role}":
             # Images carry their commit, so a rebuild is always another digest.
@@ -811,9 +812,9 @@ def test_a_newer_main_release_supersedes_only_through_the_bounded_script() -> No
     assert supersede["if"] == "github.ref == 'refs/heads/main'"
     assert supersede["permissions"] == {"actions": "write", "contents": "read"}
     assert "needs" not in supersede
-    assert "scripts/supersede-release-runs" in supersede["steps"][-1]["run"]
+    assert "scripts/ci/supersede-release-runs" in supersede["steps"][-1]["run"]
     loader = importlib.machinery.SourceFileLoader(
-        "supersede_release_runs", str(ROOT / "scripts/supersede-release-runs")
+        "supersede_release_runs", str(ROOT / "scripts/ci/supersede-release-runs")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
@@ -842,7 +843,7 @@ def test_main_reuses_the_setup_programs_of_the_pull_request_that_tested_its_tree
         "steps.tested-ci.outputs.run_id != '' && steps.select.outputs.setups == ''"
     )
     assert (
-        'scripts/resolve-pr-setups "$RUN_ID" "$(git rev-parse "$GITHUB_SHA^{tree}")"'
+        'scripts/ci/resolve-pr-setups "$RUN_ID" "$(git rev-parse "$GITHUB_SHA^{tree}")"'
         in step["run"]
     )
 
@@ -994,9 +995,9 @@ def test_main_reuses_each_spark_step_independently(
         check=True,
         capture_output=True,
     )
-    scripts = repo / "scripts"
-    scripts.mkdir(exist_ok=True)
-    (scripts / "select-ci-areas").symlink_to(ROOT / "scripts/select-ci-areas")
+    scripts = repo / "scripts/ci"
+    scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "select-ci-areas").symlink_to(ROOT / "scripts/ci/select-ci-areas")
     binaries = tmp_path / "bin"
     binaries.mkdir()
     generation = "a" * 64
@@ -1260,10 +1261,10 @@ def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
         + ("sys.exit(1)\n" if fault == "denied" else f"print(json.dumps({record!r}))\n")
     )
     gh.chmod(0o755)
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
+    scripts = tmp_path / "scripts/images"
+    scripts.mkdir(parents=True)
     (scripts / "reuse-pr-image-security").symlink_to(
-        ROOT / "scripts/reuse-pr-image-security"
+        ROOT / "scripts/images/reuse-pr-image-security"
     )
     step = next(step for step in _image_steps() if step.get("id") == "pr_security")
     output, summary = tmp_path / "output", tmp_path / "summary"

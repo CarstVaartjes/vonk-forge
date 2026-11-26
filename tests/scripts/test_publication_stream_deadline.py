@@ -13,9 +13,9 @@ import pytest
 
 def _publication(monkeypatch):
     root = Path(__file__).resolve().parents[2]
-    monkeypatch.syspath_prepend(str(root / "scripts"))
+    monkeypatch.syspath_prepend(str(root / "scripts/release"))
     loader = importlib.machinery.SourceFileLoader(
-        "publication_stream", str(root / "scripts/install-release-publication")
+        "publication_stream", str(root / "scripts/release/install-release-publication")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None

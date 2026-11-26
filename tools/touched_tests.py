@@ -157,7 +157,7 @@ def select(touched: list[str], root: Path = ROOT) -> list[tuple[str, str]]:
         name = Path(path).name
         # A quoted bare word such as "test" names nothing in particular.
         distinctive = "/" in path and any(mark in name for mark in ".-_")
-        # Whole path tokens only: scripts/test must not match scripts/test-local.
+        # Whole path tokens only: scripts/test must not match scripts/dev/test-local.
         named = re.compile(rf"(?<![\w/.-]){re.escape(path)}(?![\w.-])")
         for candidate, source in sources.items():
             if is_test_file(candidate) and (

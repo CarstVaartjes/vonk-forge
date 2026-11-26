@@ -70,7 +70,7 @@ For multi-node recipes, also prove rank failure withdraws the route, recovery
 does not silently change the accepted recipe or artifact digest, and a full NAS
 or Spark restart restores only persisted authority—not stale readiness.
 
-Dev/CI must run `scripts/qualify-recipe --level structural` against the exact
+Dev/CI must run `scripts/dev/qualify-recipe --level structural` against the exact
 canonical repository checkout and retain its package and compiler evidence.
 The local checkout is a dev/CI input only; production execution follows the
 global repository metadata that the Controller refreshes at startup and every
@@ -96,7 +96,7 @@ target. Retain the canonical model/revision/image identities and digests with
 the operation receipt. Progress is durable per Spark and includes transfer
 phase, replacement state, and serving readiness; apply reports partial state
 truthfully and never treats enqueueing as success. Once the route is active,
-run the Recipe's declared HTTP serving checks with `scripts/qualify-recipe
+run the Recipe's declared HTTP serving checks with `scripts/dev/qualify-recipe
 --serving-url URL`; it prints the bounded serving result as JSON.
 
 ## Upgrade and recovery

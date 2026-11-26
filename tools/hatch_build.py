@@ -21,7 +21,7 @@ class CustomBuildHook(BuildHookInterface[BuilderConfig]):
         directory = Path(self._build_directory.name)
         subprocess.run(
             [
-                str(root / "scripts/generate-control-clients"),
+                str(root / "scripts/dev/generate-control-clients"),
                 "--python-only",
                 "--output-root",
                 str(directory),
@@ -32,7 +32,7 @@ class CustomBuildHook(BuildHookInterface[BuilderConfig]):
         )
         subprocess.run(
             [
-                str(root / "scripts/export-agent-wire-schema"),
+                str(root / "scripts/dev/export-agent-wire-schema"),
                 "--output",
                 str(directory / "wire.json"),
             ],

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/dev-publication-sequence"
+SCRIPT = ROOT / "scripts/images/dev-publication-sequence"
 
 
 def _commit(repo: Path, committed_at: int) -> str:

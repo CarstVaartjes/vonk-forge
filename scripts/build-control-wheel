@@ -15,7 +15,7 @@ if (($# != 0)); then
     exit 2
 fi
 
-wheel_name="$(python3 "$(dirname "${BASH_SOURCE[0]}")/protocol-wheel-name" --root "$root")"
+wheel_name="$(python3 "$(dirname "${BASH_SOURCE[0]}")/release/protocol-wheel-name" --root "$root")"
 mkdir -p "$root/inventory/wheels"
 # The image and the release carry this wheel; nothing compares it with a lock.
 (cd "$root" && uv build --project agent_protocol --wheel --out-dir inventory/wheels)

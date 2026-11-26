@@ -865,6 +865,41 @@ be at most 120 seconds old when admitted. This covers the permitted transition
 without requiring renewal during the acknowledgement wait. Expiry still denies
 serving, and an expired generation cannot restart its startup budget.
 
+### External models and the alias namespace
+
+An external model is one LiteLLM `model_list` entry that points at a provider
+outside the fleet. Local routes are unchanged: a bundle without external entries
+renders the same bytes as before, so shipping this contract restarts no gateway.
+The tables `gateway_external_deployments` (the operator's desired and the
+applied spec and the publication state; its wait columns arrive with the publisher that redrives them), `gateway_credential_bindings`
+(a binding name and the destinations its secret may reach; never a secret) are additive and are reconciled from the
+models at startup.
+
+- **One rule.** `external_validation.validate_external_entry` accepts one entry
+  or returns every problem with its field path and rule code. A field must be
+  declared in the pinned LiteLLM surface (`deploy/compose/litellm/surface.json`,
+  generated from the pinned image and compared in CI); hooks, file access,
+  proxy-wide settings, client-side credentials, retries, fallbacks and
+  `custom_llm_provider` are refused; a credential is only a reference to an approved binding
+  (`os.environ/VONK_CREDENTIAL_<BINDING>`); every URL is `https` with a public
+  host (a dotless host, a trailing dot, an IPv4 shorthand such as `127.1` and an
+  embedded-IPv4 IPv6 form count as private) unless a binding approves that exact private origin; and the binding must
+  approve every origin and the region of the entry. No submitted secret value is
+  ever repeated in a problem.
+- **One namespace.** A model name decides where a client's data goes, so the
+  names of local runs and external models share one namespace. Nothing locks: a
+  producer asks `alias_owner` who serves it (an external row, an active run, or
+  the selected profile's assignments) and writes; a race is settled by the unique
+  alias of the external row and by the renderer. Local
+  owners replace each other as before (the newest accepted request owns a
+  name); an external owner is never replaced, and an external model is refused a
+  name another owner serves (`alias_taken`). The renderer leaves out an
+  external entry whose alias a local route serves, so the local route wins.
+- **Publication.** The external publication states are `ExternalPublicationState`;
+  the publisher and the credential custody follow in later changes. Every
+  gateway generation restarts LiteLLM, so adding, changing or removing an
+  external model cuts in-flight streams after at most 30 seconds.
+
 ## Scaling and networking
 
 Adding a GPU node repeats the same install/enroll operation and adds a stable node

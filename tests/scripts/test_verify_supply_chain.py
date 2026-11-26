@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from scripts.protocol_wheel import protocol_wheel_name
+from scripts.release.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/verify-supply-chain"
+SCRIPT = ROOT / "scripts/release/verify-supply-chain"
 PUBLIC_CONTRACT_WHEEL = tomllib.loads(
     (ROOT / "control/packaging/public-contracts.lock").read_text()
 )["wheel"]
@@ -311,7 +311,7 @@ def test_dockerfile_must_copy_and_install_the_protocol_wheel(tmp_path: Path) -> 
     source = dockerfile.read_text()
     dockerfile.write_text(
         source.replace(
-            "/wheels/$(scripts/protocol-wheel-name)",
+            "/wheels/$(scripts/release/protocol-wheel-name)",
             "/wheels/missing.whl",
         )
     )

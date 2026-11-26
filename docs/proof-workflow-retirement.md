@@ -77,7 +77,7 @@ the pre-merge candidate acceptance (`release-acceptance.yml`):
 2026-11 follow-up: the five retained lanes, `installed-cli-proof` and
 `client-compatibility-report` are no longer standalone workflows. Each is a
 `ci.yml` job selected by the area of the code it proves and needed by `ci-gate`
-(`scripts/verify-ci-gate`), on the tested pull request merge commit;
+(`scripts/ci/verify-ci-gate`), on the tested pull request merge commit;
 `ci-scope.yml` is deleted. Jobs: `oci-link-fallback` (a bind-mounted cross-device
 store), `privileged-helper-oci-process` (the signed helper on ARM64 systemd),
 `model-cache-unknown-expiry`, `profile-effect-consumer`, `installed-cli-proof`

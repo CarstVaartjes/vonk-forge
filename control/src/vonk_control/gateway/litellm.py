@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Discriminator, Field, Tag, model_validator
 from vonk_forge_contracts import EndpointAlias
 from vonk_forge_contracts.api import (
     AudioInputFormat,
@@ -23,6 +23,13 @@ from vonk_forge_contracts.api import (
 )
 from vonk_forge_contracts.recipe import Scalar
 
+from vonk_control.gateway.external_contract import (
+    ExternalDeploymentSpec,
+    ExternalRouteEntry,
+    ExternalRouteModelInfo,
+    ExternalRouteParams,
+    RouteOrigin,
+)
 from vonk_control.strict_json import StrictModel
 
 if TYPE_CHECKING:
@@ -266,7 +273,7 @@ class VonkAudioSpeech(_ConfigModel):
 
 
 class LiteLlmModelInfo(_ConfigModel):
-    """The ``model_info`` of one route: LiteLLM v1.103.0 field names verbatim.
+    """The ``model_info`` of one route: LiteLLM v1.106.7 field names verbatim.
 
     Built only from the recipe's API facts (``route_model_info``). A field that
     does not apply is absent from the rendered file (``None`` here), never a guess. The
@@ -333,10 +340,37 @@ class LiteLlmModelInfo(_ConfigModel):
         return self
 
 
-class LiteLlmModelEntry(_ConfigModel):
+class LocalRouteEntry(_ConfigModel):
+    """The entry of a recipe run served by a Spark of the fleet."""
+
     model_name: EndpointAlias
     litellm_params: LiteLlmUpstreamParams
     model_info: LiteLlmModelInfo | None = None
+
+
+def _route_origin(entry: object) -> str:
+    """Which contract reads an entry: it is external exactly when ``vonk_origin`` says so."""
+
+    info = (
+        entry.get("model_info")
+        if isinstance(entry, Mapping)
+        else getattr(entry, "model_info", None)
+    )
+    origin = (
+        info.get("vonk_origin")
+        if isinstance(info, Mapping)
+        else getattr(info, "vonk_origin", None)
+    )
+    return (
+        RouteOrigin.EXTERNAL if origin == RouteOrigin.EXTERNAL else RouteOrigin.LOCAL
+    ).value
+
+
+LiteLlmModelEntry = Annotated[
+    Annotated[LocalRouteEntry, Tag(RouteOrigin.LOCAL.value)]
+    | Annotated[ExternalRouteEntry, Tag(RouteOrigin.EXTERNAL.value)],
+    Discriminator(_route_origin),
+]
 
 
 class LiteLlmRouterSettings(_ConfigModel):
@@ -355,18 +389,46 @@ class LiteLlmConfig(_ConfigModel):
     router_settings: LiteLlmRouterSettings = LiteLlmRouterSettings()
 
 
-def _document(model_list: list[LiteLlmModelEntry]) -> bytes:
+def _document(model_list: list[LocalRouteEntry | ExternalRouteEntry]) -> bytes:
     document = LiteLlmConfig(model_list=model_list).model_dump(
         mode="json", exclude_none=True
     )
     return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
-def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
-    """Render the LiteLLM configuration serving exactly the published aliases."""
+def render_external_entry(
+    spec: ExternalDeploymentSpec, deployment_id: str, revision: int
+) -> ExternalRouteEntry:
+    """The entry of one accepted external model: its spec, identity and ``num_retries: 0``."""
 
-    if not routes.aliases:
+    return ExternalRouteEntry(
+        model_name=spec.alias,
+        litellm_params=ExternalRouteParams.model_validate(spec.litellm_params),
+        model_info=ExternalRouteModelInfo.model_validate(
+            {**spec.model_info, "id": f"{deployment_id}:{revision}"}
+        ),
+    )
+
+
+def render_config(
+    routes: RouteState,
+    policy: LiteLlmPolicy,
+    externals: Sequence[ExternalRouteEntry] = (),
+) -> bytes:
+    """Render the LiteLLM configuration serving exactly the published aliases.
+
+    ``externals`` are served beside the local routes; an external entry whose
+    alias a local route serves is left out (the local route owns the name).
+    """
+
+    if not routes.aliases and not externals:
         raise LiteLlmPolicyError("LiteLLM models require a published route snapshot")
+    if not routes.aliases:
+        if policy.models:
+            raise LiteLlmPolicyError(
+                "LiteLLM policy contains models outside published aliases"
+            )
+        return _document(_external_entries(externals, frozenset()))
     if any(not value for value in routes.aliases.values()):
         raise LiteLlmPolicyError("LiteLLM routes must be already-rendered strings")
     models = dict(policy.models)
@@ -376,7 +438,7 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
         )
     if not models:
         raise LiteLlmPolicyError("LiteLLM policy must publish at least one model")
-    model_list: list[LiteLlmModelEntry] = []
+    model_list: list[LocalRouteEntry | ExternalRouteEntry] = []
     for alias in sorted(models):
         # The typed policy owns the field set, provider and quota bounds; the
         # renderer only refuses an upstream name the gateway pattern rejects.
@@ -384,7 +446,7 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
         if _UPSTREAM_MODEL.fullmatch(accepted.upstream_model) is None:
             raise LiteLlmPolicyError("LiteLLM upstream model is invalid")
         model_list.append(
-            LiteLlmModelEntry(
+            LocalRouteEntry(
                 model_name=alias,
                 litellm_params=LiteLlmUpstreamParams(
                     model=f"{accepted.upstream_provider}/{accepted.upstream_model}",
@@ -393,7 +455,21 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
                 model_info=accepted.model_info,
             )
         )
+    model_list.extend(_external_entries(externals, frozenset(models)))
     return _document(model_list)
+
+
+def _external_entries(
+    externals: Sequence[ExternalRouteEntry], local: frozenset[str]
+) -> list[LocalRouteEntry | ExternalRouteEntry]:
+    aliases = [entry.model_name for entry in externals]
+    if len(aliases) != len(set(aliases)):
+        raise LiteLlmPolicyError("LiteLLM external models must have unique aliases")
+    return [
+        entry
+        for entry in sorted(externals, key=lambda item: item.model_name)
+        if entry.model_name not in local
+    ]
 
 
 def render_empty_config() -> bytes:

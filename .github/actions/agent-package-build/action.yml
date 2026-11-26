@@ -6,7 +6,7 @@ inputs:
     description: Package channel, dev or stable
     required: true
   publication_sequence:
-    description: Development source commit time (scripts/dev-publication-sequence) or zero for stable
+    description: Development source commit time (scripts/images/dev-publication-sequence) or zero for stable
     required: true
   version:
     description: Exact Debian package version
@@ -111,7 +111,7 @@ runs:
         set -euo pipefail
         case "${CHANNEL}:${PACKAGE_ENVIRONMENT}:${SECURITY_GATE_MODE}:${BINARY_SOURCE_MODE}:${LIFECYCLE_GATE_MODE}" in
           dev:agent-development:external:prebuilt:external)
-            test "$PUBLICATION_SEQUENCE" = "$(scripts/dev-publication-sequence "$GITHUB_SHA")"
+            test "$PUBLICATION_SEQUENCE" = "$(scripts/images/dev-publication-sequence "$GITHUB_SHA")"
             release=development
             ;;
           stable:agent-release:inline:compile:inline)
@@ -124,7 +124,7 @@ runs:
             ;;
         esac
         expected=$(
-          scripts/agent-package-metadata \
+          scripts/agent/agent-package-metadata \
             "$release" "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" \
             "$GITHUB_SHA" "$PUBLICATION_SEQUENCE"
         )
@@ -155,8 +155,8 @@ runs:
         set -euo pipefail
         test "$(uname -m)" = aarch64
         rustup set profile minimal
-        scripts/retry-dependency-fetch rustup toolchain install
-        scripts/retry-dependency-fetch rustup target add aarch64-unknown-linux-gnu
+        scripts/ci/retry-dependency-fetch rustup toolchain install
+        scripts/ci/retry-dependency-fetch rustup target add aarch64-unknown-linux-gnu
 
     - name: Restore Rust dependency cache
       if: inputs.binary_source_mode == 'compile'
@@ -186,7 +186,7 @@ runs:
             git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
-            scripts/verify-release-tag-authority \
+            scripts/release/verify-release-tag-authority \
               "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
             ;;
           *)
@@ -198,7 +198,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        scripts/materialize-agent-tools --output-root target
+        scripts/agent/materialize-agent-tools --output-root target
 
     - name: Validate exact precompiled architecture binary sets
       if: inputs.binary_source_mode == 'prebuilt'
@@ -240,7 +240,7 @@ runs:
               "$GITHUB_SHA" "$platform" "$lock_digest" "$BASELINE_VERSION" \
               | sha256sum | cut -d' ' -f1
           )"
-          scripts/verify-agent-binaries \
+          scripts/agent/verify-agent-binaries \
             --architecture "$platform" \
             --semantic-version "$candidate_semantic_version" \
             --build-digest "$candidate_build_digest" \
@@ -249,7 +249,7 @@ runs:
           cmp --silent \
             "prebuilt/$architecture/candidate.json" \
             "$RUNNER_TEMP/$architecture-candidate.json"
-          scripts/verify-agent-binaries \
+          scripts/agent/verify-agent-binaries \
             --architecture "$platform" \
             --semantic-version "$baseline_semantic_version" \
             --build-digest "$baseline_build_digest" \
@@ -320,7 +320,7 @@ runs:
         build_package() {
           local architecture=$1 build_digest=$2 output_dir=$3
           shift 3
-          scripts/build-agent-deb \
+          scripts/agent/build-agent-deb \
             --version "$VERSION" \
             --architecture "$architecture" \
             --build-digest "$build_digest" \
@@ -360,7 +360,7 @@ runs:
           cmp --silent \
             "dist/vonk-forge-agent_${VERSION}_${architecture}.deb.host.sig" \
             "reproducible/vonk-forge-agent_${VERSION}_${architecture}.deb.host.sig"
-          scripts/verify-agent-deb --json \
+          scripts/agent/verify-agent-deb --json \
             "dist/vonk-forge-agent_${VERSION}_${architecture}.deb"
         done
 
@@ -372,7 +372,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        scripts/verify-agent-systemd --json \
+        scripts/agent/verify-agent-systemd --json \
           | tee dist/vonk-forge-systemd-security.json
 
     - name: Build lifecycle acceptance baseline packages
@@ -400,7 +400,7 @@ runs:
         build_baseline() {
           local architecture=$1 build_digest=$2
           shift 2
-          scripts/build-agent-deb \
+          scripts/agent/build-agent-deb \
             --acceptance-baseline \
             --version "$BASELINE_VERSION" \
             --architecture "$architecture" \
@@ -412,7 +412,7 @@ runs:
         }
         build_lifecycle() {
           local architecture=$1 build_digest=$2 binaries_dir=$3
-          scripts/build-agent-deb \
+          scripts/agent/build-agent-deb \
             --version "$NEXT_VERSION" \
             --architecture "$architecture" \
             --build-digest "$build_digest" \
@@ -444,12 +444,12 @@ runs:
           )"
           build_lifecycle linux-arm64 "$arm64_build_digest" \
             target/aarch64-unknown-linux-gnu/release
-          scripts/verify-agent-deb --json \
+          scripts/agent/verify-agent-deb --json \
             "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
           build_baseline linux-arm64 "$arm64_baseline_digest" \
             "${arm64_baseline_args[@]}"
         fi
-        scripts/verify-agent-deb --json \
+        scripts/agent/verify-agent-deb --json \
           "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb"
         rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
         test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
@@ -469,16 +469,16 @@ runs:
         set -euo pipefail
         test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
         trap 'echo "lifecycle check failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
-        scripts/ci-apt-install \
+        scripts/ci/ci-apt-install \
           crun fuse-overlayfs iproute2 iptables podman shellcheck slirp4netns uidmap
         shellcheck \
           packaging/bin/vonk-forge-docker-firewall \
-          scripts/test-agent-package-native-lifecycle \
+          scripts/agent/test-agent-package-native-lifecycle \
           tests/scripts/test_docker_firewall.sh \
           tests/nodes/test_agent_package_native_lifecycle.sh
         sudo tests/scripts/test_docker_firewall.sh
         tests/nodes/test_agent_package_native_lifecycle.sh
-        sudo scripts/test-agent-package-native-lifecycle \
+        sudo scripts/agent/test-agent-package-native-lifecycle \
           linux-arm64 \
           "$(realpath "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb")" \
           "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
@@ -520,7 +520,7 @@ runs:
             git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
-            scripts/verify-release-tag-authority \
+            scripts/release/verify-release-tag-authority \
               "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
             ;;
           *)
@@ -545,7 +545,7 @@ runs:
         esac
         for architecture in arm64; do
           package="vonk-forge-agent_${VERSION}_${architecture}.deb"
-          scripts/sign-package-keyless "dist/$package" \
+          scripts/release/sign-package-keyless "dist/$package" \
             "dist/${package}.sigstore.json" "$identity"
         done
 
@@ -569,7 +569,7 @@ runs:
             git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
-            scripts/verify-release-tag-authority \
+            scripts/release/verify-release-tag-authority \
               "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
             ;;
           *)
@@ -602,7 +602,7 @@ runs:
             git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
-            scripts/verify-release-tag-authority \
+            scripts/release/verify-release-tag-authority \
               "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
             ;;
           *)
@@ -636,7 +636,7 @@ runs:
             git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
-            scripts/verify-release-tag-authority \
+            scripts/release/verify-release-tag-authority \
               "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
             ;;
           *)

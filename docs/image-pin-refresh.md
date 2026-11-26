@@ -10,7 +10,7 @@ exactly the reference they declare; the platform lock does not rewrite recipes.
 
 `deploy/compose/images.lock.json` is the single inventory. Its `images` mapping
 holds the Compose runtime images and its `build_bases` mapping holds the images
-the release Dockerfiles build `FROM`. `scripts/verify-supply-chain` binds the
+the release Dockerfiles build `FROM`. `scripts/release/verify-supply-chain` binds the
 lock to the Compose and Dockerfile defaults and rejects unpinned or floating
 references. Generated SBOM manifests are CI/release artifacts, not committed
 source files.
@@ -29,8 +29,8 @@ reference and will fail if only the lock changes.
 | `build_bases.litellm` | `ghcr.io/berriai/litellm` | `deploy/compose/images.lock.json`, `deploy/compose/litellm/Dockerfile` (both `FROM` lines) |
 | `build_bases.node` | `node` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`ARG NODE_IMAGE`) |
 | `build_bases.python` | `python` | `deploy/compose/images.lock.json`, `control/Dockerfile`, `deploy/compose/litellm/Dockerfile` (`ARG PYTHON_IMAGE`, bootstrap roots) |
-| `build_bases.skopeo` | `quay.io/skopeo/stable` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`SKOPEO_IMAGE` plus the three `*_DIGEST` args and labels), `scripts/verify-controller-skopeo`, `control/tests/test_controller_image_packaging.py`, `tests/scripts/test_verify_controller_skopeo.py` |
-| _(no lock key — developer lane)_ | `ubuntu` | `scripts/dev-agent-wire-linux.Dockerfile` (`FROM`, pinned by index digest) |
+| `build_bases.skopeo` | `quay.io/skopeo/stable` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`SKOPEO_IMAGE` plus the three `*_DIGEST` args and labels), `scripts/images/verify-controller-skopeo`, `control/tests/test_controller_image_packaging.py`, `tests/scripts/test_verify_controller_skopeo.py` |
+| _(no lock key — developer lane)_ | `ubuntu` | `scripts/dev/dev-agent-wire-linux.Dockerfile` (`FROM`, pinned by index digest) |
 
 `build_bases.litellm` is the upstream base of the
 patched `vonk-forge-litellm` release image; see
@@ -45,7 +45,7 @@ and `ARG SKOPEO_IMAGE`) and use the bare repository plus index digest whenever a
 reference is handed to skopeo:
 
 - `control/Dockerfile` resolves `docker://quay.io/skopeo/stable@${SKOPEO_INDEX_DIGEST}`.
-- `scripts/verify-controller-skopeo` takes the tagged-plus-digested source
+- `scripts/images/verify-controller-skopeo` takes the tagged-plus-digested source
   reference, asserts it equals the reviewed pin, and reduces it to
   `quay.io/skopeo/stable@<index digest>` before any `skopeo` call.
 
@@ -120,7 +120,7 @@ for m in json.load(sys.stdin)["manifests"]:
 
 Use the **index** digest (the digest of the whole manifest list) for the lock
 and `SKOPEO_IMAGE`; use the per-architecture child digests only where the
-Dockerfile and `scripts/verify-controller-skopeo` check them.
+Dockerfile and `scripts/images/verify-controller-skopeo` check them.
 
 ## Refresh procedure
 
@@ -133,7 +133,7 @@ Dockerfile and `scripts/verify-controller-skopeo` check them.
    surrounding Compose service, environment variable name, health check, or
    build stage.
 5. Update the tests listed in the table, then the annotations in
-   `scripts/verify-controller-skopeo` (pinned source reference, both expected
+   `scripts/images/verify-controller-skopeo` (pinned source reference, both expected
    child digests, and the index label check).
 6. Run the supply-chain verifier. CI generates the SBOM and lock digest
    manifest from the reviewed lockfiles and attaches them to a release; no
@@ -144,13 +144,13 @@ Dockerfile and `scripts/verify-controller-skopeo` check them.
 
 ```bash
 # 0. The lock and deployment inputs agree and all platform pins carry digests.
-scripts/verify-supply-chain --json
+scripts/release/verify-supply-chain --json
 
 # 1. Re-derive the digest you recorded.
 docker buildx imagetools inspect --raw "quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5" | sha256sum
 
 # 2. Offline supply-chain gate, and confirm the regenerated manifest is current.
-scripts/verify-supply-chain --json
+scripts/release/verify-supply-chain --json
 
 # 3. Pin-assertion tests (fast).
 pytest -q tests/scripts/test_verify_controller_skopeo.py
@@ -165,6 +165,23 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
   "control/tests/security/test_agent_protocol.py::test_root_context_image_installs_contracts_and_protocol_from_build_inputs" \
   -m lane
 ```
+
+## Regenerate the LiteLLM surface with every LiteLLM bump
+
+`deploy/compose/litellm/surface.json` records the providers and the
+`litellm_params` and `model_info` fields the pinned LiteLLM accepts, and the pin's
+digest. After changing `build_bases.litellm`, regenerate it from the new image
+and commit the result:
+
+```bash
+image=$(python3 -c 'import json; print(json.load(open("deploy/compose/images.lock.json"))["build_bases"]["litellm"])')
+docker run --rm -i -e "VONK_LITELLM_IMAGE_DIGEST=${image##*@}" \
+  --entrypoint python "$image" - < tools/litellm_surface.py \
+  > deploy/compose/litellm/surface.json
+```
+
+CI regenerates it from the pinned image and fails on any difference, and a unit
+test fails while the surface's digest differs from `images.lock.json`.
 
 ## Patched release images are a different flow
 

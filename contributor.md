@@ -12,7 +12,7 @@ merged into the repository.
 
 ## Local checks
 
-Run `scripts/test-local` from your worktree for the repository and Controller
+Run `scripts/dev/test-local` from your worktree for the repository and Controller
 pytest suites. On macOS it sends Linux-marked tests to the `vonk-ci` OrbStack
 VM when available. The Python packages are one uv workspace with one root
 `uv.lock` and one root `.venv`; the protocol is an editable member, so a fresh
@@ -24,7 +24,7 @@ acceptance lanes.
 
 ## Added-line guards
 
-`scripts/check-added-lines` uses the merge base with `origin/main`; CI supplies
+`scripts/dev/check-added-lines` uses the merge base with `origin/main`; CI supplies
 the PR base. Only new syntax on added lines fails, with no debt or category
 ledger and no before/after count report. Keep behavior tests and generated
 contract checks. See [principle guards](docs/principle-guards.md).
@@ -36,10 +36,10 @@ Every change lands through an integration PR (`integration/*` or the
 acceptance and the path-filtered proof workflows. A member PR runs no CI jobs
 and reports `CI gate (member PR)` instead of the required `CI gate`, so it
 cannot merge itself. [Testing and CI](docs/testing-and-ci.md) lists what runs
-where (`full` in `scripts/select-ci-areas`).
+where (`full` in `scripts/ci/select-ci-areas`).
 Merge queues also accept their combined candidate before admission.
 Integration selection uses the conservative dependency closure documented in
-`scripts/select-ci-areas`; unfamiliar inputs select every integration. The
+`scripts/ci/select-ci-areas`; unfamiliar inputs select every integration. The
 Controller suites include their real PostgreSQL tests on every full run.
 
 Integration PRs carry the `release-acceptance` label. CI adds it to

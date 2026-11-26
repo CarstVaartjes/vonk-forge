@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Thin shell entrypoint kept separately so ``shellcheck scripts/fleet/validate-fabric``
+# validates the documented operator command while the parser remains unit-testable.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+exec python3 "$repo_root/scripts/fleet/validate_fabric.py" "$@"

@@ -14,7 +14,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/check-python-types"
+SCRIPT = ROOT / "scripts/dev/check-python-types"
 
 
 def _module(script: Path = SCRIPT) -> ModuleType:
@@ -54,7 +54,7 @@ def test_real_hook_checks_whitespace_paths_with_prepared_environment(
 ) -> None:
     """Catch skipped typing and broken filename splitting after preparation."""
     (tmp_path / "control").mkdir()
-    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/dev").mkdir(parents=True)
     (tmp_path / "tools").mkdir()
     (tmp_path / "control/pyproject.toml").write_text(
         '[project]\nname = "hook-probe"\nversion = "0.0.0"\nrequires-python = ">=3.14"\n'
@@ -62,19 +62,21 @@ def test_real_hook_checks_whitespace_paths_with_prepared_environment(
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pyright]\ntypeCheckingMode = "basic"\n'
     )
-    shutil.copy2(SCRIPT, tmp_path / "scripts/check-python-types")
+    shutil.copy2(SCRIPT, tmp_path / "scripts/dev/check-python-types")
     shutil.copy2(
-        ROOT / "scripts/check-staged-code", tmp_path / "scripts/check-staged-code"
+        ROOT / "scripts/dev/check-staged-code",
+        tmp_path / "scripts/dev/check-staged-code",
     )
     shutil.copy2(
-        ROOT / "scripts/check-staged-python", tmp_path / "scripts/check-staged-python"
+        ROOT / "scripts/dev/check-staged-python",
+        tmp_path / "scripts/dev/check-staged-python",
     )
     shutil.copy2(
-        ROOT / "scripts/hook_words_generated.py",
-        tmp_path / "scripts/hook_words_generated.py",
+        ROOT / "scripts/dev/hook_words_generated.py",
+        tmp_path / "scripts/dev/hook_words_generated.py",
     )
     # This fixture tests check dispatch, not dependency acquisition.
-    helper = tmp_path / "scripts/check_environment.py"
+    helper = tmp_path / "scripts/dev/check_environment.py"
     helper.write_text(
         "def ensure_control(root, environment): pass\n\ndef ensure_web(root): pass\n"
         "\nimport os\n\ndef pyright_environment(): return dict(os.environ)\n"
@@ -119,7 +121,7 @@ def test_non_python_check_failure_still_blocks_the_commit(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, file: str
 ) -> None:
     """A Python-only early return must not silently accept other languages."""
-    module = _module(ROOT / "scripts/check-staged-code")
+    module = _module(ROOT / "scripts/dev/check-staged-code")
     monkeypatch.setattr(module, "ROOT", tmp_path)
     monkeypatch.setattr(
         module.subprocess, "check_output", lambda *a, **k: (file + "\0").encode()
@@ -131,7 +133,7 @@ def test_non_python_check_failure_still_blocks_the_commit(
     (tools / "tsc").touch()
 
     def refuse(command: list[str], **kwargs: object) -> None:
-        if command == ["python3", "scripts/check-staged-python"]:
+        if command == ["python3", "scripts/dev/check-staged-python"]:
             return
         raise subprocess.CalledProcessError(1, command)
 
@@ -147,7 +149,7 @@ def test_non_python_check_failure_still_blocks_the_commit(
 
 def _hook_module() -> ModuleType:
     loader = importlib.machinery.SourceFileLoader(
-        "check_staged_python", str(ROOT / "scripts/check-staged-python")
+        "check_staged_python", str(ROOT / "scripts/dev/check-staged-python")
     )
     specification = importlib.util.spec_from_loader(loader.name, loader)
     assert specification is not None
@@ -234,7 +236,7 @@ def test_hook_preserves_nul_filenames_and_only_runs_checks(
             "--",
             filename,
         ],
-        [module.sys.executable, "scripts/check-python-types", filename],
+        [module.sys.executable, "scripts/dev/check-python-types", filename],
     ]
 
 
@@ -251,7 +253,7 @@ def test_staged_added_line_violation_fails_the_hook(
     file: str,
     source: str,
 ) -> None:
-    module = _module(ROOT / "scripts/check-staged-code")
+    module = _module(ROOT / "scripts/dev/check-staged-code")
     # The guards read files relative to their own checkout: copy them beside the diff.
     shutil.copytree(
         ROOT / "control/tests",

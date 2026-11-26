@@ -1,6 +1,6 @@
 """A workflow runs a repository Python script inside the environment its imports need.
 
-Batch 7b's release failed: ``scripts/build-nas-compose-bundle`` started importing the
+Batch 7b's release failed: ``scripts/release/build-nas-compose-bundle`` started importing the
 shared Pydantic contracts, but the publication workflow ran it with the runner's bare
 Python, which has no pydantic. Every direct workflow invocation of a repository Python
 script whose module-level imports need a project package must go through ``uv run``
@@ -96,8 +96,8 @@ def test_lint_job_checks_the_one_workspace_lock_is_current() -> None:
 def test_contract_generators_prepare_before_project_imports() -> None:
     """A bare interpreter must enter preparation before loading dependencies."""
 
-    scripts = sorted(ROOT.joinpath("scripts").glob("generate-*")) + sorted(
-        ROOT.joinpath("scripts").glob("export-*schema*")
+    scripts = sorted(ROOT.joinpath("scripts/dev").glob("generate-*")) + sorted(
+        ROOT.joinpath("scripts/dev").glob("export-*schema*")
     )
     checked = []
     for script in scripts:
@@ -117,7 +117,7 @@ def test_contract_generators_prepare_before_project_imports() -> None:
                 }
                 for node in ast.walk(tree)
             )
-            or "scripts/export-" in source
+            or "scripts/dev/export-" in source
         )
         if not needs_project:
             continue
@@ -167,11 +167,11 @@ def test_spark_acceptance_prepares_its_observation_contract(tmp_path, monkeypatc
             command = step.get("run", "")
             if "python tests/acceptance/test_spark_lifecycle.py run" in command:
                 break
-            if command.startswith("scripts/generate-control-clients "):
+            if command.startswith("scripts/dev/generate-control-clients "):
                 subprocess.run(
                     [
                         sys.executable,
-                        str(ROOT / "scripts/generate-control-clients"),
+                        str(ROOT / "scripts/dev/generate-control-clients"),
                         *shlex.split(command)[1:],
                         "--output-root",
                         str(tmp_path),

@@ -212,6 +212,14 @@ RETAINED: dict[str, tuple[Retained, str]] = {
     ),
     "recipe_route_authorities": (Retained.DESIRED_STATE, "published routes"),
     "route_publication_owner": (Retained.DESIRED_STATE, "a route's live owner"),
+    "gateway_external_deployments": (
+        Retained.DESIRED_STATE,
+        "operator configuration: kept while configured, deleted only by an explicit remove",
+    ),
+    "gateway_credential_bindings": (
+        Retained.DESIRED_STATE,
+        "operator configuration: kept while configured, deleted only by an explicit remove",
+    ),
     "fleet_event_cursor": (Retained.OBSERVED_TRUTH, "the stream's one cursor"),
     "node_telemetry_latest": (Retained.OBSERVED_TRUTH, "each node's newest sample"),
     "measured_role_peaks": (
