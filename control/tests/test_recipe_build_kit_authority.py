@@ -15,7 +15,7 @@ from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.prebuilt_images import PrebuiltImageImporter, executable_build_key
+from vonk_control.prebuilt_images import PrebuiltImageImporter
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.runtime_image_preparation.storage import (
     FilesystemRuntimeImageStorage,
@@ -43,9 +43,6 @@ from .test_prebuilt_images import (
 def test_prebuilt_preparation_has_no_nominal_spark_admission(tmp_path, damage):
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     reference = "ghcr.io/example/runtime@sha256:" + "b" * 64
-    accepted_key = executable_build_key(
-        RecipeBuildService(sessions, bundles=bundles).resolve(revision.id).input_intent
-    )
     with sessions.begin() as session:
         row = session.get(CatalogDocumentRevision, revision.id)
         assert row is not None
@@ -57,7 +54,7 @@ def test_prebuilt_preparation_has_no_nominal_spark_admission(tmp_path, damage):
                 | {
                     "prebuilt_image": {
                         "reference": reference,
-                        "build_key": accepted_key,
+                        "build_key": "c" * 64,
                     }
                 }
             )
@@ -89,8 +86,6 @@ def test_prebuilt_preparation_has_no_nominal_spark_admission(tmp_path, damage):
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_past_failed_pull_and_source_key_do_not_change_accepted_content(tmp_path):
     sessions, bundles, now, node_id, revision = setup(tmp_path)
-    service = RecipeBuildService(sessions, bundles=bundles)
-    accepted_key = executable_build_key(service.resolve(revision.id).input_intent)
     reference = "ghcr.io/example/runtime@sha256:" + "b" * 64
     with sessions.begin() as session:
         row = session.get(CatalogDocumentRevision, revision.id)
@@ -103,7 +98,7 @@ def test_past_failed_pull_and_source_key_do_not_change_accepted_content(tmp_path
                 | {
                     "prebuilt_image": {
                         "reference": reference,
-                        "build_key": accepted_key,
+                        "build_key": "c" * 64,
                     }
                 }
             )

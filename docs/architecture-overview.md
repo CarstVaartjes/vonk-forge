@@ -579,8 +579,9 @@ DGX Spark's supported Docker Engine and NVIDIA Container Toolkit. The
 unprivileged agent never joins the Docker group or opens the daemon socket;
 instead, the controller signs an expiring grant bound to one canonical runtime
 request, and a root helper compiles only the allow-listed Docker operation.
-The helper verifies the imported image, Linux/ARM64 platform, numeric non-root
-user, runtime-interface label, resource limits, mounts, ports, and optional
+The helper verifies the imported image by its signed digest and Linux/ARM64
+platform (never by an image label or the image's own user), forces the signed
+numeric non-root user, and checks resource limits, mounts, ports, and optional
 `--device nvidia.com/gpu=all` request. Single-node endpoints use bridge mode.
 Every workload, on any network, runs with unlimited memlock
 (`--ulimit memlock=-1:-1`): the helper adds it at launch for workloads whose
@@ -629,9 +630,9 @@ path. `slirp4netns` is never treated as an allowlist. The Controller requires
 fresh `recipe.build.egress-proxy.v1` capability evidence before dispatching a
 public build, while networkless builds remain `--network=none`.
 
-Most recipe images never build on a Spark: CI prebuilds them per distinct
-executable build key and the signed catalog pins the GHCR digest. When the
-Controller derives the same key, the build is executed by pulling that digest
+Most recipe images never build on a Spark: CI prebuilds them and the signed
+catalog pins the GHCR digest per recipe content. When the catalog pins one for
+the revision's content, the build is executed by pulling that digest
 into the image cache (verified once, at ingress) instead of admitting Spark
 build memory, so updating a running recipe does not need the Spark it runs on.
 The Spark build described above is the fallback; see

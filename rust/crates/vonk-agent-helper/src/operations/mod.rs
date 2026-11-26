@@ -457,7 +457,8 @@ struct NativeFabric {
     port: u16,
 }
 
-type RuntimeImageInspection = (String, String, String, String, String);
+/// What the helper reads of an image: its id, OS and architecture.
+type RuntimeImageInspection = (String, String, String);
 
 mod arguments;
 use arguments::{

@@ -341,6 +341,12 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
 
 ## Recipe-library checks
 
+A recipe image is identified by its manifest digest: the Controller uses the
+signed catalog's pin for a revision's content digest and never derives or reads
+its `build_key` (the `prebuilt-key` guard), and the helper authorizes by the
+signed digest, never by an image label or the image's `USER`. See
+[Profile cache contract](docs/agent-rules.md#profile-cache-contract).
+
 Build and validate the sibling recipe checkout against the exact platform
 worktree using [the recipe-library procedure](docs/operators/recipe-library.md#validate-a-checkout-locally)
 before calling its contract installable. Record both commits, the recipe digest,
