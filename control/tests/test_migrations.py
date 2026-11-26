@@ -27,6 +27,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_control.db import schema_helpers
 from vonk_control.db.schema_helpers import SchemaDriftKind
 from vonk_control.db.startup import initialize_database, verify_schema_is_current
 from vonk_control.distribution.service import DistributionService
@@ -357,19 +358,18 @@ def test_postgres_reconciliation_preserves_unknown_column_data(
         assert nullable is True
 
 
-def test_postgres_reconciliation_drops_every_undeclared_table(
-    postgres_engine,
+def test_postgres_reconciliation_keeps_undeclared_table_for_one_minor(
+    postgres_engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A table the model does not declare is dropped, whatever it references.
+    """An undeclared table keeps its rows and is stamped, but loses its keys.
 
-    An upgraded or rolled-back database may hold tables no code reads. Their
-    RESTRICT keys would block deletes, so startup drops them; declared tables and
-    ``alembic_version`` stay.
+    Its RESTRICT key must not block deleting a declared row; a rollback to the
+    previous minor finds the table intact.
     """
 
+    monkeypatch.setattr(schema_helpers, "_CONTROLLER_MINOR", (1, 0))
     _upgrade(postgres_engine.url.render_as_string(hide_password=False))
     with postgres_engine.begin() as connection:
-        declared = set(inspect(connection).get_table_names())
         connection.execute(
             text(
                 "CREATE TABLE some_retired_table ("
@@ -380,12 +380,38 @@ def test_postgres_reconciliation_drops_every_undeclared_table(
                 "ON DELETE RESTRICT)"
             )
         )
-        assert inspect(connection).get_foreign_keys("some_retired_table")
     with postgres_engine.begin() as connection:
         verify_schema_is_current(connection)
     with postgres_engine.connect() as connection:
-        assert set(inspect(connection).get_table_names()) == declared
-        assert "alembic_version" in declared
+        inspector = inspect(connection)
+        assert not inspector.get_foreign_keys("some_retired_table")
+        assert (
+            inspector.get_table_comment("some_retired_table")["text"]
+            == "vonk-undeclared-since 1.0"
+        )
+
+
+def test_postgres_reconciliation_drops_older_stamp_and_clears_declared(
+    postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first later minor drops a stamped table; a declared table loses its stamp."""
+
+    monkeypatch.setattr(schema_helpers, "_CONTROLLER_MINOR", (1, 1))
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.execute(text("CREATE TABLE some_retired_table (id INTEGER)"))
+        connection.execute(
+            text("COMMENT ON TABLE some_retired_table IS 'vonk-undeclared-since 1.0'")
+        )
+        connection.execute(
+            text("COMMENT ON TABLE agent_nodes IS 'vonk-undeclared-since 1.0'")
+        )
+    with postgres_engine.begin() as connection:
+        verify_schema_is_current(connection)
+    with postgres_engine.connect() as connection:
+        inspector = inspect(connection)
+        assert "some_retired_table" not in inspector.get_table_names()
+        assert inspector.get_table_comment("agent_nodes")["text"] is None
 
 
 def test_schema_reconciliation_preserves_unexpected_column(

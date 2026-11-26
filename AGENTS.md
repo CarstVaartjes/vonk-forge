@@ -393,7 +393,7 @@ actual schema effect of changes to `control/src/vonk_control/models.py` and
 `control/migrations/`. Keep schema-changing PRs out of auto-merge and obtain an
 explicit operator decision; describe the deployment impact in the PR. Startup
 reconciles the live schema to the models transactionally (missing objects added,
-unknown columns preserved, undeclared tables dropped). Merging source does not
+unknown columns preserved, undeclared tables kept for one minor release, then dropped). Merging source does not
 wipe a database, and a deliberate reset needs its own explicit authorization.
 See [Schema implementation, merge, and deployment](docs/agent-rules.md#schema-implementation-merge-and-deployment).
 
