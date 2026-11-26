@@ -826,6 +826,29 @@ def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
         client.close()
 
 
+def test_an_unknown_served_capability_is_left_out_not_fatal(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """A capability a newer contract adds must not stop the index sync."""
+    index_bytes, _, package = _canonical_package_fixture()
+    index = json.loads(index_bytes)
+    index["recipes"][0]["served_capabilities"] = ["text-generation", "teleportation"]
+    release = _release_for(_canonical(index) + b"\n", package)
+    client = _client(release, tmp_path / "packages")
+    try:
+        snapshot = client.list()
+        assert snapshot.items
+        assert tuple(snapshot.items[0].served_capabilities or ()) == (
+            "text-generation",
+        )
+        assert any(
+            "'teleportation' is unknown to this Controller" in problem.detail
+            for problem in snapshot.display_notes
+        )
+    finally:
+        client.close()
+
+
 def test_unreadable_parts_cost_only_their_entry_or_block(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:

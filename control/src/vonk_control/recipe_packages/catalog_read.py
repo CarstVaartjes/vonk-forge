@@ -34,7 +34,7 @@ from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_control.catalog.revision_contract import PublishedDocument
 from vonk_control.catalog.sync_contract import ManagedCatalogSyncProblem
 from vonk_control.recipe_packages.contracts import RecipePackageError
-from vonk_control.recipe_packages.known_words import BlockWithheld, known_block
+from vonk_control.recipe_packages.known_words import BlockWithheld, known_field
 
 # Entries named in one note; the count names them all.
 _NAMED = 3
@@ -115,10 +115,10 @@ def known_entries[E: (CatalogModelEntry, CatalogRecipeEntry)](
     for entry in entries:
         identity = entry.document.identity
         name = f"{identity.publisher}/{identity.slug}"
-        update: dict[str, BaseModel | None] = {}
+        update: dict[str, BaseModel | tuple[str, ...] | None] = {}
         for block in sorted(unknown.get((section, name), ())):
             try:
-                update[block] = known_block(getattr(entry, block))
+                update[block] = known_field(getattr(entry, block))
             except BlockWithheld:
                 update[block] = None
                 # Noted below, once per block: never a silent absence.
