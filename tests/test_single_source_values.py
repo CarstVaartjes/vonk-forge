@@ -620,7 +620,7 @@ def test_python_version_has_one_owner() -> None:
         r"|python:(\d+\.\d+)(?:\.\d+)?-"
         r"|PYTHON_VERSION=(\d+\.\d+)"
     )
-    adapter_venv = {".github/workflows/ci.yml", "scripts/test-changed"}
+    adapter_venv = {".github/workflows/ci.yml", "scripts/dev/test-changed"}
     surfaces = {
         "control/Dockerfile",
         "deploy/compose/litellm/Dockerfile",
