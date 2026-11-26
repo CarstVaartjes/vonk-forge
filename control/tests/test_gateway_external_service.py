@@ -12,9 +12,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, insert, update
 from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName, WaitReason
+from vonk_agent_protocol.state_machines import ExternalBlockReason
 from vonk_control.auth import Actor
 from vonk_control.gateway.external_api import install_external_model_routes
+from vonk_control.gateway.external_publication import START_FAILURE_LIMIT
 from vonk_control.gateway.external_service import ExternalModelService
+from vonk_control.gateway.external_states import ExternalEvent, apply_event
 from vonk_control.gateway.litellm_surface import load_surface
 from vonk_control.model_primitives import Base
 from vonk_control.models.gateway import (
@@ -26,6 +30,7 @@ from vonk_control.operator_acceptance.resolution import (
     ControllerAPIRoute,
     OperatorReceiptResolver,
 )
+from vonk_control.waits.persisted import park_wait
 
 ROOT = Path(__file__).resolve().parents[2]
 PARTNER = "https://api.partner.example"
@@ -241,6 +246,48 @@ def test_a_removal_that_is_already_complete_replays_as_accepted(tmp_path: Path) 
         client.post("/api/gateway/models/partner-large/accept", json=other).status_code
         == 200
     )
+
+
+def test_a_parked_model_shows_its_resume_action_until_an_enable(
+    tmp_path: Path,
+) -> None:
+    client, engine = _client_and_engine(tmp_path)
+    _approve(client, PARTNER)
+    _put(client, _entry(), None)
+    now = datetime(2026, 11, 26, tzinfo=UTC)
+    with sessionmaker(engine).begin() as session:
+        row = session.query(GatewayExternalDeployment).one()
+        apply_event(
+            row, ExternalEvent.BLOCK, reason=ExternalBlockReason.START_FAILED, now=now
+        )
+        row.start_failures = START_FAILURE_LIMIT
+        park_wait(
+            row,
+            reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
+            detail="parked",
+            now=now,
+            operator_action=OperatorActionName.RESUME,
+        )
+    parked = client.get("/api/gateway/models/partner-large").json()
+    assert parked["operator_action"] == "resume"
+    assert parked["start_failures"] == START_FAILURE_LIMIT
+
+    base = "/api/gateway/models/partner-large"
+    request = {"action": "enable", "expected_revision": 1}
+    review = client.post(f"{base}/preview", json=request).json()
+    accepted = client.post(
+        f"{base}/accept",
+        json={
+            **request,
+            "request_id": str(uuid4()),
+            "effect_digest": review["effect_digest"],
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    resumed = client.get(base).json()
+    assert resumed["state"] == "pending"
+    assert resumed.get("operator_action") is None
+    assert resumed["start_failures"] == 0
 
 
 def _binding_accept(client: TestClient, destinations, revision) -> int:

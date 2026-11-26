@@ -87,6 +87,7 @@ from vonk_control.models.gateway import (
     GatewayExternalDeployment,
 )
 from vonk_control.recipe_routes.shared import ROUTE_RECONCILE_SECONDS
+from vonk_control.waits.contract import WaitEvidence
 from vonk_control.waits.persisted import schedule_wait
 
 
@@ -617,6 +618,12 @@ def _view(row: GatewayExternalDeployment) -> ExternalModelView:
         state=state,
         reason=block_reason(row),
         next_check_at=row.next_action_at,
+        operator_action=(
+            row.wait_evidence.operator_action
+            if isinstance(row.wait_evidence, WaitEvidence)
+            else None
+        ),
+        start_failures=row.start_failures,
         published=(
             state == ExternalPublicationState.PUBLISHED
             and row.applied_revision == row.desired_revision
