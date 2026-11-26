@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import copy
-from typing import Any
+import json
+from pathlib import Path
+from typing import Any, cast
 
-from tools.client_compatibility_report import breaks
+import pytest
+
+from cluster_profiles.cli_update import CliUpdateUnavailable
+from tools import client_compatibility_report
+from tools.client_compatibility_report import breaks, main
 
 _LEVELS = {
     "type": "object",
@@ -120,3 +126,67 @@ def test_a_word_set_the_prior_ships_open_reads_new_words() -> None:
     assert [line.split(":")[0] for line in found] == [
         "GET /api/recipe/library 200.state"
     ]
+
+
+def _run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str], published: object
+) -> int:
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps(_contract({"type": "string"}, extra_route=False)))
+    monkeypatch.setattr(client_compatibility_report.time, "sleep", lambda _: None)
+
+    def fetch(_channel: str) -> tuple[str, str, object]:
+        if isinstance(published, Exception):
+            raise published
+        return cast("tuple[str, str, object]", published)
+
+    monkeypatch.setattr(client_compatibility_report, "_published_contract", fetch)
+    return main(["--candidate", str(candidate), *argv])
+
+
+_BREAKING = _contract({"type": "integer"})
+
+
+@pytest.mark.parametrize(
+    ("channel", "version", "gate", "code"),
+    [
+        ("stable", "1.0.0", "stable", 1),
+        ("stable", "0.1.1", "stable", 0),
+        ("dev", "1.0.1~dev.1", "stable", 0),
+    ],
+)
+def test_only_a_stable_1_0_break_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    channel: str,
+    version: str,
+    gate: str,
+    code: int,
+) -> None:
+    published = (f"{channel} {version}", version, _BREAKING)
+
+    assert (
+        _run(
+            monkeypatch,
+            tmp_path,
+            ["--channel", channel, "--gate-channel", gate],
+            published,
+        )
+        == code
+    )
+
+
+def test_an_unreachable_gated_channel_does_not_fail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    error = CliUpdateUnavailable("no answer")
+
+    assert (
+        _run(
+            monkeypatch,
+            tmp_path,
+            ["--channel", "stable", "--gate-channel", "stable"],
+            error,
+        )
+        == 0
+    )

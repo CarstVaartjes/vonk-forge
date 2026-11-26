@@ -80,6 +80,18 @@ class CliUpdateIngressError(CliUpdateError):
     """Unverified ingress bytes or denied publication authentication."""
 
 
+class CliUpdateNotPublished(CliUpdateError):
+    """The server answered that a release object does not exist (404 or 410)."""
+
+    def __init__(self, url: str) -> None:
+        super().__init__("release object is not published")
+        self.url = url
+
+
+class CliUpdateUnavailable(CliUpdateError):
+    """The release server did not answer in time (outage, 5xx, timeout)."""
+
+
 def configured_update_channel() -> str:
     """Return the configured accepted release channel for CLI updates."""
 
@@ -114,12 +126,14 @@ def _download(url: str, maximum: int, *, timeout: int = 20) -> bytes:
                 raise CliUpdateIngressError(
                     "release download redirected or denied"
                 ) from error
+            if error.code in (404, 410):
+                raise CliUpdateNotPublished(url) from error
         except OSError, urllib.error.URLError, TimeoutError:
             pass
         remaining = deadline - time.monotonic()
         if attempt < 2 and remaining > 0:
             time.sleep(min(0.25 * 2**attempt, remaining))
-    raise CliUpdateError("release download outcome is unknown after its deadline")
+    raise CliUpdateUnavailable("release download outcome is unknown after its deadline")
 
 
 def _verify(key: rsa.RSAPublicKey, content: bytes, signature: bytes) -> None:

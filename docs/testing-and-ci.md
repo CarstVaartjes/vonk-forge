@@ -33,6 +33,15 @@ Every change lands through an integration PR: a same-repository
 | Integration PR | The complete sharded Controller and repository suites, web tests, Rust tests/lint/platform, wire contracts, every selected integration, candidate acceptance with the upgrade carry, and every selected proof (agent repair recovery, client compatibility report, installed CLI, model-cache cancellation, OCI link fallback, privileged helper, profile-effect consumer). |
 | Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. On a signed `v*` tag `ci.yml` also calls `stable-release.yml` after `ci-gate`; that file holds the stable-channel publication jobs, and the stable package signature identity names it. |
 
+`client-compatibility-report` compares this Controller's OpenAPI with the signed
+CLI wheel of each published channel. Against the stable channel it is a gate
+from 1.0 on: a response shape the published stable vonkctl would refuse fails
+the job (`--gate-channel stable`), which is how the N-1 support window is
+enforced. The dev channel and a 0.x stable are only reported. A stable channel
+that is not published yet (its signed pointer answers 404) or that does not
+answer after three tries with backoff is reported and does not fail the job;
+invalid signed data still does.
+
 A member PR is done when its review has passed.
 Adding the `release-acceptance` label re-runs `ci.yml` in full at once.
 
