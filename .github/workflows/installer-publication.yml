@@ -599,16 +599,36 @@ jobs:
 
       # The attestation binds the bundle to this run's source and ref, which
       # recipes CI checks against the pointer (--source-digest, --source-ref).
-      - name: Bind the recipe-tools bundle to the release source
+      # Revalidate the source authority first, as the agent package does
+      # before its attestation, so a refused source is never attested.
+      - name: Revalidate source before recipe-tools attestation
         shell: bash
         env:
+          CHANNEL: ${{ needs.authority.outputs.channel }}
           SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           AUTHORITY_REF: ${{ needs.authority.outputs.authority_ref }}
+          TAG_OID: ${{ needs.authority.outputs.tag_oid }}
         run: |
           set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$SOURCE_SHA" = "$GITHUB_SHA"
           test "$AUTHORITY_REF" = "$GITHUB_REF"
           test -f "$RUNNER_TEMP/recipe-tools/recipe-tools.tar.gz"
+          case "$CHANNEL" in
+            dev)
+              test "$GITHUB_REF" = refs/heads/main
+              git fetch --force --no-tags origin \
+                +refs/heads/main:refs/remotes/origin/main
+              git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
+              ;;
+            stable)
+              scripts/release/verify-release-tag-authority \
+                "${AUTHORITY_REF#refs/tags/}" "$TAG_OID" "$SOURCE_SHA"
+              ;;
+            *)
+              exit 64
+              ;;
+          esac
 
       - name: Attest the accepted recipe-tools bundle
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

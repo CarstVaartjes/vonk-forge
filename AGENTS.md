@@ -257,8 +257,10 @@ text of this section:
   (`scripts/recipes/build-recipe-tools-bundle`, entry point
   `scripts/recipes/validate-recipe-checkout`). Its `platform-features.json`
   comes only from the tables the platform executes (`scripts/recipes/platform-features`;
-  a value without a handler fails `control/tests/test_platform_features.py`);
-  never type a feature value by hand. Release acceptance runs the extracted
+  a serving kind, adapter or source provider without a handler fails
+  `control/tests/test_platform_features.py`); never type a feature value by hand.
+  Recipes CI addresses the bundle's `scripts/recipes/validate-recipe-checkout`,
+  `platform-features.json` and `.tool-versions` by path: move them only together with the recipes reader. Release acceptance runs the extracted
   bundle against the pinned library, and promotion writes its pointer last; see
   [Recipe-tools bundle](docs/runbooks/platform-release-publication.md#recipe-tools-bundle).
 - `cross-repo-nightly.yml` validates the recipes `main` library with the published

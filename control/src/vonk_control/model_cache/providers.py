@@ -422,7 +422,11 @@ def model_source_kind(provider: str) -> str | None:
     """The artifact kind a Model source with this ``provider`` word downloads as."""
 
     return next(
-        (kind for kind, entry in PROVIDERS.items() if entry.model_source == provider),
+        (
+            str(kind)
+            for kind, entry in PROVIDERS.items()
+            if entry.model_source == provider
+        ),
         None,
     )
 

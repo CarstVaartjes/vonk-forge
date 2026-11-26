@@ -49,7 +49,7 @@ def _has_handler(key: str, value: str) -> bool:
     if key == "source_providers":
         kind = model_source_kind(value)
         return kind is not None and PROVIDERS[kind].production
-    return True
+    raise AssertionError(f"no executor probe for {key}")
 
 
 def test_every_declared_value_has_an_executing_handler() -> None:
@@ -61,6 +61,7 @@ def test_every_declared_value_has_an_executing_handler() -> None:
         assert document[key], key
         for value in document[key]:
             assert _has_handler(key, value), (key, value)
+    # The gateway's rendered config models are the executing tables for these.
     assert {"chat", "audio_speech"} <= set(document["api_modes"])
     assert {"levels", "text"} <= set(document["effort_kinds"])
 
