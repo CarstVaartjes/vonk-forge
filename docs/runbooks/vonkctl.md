@@ -424,7 +424,10 @@ vonkctl recipe installation reconcile INSTALLATION_UUID --review
 
 `vonkctl recipe` and `recipe library` list recipes the same way, adding the
 Spark count and the Controller's readiness verdict; `recipe detail` explains
-the verdict.
+the verdict. Every recipe is listed whatever its qualification status (Working,
+Re-check, Untested, Not yet verified, ...), with the status on its row: the bare
+`vonkctl recipe` lists every cached recipe, running ones first, then preparing,
+then Working, and filters are only the ones you pass.
 
 Recipe removal requires an explicit `--keep-model` or `--with-model` choice.
 The read-only `--review` form reports the exact recipe revision and affected

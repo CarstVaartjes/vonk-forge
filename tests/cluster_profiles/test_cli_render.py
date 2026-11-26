@@ -29,7 +29,6 @@ from cluster_profiles.cli_render.fleet import (
     run_problem,
 )
 from cluster_profiles.cli_render.library import (
-    COMPACT_RECIPE_ROWS,
     _applied_filters,
     _needs_download,
     _qualification_status,
@@ -383,7 +382,10 @@ def _recipe_library_payload(count: int) -> dict[str, object]:
                     "running_on": ["spk_1"] if index == count - 1 else [],
                 },
                 "resources": {"disk_bytes": 1024**3},
-                "qualification": {"status": "Working", "required_sparks": 1},
+                "qualification": {
+                    "status": "Working" if index < count // 2 else "Untested",
+                    "required_sparks": 1,
+                },
             }
             for index in range(count)
         ],
@@ -391,20 +393,14 @@ def _recipe_library_payload(count: int) -> dict[str, object]:
     }
 
 
-def test_bare_recipe_listing_is_compact_and_the_library_listing_is_not(capsys):
-    # Break caught: a 100-recipe listing printing hundreds of lines, or the
-    # library listing (with its own --limit/--sort/--cursor) being cut.
-    payload = _recipe_library_payload(100)
+def test_bare_recipe_listing_lists_every_recipe_ranked_not_cut(capsys):
+    # Break caught: the bare listing dropping recipes that are not Working
+    # (a top-N cut ranked by status hides Untested recipes).
+    payload = _recipe_library_payload(30)
     render_payload(payload, "recipe", action=None)
-    compact = capsys.readouterr().out.splitlines()
-    assert len(compact) < 40
-    assert sum("recipe-" in line for line in compact) == COMPACT_RECIPE_ROWS
-    # The running recipe is last in the payload and still on the screen.
-    assert any("recipe-099" in line for line in compact)
-
-    render_payload(payload, "recipe", action=None, show_all=True)
-    every = capsys.readouterr().out.splitlines()
-    assert sum("recipe-" in line for line in every) == 100
-    render_payload(payload, "recipe", action="library")
-    library = capsys.readouterr().out.splitlines()
-    assert sum("recipe-" in line for line in library) == 100
+    lines = [line for line in capsys.readouterr().out.splitlines() if "recipe-" in line]
+    assert len(lines) == 30
+    # The running recipe leads, then the Working ones, then the Untested ones.
+    ranks = [int(line.split("recipe-")[1][:3]) for line in lines]
+    assert ranks[0] == 29
+    assert sorted(ranks[1:16]) == list(range(15))
