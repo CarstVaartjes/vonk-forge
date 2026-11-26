@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -15,6 +16,7 @@ from tests.fleet_projection_support import (
     NOW,
     _canonical_catalog_documents,
     _certificate,
+    _telemetry,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
@@ -36,6 +38,7 @@ from vonk_control.models.catalog import (
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode, AgentNodeContact
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.telemetry import NodeEngineSample, NodeTelemetryLatest
 from vonk_control.recipe_update_batches.notice import (
     newest_active_revisions,
     recipe_update_notice,
@@ -411,3 +414,41 @@ def test_a_spark_running_the_reverted_revision_is_told_about_the_head() -> None:
     assert notice is not None
     assert notice.running_revision_id == REVISION_2
     assert notice.newest_revision_id == REVISION_1
+
+
+def test_a_loaded_run_with_flat_engine_readings_is_flagged_by_run_id() -> None:
+    sessions = _sessions()
+    _seed(sessions, running=REVISION_1)
+    other_run = _uuid(399)  # reports readings but is not loaded on the node
+    with sessions.begin() as session:
+        sample = None
+        for minute in range(16):
+            sample = _telemetry(
+                NODE_A,
+                _uuid(500 + minute),
+                NOW - timedelta(minutes=15 - minute, seconds=1),
+                sequence=minute,
+                cpu=3.0,
+            )
+            sample.received_at = NOW - timedelta(minutes=15 - minute)
+            session.add(sample)
+            session.flush()
+            for run_id in (_uuid(307), other_run):
+                session.add(
+                    NodeEngineSample(
+                        sample_id=sample.id,
+                        run_id=run_id,
+                        format="tensorfold",
+                        requests_running=1,
+                        requests_waiting=0,
+                        kv_cache_usage_ratio=0.001,
+                    )
+                )
+        assert sample is not None
+        session.add(NodeTelemetryLatest(node_id=NODE_A, sample_id=sample.id))
+
+    node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+
+    (warning,) = [w for w in node.warnings if w.code == "run.not-progressing"]
+    assert "GPU utilisation 3%" in warning.detail
+    assert warning.severity == "warning"

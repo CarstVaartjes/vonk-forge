@@ -36,7 +36,7 @@ jobs:
           # runner's system Python instead of the version this repository
           # declares, so the recipe check would validate on a different
           # interpreter than every other lane.
-          python-version: "3.14"
+          python-version: "3.15"
           enable-cache: true
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 

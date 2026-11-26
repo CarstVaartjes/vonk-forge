@@ -77,7 +77,7 @@ grants and auto-approvals, and create the scoped gateway OAuth client. Never
 add test-only Service names or policy to an operator tailnet.
 
 Prepare on Intel or ARM macOS or Linux with `curl`, `openssl` and
-installed `uv`. The verified NAS setup wheel runs in an isolated Python 3.14
+installed `uv`. The verified NAS setup wheel runs in an isolated Python 3.15
 environment managed by `uv`; no native NAS setup compilation is required.
 Then run:
 
@@ -166,7 +166,7 @@ How Vonk reads the reserved display memory, and what it reports, is in the
 
 Install the latest accepted stable CLI without cloning the repository. This
 requires `curl`, `openssl`, Python 3, and `uv` on your workstation. The CLI
-requires Python 3.14 or newer, which `uv` can manage for its tool environment:
+requires Python 3.15 or newer, which `uv` can manage for its tool environment:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/vonkctl | sh
@@ -233,7 +233,7 @@ The public website and catalog implementation live in
 
 ## Develop
 
-Required tools are Python 3.14+, [`uv`](https://docs.astral.sh/uv/), Rust,
+Required tools are Python 3.15+, [`uv`](https://docs.astral.sh/uv/), Rust,
 Node.js, and Docker for integration tests.
 
 Catalog tests consume the real recipe repository. Set

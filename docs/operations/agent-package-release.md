@@ -275,13 +275,13 @@ Operators use the signed `/nas` endpoint, which verifies the wheel and payload
 before executing the equivalent of:
 
 ```sh
-uv run --isolated --no-project --python 3.14 --with "$wheel" \
+uv run --isolated --no-project --python 3.15 --with "$wheel" \
   vonk-nas-setup --template "$payload"
 ```
 
 Here `$wheel` and `$payload` are the exact files already verified by the
 bootstrap, not independently chosen downloads. `uv` must already be installed;
-it manages the Python 3.14 runtime. Upgrade switch, private answers,
+it manages the Python 3.15 runtime. Upgrade switch, private answers,
 Lab mode, local secrets and PKI retain the same command workflow.
 
 Release JSON is signed, and one signed, expiring `current.manifest` atomically

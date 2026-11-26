@@ -4,7 +4,7 @@ mod decision;
 pub use decision::{Counters, Decision, Rates, Sample, Trigger, meminfo_bytes, read_sample};
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fs::{self, File},
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
@@ -26,6 +26,42 @@ use wait_timeout::ChildExt;
 pub use vonk_agent_protocol::host_memory_guard_policy::{
     COMMAND_TIMEOUT, JOURNAL_RETRY, PRELOAD_MARGIN_BYTES, SAMPLE_INTERVAL, SUSTAINED_PRESSURE,
 };
+
+/// The Xid codes the kernel journal showed since the helper started, with the
+/// time each was read. Only the code and the time are kept, bounded at
+/// `XID_LOG_ENTRIES` (oldest dropped first). A restart loses it: these are
+/// events, not a since-boot total.
+#[derive(Clone, Default)]
+pub struct XidLog(Arc<Mutex<VecDeque<XidEvent>>>);
+
+type XidEvent = (chrono::DateTime<chrono::Utc>, u32);
+
+const XID_LOG_ENTRIES: usize = 1024;
+
+impl XidLog {
+    pub fn record(&self, at: chrono::DateTime<chrono::Utc>, code: u32) {
+        if let Ok(mut entries) = self.0.lock() {
+            if entries.len() >= XID_LOG_ENTRIES {
+                entries.pop_front();
+            }
+            entries.push_back((at, code));
+        }
+    }
+
+    /// The first code seen in `[from, until]`: the first Xid is the root cause,
+    /// later ones are consequences.
+    pub fn first_between(
+        &self,
+        from: chrono::DateTime<chrono::Utc>,
+        until: chrono::DateTime<chrono::Utc>,
+    ) -> Option<u32> {
+        let entries = self.0.lock().ok()?;
+        entries
+            .iter()
+            .find(|(at, _)| (from..=until).contains(at))
+            .map(|(_, code)| *code)
+    }
+}
 
 fn nvidia_allocation_failure(line: &str) -> bool {
     line.contains("NVRM:") && line.contains("Out of memory") && line.contains("NV_ERR_NO_MEMORY")
@@ -418,7 +454,7 @@ pub fn summary(value: &FailureDiagnostics) -> String {
 
 // Journal follow runs in its own thread and restarts with bounded backoff. The
 // bounded channel retains the precursor without letting log floods consume RAM.
-fn kernel_events() -> Receiver<Instant> {
+fn kernel_events(xids: XidLog) -> Receiver<Instant> {
     let (send, receive) = mpsc::sync_channel(1);
     thread::spawn(move || {
         let mut previous: Option<std::process::Child> = None;
@@ -458,14 +494,19 @@ fn kernel_events() -> Receiver<Instant> {
                             .read_until(b'\n', &mut line)
                         {
                             Ok(0) | Err(_) => break,
-                            Ok(_) if nvidia_allocation_failure(&String::from_utf8_lossy(&line)) => {
-                                #[expect(
-                                    clippy::let_underscore_must_use,
-                                    reason = "the receiving side may already be gone; nobody is waiting for the value"
-                                )]
-                                let _ = send.try_send(Instant::now());
+                            Ok(_) => {
+                                let line = String::from_utf8_lossy(&line);
+                                if nvidia_allocation_failure(&line) {
+                                    #[expect(
+                                        clippy::let_underscore_must_use,
+                                        reason = "the receiving side may already be gone; nobody is waiting for the value"
+                                    )]
+                                    let _ = send.try_send(Instant::now());
+                                }
+                                if let Some(code) = vonk_agent_protocol::gpu_xid::xid_code(&line) {
+                                    xids.record(chrono::Utc::now(), code);
+                                }
                             }
-                            Ok(_) => {}
                         }
                     }
                 }
@@ -483,8 +524,8 @@ fn kernel_events() -> Receiver<Instant> {
     receive
 }
 
-pub fn spawn(data_root: PathBuf) {
-    let kernel = kernel_events();
+pub fn spawn(data_root: PathBuf, xids: XidLog) {
+    let kernel = kernel_events(xids);
     let active = Arc::new(Mutex::new(Known::new()));
     let (send, receive) = mpsc::sync_channel::<Trip>(1);
     let mut lane = Lane {

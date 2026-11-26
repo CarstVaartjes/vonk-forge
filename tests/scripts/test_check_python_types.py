@@ -57,7 +57,7 @@ def test_real_hook_checks_whitespace_paths_with_prepared_environment(
     (tmp_path / "scripts/dev").mkdir(parents=True)
     (tmp_path / "tools").mkdir()
     (tmp_path / "control/pyproject.toml").write_text(
-        '[project]\nname = "hook-probe"\nversion = "0.0.0"\nrequires-python = ">=3.14"\n'
+        '[project]\nname = "hook-probe"\nversion = "0.0.0"\nrequires-python = ">=3.15"\n'
     )
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pyright]\ntypeCheckingMode = "basic"\n'
