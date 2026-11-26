@@ -1057,6 +1057,10 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             }
             assert requests.count(wheel_path) == 2
             assert requests.count("/api/cli/contract") == 1
+            # The real installed METADATA equals the wheel's: no reinstall loop.
+            again = invoke([str(python), "-c", driver, origin, str(key)])
+            assert again.returncode == 0, again.stderr
+            assert json.loads(again.stdout)["updated"] is False
             assert "/api/platform" not in requests
             # uv's real tool receipt must now reference the installed accepted
             # bytes rather than retaining the initial fixture wheel.
@@ -1697,7 +1701,7 @@ def test_signed_download_total_deadline_ends_slow_drip_and_fresh_read_works():
             thread.join(timeout=30)
 
 
-def _run_with_installed(tmp_path, monkeypatch, *, channel, installed, version="other"):
+def _run_with_installed(tmp_path, monkeypatch, *, channel, version="other", runs=2):
     key, objects = _signed_publication(tmp_path, source_sha="b" * 40, channel=channel)
     wheel_bytes = next(value for url, value in objects.items() if url.endswith(".whl"))
     with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as archive:
@@ -1705,7 +1709,7 @@ def _run_with_installed(tmp_path, monkeypatch, *, channel, installed, version="o
     monkeypatch.setattr(
         cli_update,
         "installed_content_identity",
-        lambda: content_identity if installed is None else installed,
+        lambda: content_identity,
     )
     monkeypatch.setattr(
         cli_update,
@@ -1728,7 +1732,7 @@ def _run_with_installed(tmp_path, monkeypatch, *, channel, installed, version="o
             download=lambda url, maximum: objects[url],
             compatibility_observation=_controller_observation,
         )
-        for _ in range(2)
+        for _ in range(runs)
     ]
     return results, installs
 
@@ -1736,24 +1740,22 @@ def _run_with_installed(tmp_path, monkeypatch, *, channel, installed, version="o
 def test_equal_package_bytes_reuse_across_different_provenance_on_dev(
     tmp_path, monkeypatch
 ):
-    results, installs = _run_with_installed(
-        tmp_path, monkeypatch, channel="dev", installed=None
-    )
+    results, installs = _run_with_installed(tmp_path, monkeypatch, channel="dev")
     assert [result["updated"] for result in results] == [False, False]
     assert installs == []
 
 
 def test_stable_installs_a_different_version_with_equal_bytes(tmp_path, monkeypatch):
     results, installs = _run_with_installed(
-        tmp_path, monkeypatch, channel="stable", installed=None
+        tmp_path, monkeypatch, channel="stable", runs=1
     )
     assert results[0]["updated"] is True
-    assert len(installs) == 2
+    assert len(installs) == 1
 
 
 def test_stable_keeps_equal_bytes_of_the_same_version(tmp_path, monkeypatch):
     results, installs = _run_with_installed(
-        tmp_path, monkeypatch, channel="stable", installed=None, version="1.2.3"
+        tmp_path, monkeypatch, channel="stable", version="1.2.3"
     )
     assert [result["updated"] for result in results] == [False, False]
     assert installs == []
