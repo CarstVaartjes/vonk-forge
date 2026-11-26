@@ -7,6 +7,10 @@ from pathlib import Path
 
 from cluster_profiles.cli_artifact_jobs import add_artifact_job_commands
 from cluster_profiles.cli_json_contract import Word
+from cluster_profiles.cli_states_generated import (
+    ExternalBindingAction,
+    ExternalModelAction,
+)
 from cluster_profiles.controller_cli.common import (
     MAX_LOG_LINES,
     _action_flags,
@@ -651,6 +655,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     key_revoke.add_argument("--yes", action="store_true", help="Confirm without asking")
     _add_output(key_revoke)
 
+    _add_gateway_commands(commands)
+
     run = commands.add_parser(
         "run",
         help="Run a recipe in a profile",
@@ -686,3 +692,125 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _watch_controls(run)
     _add_profile_selection(run)
     _add_output(run)
+
+
+def _add_gateway_commands[ControllerParserT: argparse.ArgumentParser](
+    commands: argparse._SubParsersAction[ControllerParserT],
+) -> None:
+    gateway = commands.add_parser(
+        Word.GATEWAY,
+        help="External models and the credentials they use",
+        description=(
+            "Models a partner or cloud provider serves, published through the same "
+            "gateway and client keys as the local models. Every change is reviewed "
+            "first and accepted exactly as reviewed."
+        ),
+        epilog=(
+            "A credential is a name; its secret is provisioned on the NAS "
+            "(deploy/compose/README.md) and never passes through vonkctl."
+        ),
+    )
+    _add_output(gateway)
+    areas = gateway.add_subparsers(dest="gateway_action", parser_class=type(gateway))
+    model = areas.add_parser(Word.MODEL, help="External models behind the gateway")
+    _add_output(model)
+    actions = model.add_subparsers(
+        dest="gateway_model_action", parser_class=type(gateway)
+    )
+    model_list = actions.add_parser(
+        Word.LIST, help="List external models and their state"
+    )
+    _add_output(model_list)
+    model_show = actions.add_parser(
+        Word.SHOW, help="One external model: state, reason and next check"
+    )
+    model_show.add_argument(Word.ALIAS)
+    _add_output(model_show)
+    model_validate = actions.add_parser(
+        Word.VALIDATE, help="Check an entry file; sends no traffic and changes nothing"
+    )
+    _entry_file(model_validate)
+    _add_output(model_validate)
+    model_put = actions.add_parser(
+        ExternalModelAction.PUT,
+        help="Add or change an external model from a LiteLLM entry file",
+        description=(
+            "Validates the entry, shows the review, and on consent publishes it. "
+            "The entry names its credential as api_key: os.environ/VONK_CREDENTIAL_NAME."
+        ),
+    )
+    _entry_file(model_put)
+    _change_flags(model_put)
+    for word, help_text in (
+        (ExternalModelAction.DISABLE, "Withdraw an external model but keep its entry"),
+        (
+            ExternalModelAction.ENABLE,
+            "Publish a disabled model again, or resume one the gateway gave up on",
+        ),
+        (ExternalModelAction.REMOVE, "Withdraw an external model and delete its entry"),
+    ):
+        parser = actions.add_parser(word, help=help_text)
+        parser.add_argument(Word.ALIAS)
+        _change_flags(parser)
+
+    credential = areas.add_parser(
+        Word.CREDENTIAL, help="Where each credential's secret may be sent"
+    )
+    _add_output(credential)
+    credential_actions = credential.add_subparsers(
+        dest="gateway_credential_action", parser_class=type(gateway)
+    )
+    credential_list = credential_actions.add_parser(
+        Word.LIST,
+        help="List credentials and their approved destinations, never secrets",
+    )
+    _add_output(credential_list)
+    credential_put = credential_actions.add_parser(
+        ExternalBindingAction.PUT,
+        help="Approve the destinations a credential may be sent to",
+    )
+    credential_put.add_argument("name", help="Binding name, e.g. PARTNER")
+    credential_put.add_argument(
+        "--origin",
+        dest="origins",
+        action="append",
+        required=True,
+        metavar="URL",
+        help="An https origin the secret may reach; repeat for several",
+    )
+    credential_put.add_argument(
+        "--region", help="Only this region of the origins (default: any)"
+    )
+    credential_put.add_argument(
+        "--private",
+        action="store_true",
+        help="Approve origins whose host is a private IP address",
+    )
+    _change_flags(credential_put)
+    credential_remove = credential_actions.add_parser(
+        ExternalBindingAction.REMOVE,
+        help="Remove a credential's approval; its models are withdrawn",
+    )
+    credential_remove.add_argument("name")
+    _change_flags(credential_remove)
+
+
+def _entry_file(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--file",
+        required=True,
+        metavar="PATH",
+        help="JSON file with one LiteLLM model_list entry; - reads stdin",
+    )
+
+
+def _change_flags(parser: argparse.ArgumentParser) -> None:
+    parser.set_defaults(outcome_context="mutation")
+    _add_yes(parser)
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        help="Show the review and stop; change nothing",
+    )
+    parser.add_argument("--request-key", type=_uuid_argument)
+    _add_output(parser)

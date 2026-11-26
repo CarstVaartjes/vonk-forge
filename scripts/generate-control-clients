@@ -78,6 +78,10 @@ from vonk_control.cli_update_contract import (  # noqa: E402 -- the project impo
 from vonk_control.fleet_profile_contract.review import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     ProfileLoadAction,
 )
+from vonk_control.gateway.external_api_contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    ExternalBindingAction,
+    ExternalModelAction,
+)
 from vonk_control.library.contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     LibraryCacheState,
 )
@@ -163,6 +167,8 @@ def typescript_vocabulary() -> str:
             QualificationStatus,
             QualificationOutcome,
             GroupHealth,
+            ExternalModelAction,
+            ExternalBindingAction,
         )
     )
     for words in word_types:

@@ -3,12 +3,19 @@ import { KeysPage } from "./keys";
 import { ToastProvider } from "../components/ui/toast";
 import type { ControlApi } from "../api/types";
 
+/** The gateway sections read these; the key tests have no external model or credential. */
+const noExternal = {
+  gatewayModels: vi.fn().mockResolvedValue({ models: [] }),
+  gatewayCredentials: vi.fn().mockResolvedValue({ bindings: [] }),
+};
 const key = { name: "laptop", models: [], created_at: null, expires_at: null, last_used_at: null };
 
 test("a created key is shown once and then dismissed", async () => {
   const gatewayKeys = vi.fn().mockResolvedValue({ keys: [] });
   const createGatewayKey = vi.fn().mockResolvedValue({ ...key, key: "sk-secret-value" });
-  render(<KeysPage api={{ gatewayKeys, createGatewayKey } as unknown as ControlApi} />);
+  render(
+    <KeysPage api={{ ...noExternal, gatewayKeys, createGatewayKey } as unknown as ControlApi} />,
+  );
   fireEvent.click(await screen.findByRole("button", { name: "Create key" }));
   fireEvent.change(await screen.findByLabelText("Key name"), { target: { value: "laptop" } });
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
@@ -26,6 +33,7 @@ test("revoking a key needs its name typed first", async () => {
       <KeysPage
         api={
           {
+            ...noExternal,
             gatewayKeys: vi.fn().mockResolvedValue({ keys: [key] }),
             revokeGatewayKey,
           } as unknown as ControlApi
@@ -51,6 +59,7 @@ test("rolling a key shows the new secret once", async () => {
       <KeysPage
         api={
           {
+            ...noExternal,
             gatewayKeys: vi.fn().mockResolvedValue({ keys: [key] }),
             rollGatewayKey,
           } as unknown as ControlApi
@@ -68,11 +77,16 @@ test("an empty key list offers to create the first key", async () => {
   render(
     <ToastProvider>
       <KeysPage
-        api={{ gatewayKeys: vi.fn().mockResolvedValue({ keys: [] }) } as unknown as ControlApi}
+        api={
+          {
+            ...noExternal,
+            gatewayKeys: vi.fn().mockResolvedValue({ keys: [] }),
+          } as unknown as ControlApi
+        }
       />
     </ToastProvider>,
   );
-  expect(await screen.findByRole("heading", { level: 2 })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "No API keys" })).toBeVisible();
   expect(screen.getAllByRole("button", { name: "Create key" }).length).toBeGreaterThan(1);
 });
 
@@ -85,6 +99,7 @@ test("the create form explains the expiry format, hides while the secret shows, 
     <KeysPage
       api={
         {
+          ...noExternal,
           gatewayKeys: vi.fn().mockResolvedValue({ keys: [] }),
           createGatewayKey,
         } as unknown as ControlApi
@@ -112,6 +127,7 @@ test("a create failure does not reappear after the panel is closed and reopened"
     <KeysPage
       api={
         {
+          ...noExternal,
           gatewayKeys: vi.fn().mockResolvedValue({ keys: [key] }),
           createGatewayKey,
         } as unknown as ControlApi
@@ -136,6 +152,7 @@ test("an expired key is badged and a key without expiry reads Never", async () =
       <KeysPage
         api={
           {
+            ...noExternal,
             gatewayKeys: vi.fn().mockResolvedValue({ keys: [expired, key] }),
           } as unknown as ControlApi
         }
@@ -151,4 +168,50 @@ test("an expired key is badged and a key without expiry reads Never", async () =
   ) as HTMLElement;
   expect(within(live).queryByText("Expired")).toBeNull();
   expect(within(live).getAllByText("Never")).toHaveLength(3);
+});
+
+test("a parked external model offers Resume, which reviews then accepts exactly that review", async () => {
+  // Break caught: the operator could not tell "gave up" from "retrying", nor resume it.
+  const parked = {
+    alias: "partner-large",
+    destination: { origins: ["https://api.partner.example"] },
+    credential_bindings: ["PARTNER"],
+    desired_revision: 3,
+    enabled: true,
+    state: "blocked",
+    reason: "start-failed",
+    operator_action: "resume",
+    start_failures: 3,
+    published: false,
+  };
+  const review = {
+    effects: ["gateway-restart"],
+    grace_seconds: 30,
+    problems: [],
+    effect_digest: "d",
+  };
+  const previewGatewayModel = vi.fn().mockResolvedValue(review);
+  const acceptGatewayModel = vi.fn().mockResolvedValue({ alias: "partner-large" });
+  render(
+    <ToastProvider>
+      <KeysPage
+        api={
+          {
+            gatewayKeys: vi.fn().mockResolvedValue({ keys: [] }),
+            gatewayModels: vi.fn().mockResolvedValue({ models: [parked] }),
+            gatewayCredentials: vi.fn().mockResolvedValue({ bindings: [] }),
+            previewGatewayModel,
+            acceptGatewayModel,
+          } as unknown as ControlApi
+        }
+      />
+    </ToastProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /Resume/ }));
+  const request = { action: "enable", expected_revision: 3 };
+  await waitFor(() => expect(previewGatewayModel).toHaveBeenCalledWith("partner-large", request));
+  fireEvent.click(await screen.findByRole("button", { name: "Accept change" }));
+  await waitFor(() =>
+    expect(acceptGatewayModel).toHaveBeenCalledWith("partner-large", request, review),
+  );
 });

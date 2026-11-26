@@ -83,6 +83,10 @@ from vonk_control.cache_removal_review import (  # noqa: E402 -- the project imp
 from vonk_control.fleet_profile_contract.review import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     ProfileLoadAction,
 )
+from vonk_control.gateway.external_api_contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    ExternalBindingAction,
+    ExternalModelAction,
+)
 from vonk_control.model_cache.contract import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     CacheOperationKind,
 )
@@ -165,6 +169,8 @@ def cli_words() -> str:
         ProfileReportedPhase,
         QualificationStatus,
         QualificationOutcome,
+        ExternalModelAction,
+        ExternalBindingAction,
     ):
         lines += [
             f"class {enum_type.__name__}(StrEnum):",

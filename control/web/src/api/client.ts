@@ -46,6 +46,14 @@ import type {
   FleetEnrollRequest,
   FleetLogResponse,
   FleetNodeIdentity,
+  ExternalBindingAccepted,
+  ExternalBindingList,
+  ExternalBindingPreviewRequest,
+  ExternalBindingReview,
+  ExternalModelAccepted,
+  ExternalModelList,
+  ExternalModelPreviewRequest,
+  ExternalModelReview,
   GatewayKeyCreated,
   GatewayKeyList,
   GatewayKeyRevoked,
@@ -577,6 +585,68 @@ export class ApiClient implements ControlApi {
   async revokeGatewayKey(name: string): Promise<GatewayKeyRevoked> {
     return gatewayData(
       await this.generated.POST("/api/key/{name}/revoke", { params: { path: { name } } }),
+    );
+  }
+
+  async gatewayModels(signal?: AbortSignal): Promise<ExternalModelList> {
+    return resultData(await this.generated.GET("/api/gateway/models", { ...signalOption(signal) }));
+  }
+
+  async previewGatewayModel(
+    alias: string,
+    request: ExternalModelPreviewRequest,
+  ): Promise<ExternalModelReview> {
+    return resultData(
+      await this.generated.POST("/api/gateway/models/{alias}/preview", {
+        params: { path: { alias } },
+        body: request,
+      }),
+    );
+  }
+
+  async acceptGatewayModel(
+    alias: string,
+    request: ExternalModelPreviewRequest,
+    review: ExternalModelReview,
+    requestId: string = crypto.randomUUID(),
+  ): Promise<ExternalModelAccepted> {
+    return resultData(
+      await this.generated.POST("/api/gateway/models/{alias}/accept", {
+        params: { path: { alias } },
+        body: { ...request, request_id: requestId, effect_digest: review.effect_digest },
+      }),
+    );
+  }
+
+  async gatewayCredentials(signal?: AbortSignal): Promise<ExternalBindingList> {
+    return resultData(
+      await this.generated.GET("/api/gateway/credentials", { ...signalOption(signal) }),
+    );
+  }
+
+  async previewGatewayCredential(
+    name: string,
+    request: ExternalBindingPreviewRequest,
+  ): Promise<ExternalBindingReview> {
+    return resultData(
+      await this.generated.POST("/api/gateway/credentials/{name}/preview", {
+        params: { path: { name } },
+        body: request,
+      }),
+    );
+  }
+
+  async acceptGatewayCredential(
+    name: string,
+    request: ExternalBindingPreviewRequest,
+    review: ExternalBindingReview,
+    requestId: string = crypto.randomUUID(),
+  ): Promise<ExternalBindingAccepted> {
+    return resultData(
+      await this.generated.POST("/api/gateway/credentials/{name}/accept", {
+        params: { path: { name } },
+        body: { ...request, request_id: requestId, effect_digest: review.effect_digest },
+      }),
     );
   }
 

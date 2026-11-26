@@ -207,6 +207,13 @@ time its container starts it stages, before the services that read it start:
 - the ownership of the shared volume roots (`/state`, the object stores,
   `/routes`, `/supervisor`, `secrets/gateway`).
 
+To provision or rotate an external-model credential, write the secret to
+`secrets/gateway-credentials/<BINDING>` (mode 600, no trailing newline needed), approve the binding's
+destinations with `vonkctl gateway credential put`, and run `docker compose restart runtime-init`;
+`vonkctl gateway credential list` then shows `LOADED yes`. The secret is never an argument, an
+environment variable of the Controller or part of any API document. Removing a binding withdraws its
+models; delete its file afterwards to stage nothing.
+
 Every file is a bounded regular file (at most 64 KiB) published with fsync and
 atomic replacement, so a reader sees the old or the new copy, never a partial
 one. A staging run retries three times and then exits 1, and the restart policy

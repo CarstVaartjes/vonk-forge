@@ -60,6 +60,13 @@ class Word(StrEnum):
     RESUME = "resume"
     RETRY = "retry"
     REMOVE = "remove"
+    GATEWAY = "gateway"
+    MODEL = "model"
+    CREDENTIAL = "credential"
+    ALIAS = "alias"
+    NONE = "none"
+    SHOW = "show"
+    VALIDATE = "validate"
 
 
 class Reconcile(TypedDict):

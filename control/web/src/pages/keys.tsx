@@ -10,6 +10,8 @@ import { SortHeader, useSort } from "../components/ui/sort-header";
 import { StatusPill } from "../components/ui/status-pill";
 import { Time } from "../components/ui/time";
 import { safeErrorText } from "../lib/error-display";
+import { CredentialsSection } from "./credentials";
+import { ExternalModelsSection } from "./external-models";
 
 function failure(error: unknown, fallback: string): string {
   return safeErrorText(error instanceof Error ? error.message : fallback);
@@ -274,6 +276,8 @@ export function KeysPage({ api }: { api: ControlApi }) {
           </div>
         </section>
       )}
+      <ExternalModelsSection api={api} />
+      <CredentialsSection api={api} />
       {rolling && (
         <ConfirmDialog
           title={`Roll key ${rolling}?`}

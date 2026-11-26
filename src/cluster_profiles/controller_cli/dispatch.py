@@ -14,6 +14,7 @@ from cluster_profiles.controller_cli.common import (
 )
 from cluster_profiles.controller_cli.confirmation import _confirm_action
 from cluster_profiles.controller_cli.fleet import _fleet
+from cluster_profiles.controller_cli.gateway import _gateway
 from cluster_profiles.controller_cli.library import _job, _model, _recipe
 from cluster_profiles.controller_cli.metrics import _metric_series
 from cluster_profiles.controller_cli.profile import _profile
@@ -45,6 +46,8 @@ def run_controller(
         return _job(args, client, request_id_factory)
     if command == "profile":
         return _profile(args, client, request_id_factory)
+    if command == Word.GATEWAY:
+        return dict(_gateway(args, client, request_id_factory).to_dict())
     if command == "key":
         if getattr(args, "key_action", None) not in (None, "list"):
             args.request_id = _request_key(args, request_id_factory)

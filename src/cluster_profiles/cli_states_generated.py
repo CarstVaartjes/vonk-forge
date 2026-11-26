@@ -95,6 +95,18 @@ class QualificationOutcome(StrEnum):
     FAILED = "failed"
 
 
+class ExternalModelAction(StrEnum):
+    PUT = "put"
+    DISABLE = "disable"
+    ENABLE = "enable"
+    REMOVE = "remove"
+
+
+class ExternalBindingAction(StrEnum):
+    PUT = "put"
+    REMOVE = "remove"
+
+
 STOP_UNCONFIRMED = "unconfirmed"
 WAIT_DEPENDENCY_PENDING = "dependency-pending"
 WAIT_SPARK_BUSY = "queue.spark_busy"
@@ -229,6 +241,7 @@ HTTP_STATUS_DISPOSITIONS = (
 PROFILE_REFUSAL_CODES = frozenset(
     {
         "profile.admission_defect",
+        "profile.alias_taken",
         "profile.definition_unavailable",
         "profile.request_invalid",
         "profile.review_stale",
