@@ -943,8 +943,10 @@ request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
 weekly CI base image mirror run prunes the caches of closed pull requests. The
 pruner reads the package versions one page at a time, each request with its own
-timeout; a timeout, 5xx or rate limit skips only that work with a notice and the
-next weekly run continues, while any other 4xx fails. The mirror job copies with
+timeout; a timeout, 5xx, rate limit or connection error skips only that work
+with a notice and the next weekly run continues, while any other failure fails.
+It reads every page on every run (newest first with no cursor, a page cap would
+strand the oldest caches), and a delete of an already-gone version counts as done. The mirror job copies with
 the lock's pinned skopeo image (`build_bases.skopeo`), not the runner's apt skopeo,
 which cannot keep some OCI indexes digest-exact.
 

@@ -32,7 +32,7 @@ def _version(identifier: int, *tags: str) -> dict[str, Any]:
 def test_only_closed_caches_are_deleted_and_a_slow_page_waits_a_week() -> None:
     """Catches a pruner that deletes an open pull request's cache, main's cache
     or a version that also carries another tag, or one that turns a timed-out
-    page red instead of pruning the other pages."""
+    page or an already-deleted version red instead of pruning the rest."""
     module = _module()
     pages = {
         1: [
@@ -50,6 +50,9 @@ def test_only_closed_caches_are_deleted_and_a_slow_page_waits_a_week() -> None:
         endpoint = args[-1]
         if args[:2] == ("--method", "DELETE"):
             deleted.append(endpoint)
+            if endpoint.endswith("/6"):
+                # Already gone (another run deleted it): done, not a failure.
+                raise subprocess.CalledProcessError(1, args, stderr="(HTTP 404)")
             return ""
         if "/pulls?" in endpoint:
             return "11\n"
@@ -64,14 +67,17 @@ def test_only_closed_caches_are_deleted_and_a_slow_page_waits_a_week() -> None:
     assert deleted == [f"{PACKAGE}/versions/2", f"{PACKAGE}/versions/6"]
 
 
-def test_a_refused_listing_fails() -> None:
-    """Catches a pruner that hides a real 4xx refusal as housekeeping noise."""
+@pytest.mark.parametrize(
+    "stderr",
+    ["gh: Not Found (HTTP 404)", "gh: To use GitHub CLI, set the GH_TOKEN variable"],
+)
+def test_a_real_failure_is_not_skipped(stderr: str) -> None:
+    """Catches a pruner that hides a 4xx refusal or a non-HTTP gh error (a
+    missing token, a usage error) as housekeeping noise."""
     module = _module()
 
     def api(*args: str) -> str:
-        raise subprocess.CalledProcessError(
-            1, ["gh", "api", *args], stderr="gh: Not Found (HTTP 404)"
-        )
+        raise subprocess.CalledProcessError(1, ["gh", "api", *args], stderr=stderr)
 
     with pytest.raises(subprocess.CalledProcessError):
         module.prune(api, "owner", "owner/repo")

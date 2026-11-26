@@ -9,10 +9,11 @@ not a pull-request cache or whose pull request is still open, and deletes the
 rest.
 
 This is weekly housekeeping, so it never waits unbounded and never turns red
-for a slow or busy API: each request has its own timeout, and a timeout, 5xx or
-rate limit prints a notice, skips that work and exits 0, so the next weekly run
-continues. Only a real refusal (any other 4xx) fails; a refused delete is
-reported and the others still run.
+for a slow or busy API: each request has its own timeout, and a timeout, 5xx,
+rate limit or connection error prints a notice, skips that work and exits 0, so
+the next weekly run continues. Everything else fails (a 4xx, a missing token, a
+usage error, an unexplained ``gh`` exit); a refused delete is reported and the
+others still run, and a delete of a version that is already gone counts as done.
 """
 
 from __future__ import annotations
@@ -32,8 +33,13 @@ PACKAGE = "vonk-forge-api"
 PAGE_SIZE = 100
 PAGE_READERS = 4
 REQUEST_TIMEOUT_SECONDS = 60
-_REFUSED = re.compile(r"\(HTTP 4(?!29)\d\d\)")
-_RATE_LIMITED = re.compile(r"rate limit", re.IGNORECASE)
+# Only these may pass on the next run; any other failure is real and raises.
+_TRANSIENT = re.compile(
+    r"\(HTTP (?:5\d\d|429)\)|rate limit|error connecting|dial tcp|"
+    r"connection (?:reset|refused)|i/o timeout|TLS handshake timeout|unexpected EOF",
+    re.IGNORECASE,
+)
+_GONE = "(HTTP 404)"
 
 Api = Callable[..., str]
 """Runs ``gh api`` with the given arguments and returns its stdout."""
@@ -52,14 +58,15 @@ def gh(*args: str) -> str:
 def call(api: Api, *args: str) -> str | None:
     """The request's stdout, or ``None`` when it may pass on the next run.
 
-    A refusal (a 4xx that is not a rate limit) raises."""
+    Any failure that is not a timeout, 5xx, rate limit or connection error
+    raises."""
     try:
         return api(*args)
     except subprocess.TimeoutExpired:
         reason = f"timed out after {REQUEST_TIMEOUT_SECONDS}s"
     except subprocess.CalledProcessError as error:
         reason = (error.stderr or "").strip()
-        if _REFUSED.search(reason) and not _RATE_LIMITED.search(reason):
+        if not _TRANSIENT.search(reason):
             raise
     print(f"::notice::skipped {args[-1]} ({reason}); the next weekly run retries it")
     return None
@@ -115,6 +122,9 @@ def prune(api: Api, owner: str, repository: str, *, dry_run: bool = False) -> in
     if listed_open is None or listed_package is None:
         return 0
     open_numbers = {int(number) for number in listed_open.split()}
+    # Every page is read on every run. A page cap would strand caches: the
+    # listing is newest first with no cursor, so each run restarts at page 1
+    # and a capped run would never reach the oldest closed pull requests.
     pages = range(
         1, math.ceil(json.loads(listed_package)["version_count"] / PAGE_SIZE) + 1
     )
@@ -142,6 +152,9 @@ def prune(api: Api, owner: str, repository: str, *, dry_run: bool = False) -> in
                 api, "--method", "DELETE", f"{package}/versions/{version_id}"
             )
         except subprocess.CalledProcessError as error:
+            if _GONE in (error.stderr or ""):
+                print(f"buildcache-pr-{number} was already gone (version {version_id})")
+                continue
             failures += 1
             print(
                 f"could not delete buildcache-pr-{number}: {error.stderr.strip()}",
