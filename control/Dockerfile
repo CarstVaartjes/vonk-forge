@@ -92,7 +92,9 @@ COPY agent_protocol/pyproject.toml ./agent_protocol/
 # complete local editable project in this build stage; it never reaches runtime.
 COPY nas_setup/pyproject.toml nas_setup/hatch_build.py ./nas_setup/
 COPY nas_setup/src/ ./nas_setup/src/
-# Install the locked generator dependencies before any application source.
+# Install the locked generator dependencies before any application source. The
+# locked public-contracts wheel is a uv path source, so it must be present.
+COPY inventory/wheels/vonk_forge_public_contracts-5.8.1-py3-none-any.whl ./inventory/wheels/
 RUN uv sync --project control --frozen --no-install-workspace
 COPY tools/openapi-client/ ./tools/openapi-client/
 RUN npm ci --prefix tools/openapi-client --ignore-scripts
