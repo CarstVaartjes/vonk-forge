@@ -44,7 +44,7 @@ the tagged commit.
    any (2 if state cannot be read):
 
    ```sh
-   scripts/release/stable-preflight --repo CarstVaartjes/vonk-forge --tag vX.Y.Z --sha <sha>
+   scripts/release/stable-preflight --repo CarstVaartjes/vonk-forge --tag vX.Y.Z --sha <full 40-character sha>
    ```
 
    It needs `gh` (logged in with read access to the repository, its
@@ -62,10 +62,7 @@ the tagged commit.
 
 ## Tag and approvals
 
-Only the owner signs and pushes the tag, with the key listed in
-`.github/release-allowed-signers`:
-
-The tag must be signed with the allowed release signer: principal
+Only the owner signs and pushes the tag. The tag must be signed with the allowed release signer: principal
 `cvaartjes@visualfabriq.com` in `.github/release-allowed-signers`. A plain
 `git tag -s` signs with the machine's default key, which is not that signer and
 fails the release's signature check. The release key lives in the 1Password SSH
@@ -74,7 +71,7 @@ agent, so no key file is needed; 1Password asks for approval when it signs.
 (present on this Mac; elsewhere 1Password places it in the `MacOS` folder of its
 app bundle).
 
-From an up-to-date main checkout:
+From the root of an up-to-date main checkout (the signers file path is relative). `<sha>` is the full 40-character sha:
 
 ```sh
 git checkout main && git pull --ff-only origin main
@@ -86,7 +83,21 @@ git -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag vX.
 git push origin vX.Y.Z
 ```
 
-The `key::` value is the public key in `.github/release-allowed-signers` (check
+The owner then approves two deployments in the Actions run of the tag:
+
+- `apt-release`: the prompt appears after the GitHub Release is published and
+  the stable images are built. Before approving, check that the Release
+  `vX.Y.Z` exists with its assets and that the run's earlier jobs are green. It
+  publishes the stable apt package `vonk-forge-agent X.Y.Z`.
+- `installer-acceptance-stable`: the prompt appears after every canary passed,
+  right before promotion. Before approving, check that the canaries and the
+  stable carry in the release-acceptance summary passed. Approving means
+  "promote this release": it signs the acceptance, and promotion then moves
+  `:latest` and the installer pointer. The reviewer is not on
+  `installer-promotion-stable`: the daily `installer-maintenance` refresh runs in
+  that environment from `main` and would otherwise wait for a click every day.
+
+The `key:: value is the public key in `.github/release-allowed-signers` (check
 it still matches before signing). `verify-tag` reads that file from the working
 tree, so run it on the up-to-date main checkout; it must print
 `Good "git" signature` for that principal before you push. To retry, delete the
@@ -111,9 +122,9 @@ Announce deprecations there.
 
 - **Before anything immutable is public** (no `vX.Y.Z` image tag written, the
   GitHub Release still a draft): fix the settings, or land a fix on main and
-  deploy it. For a code fix the owner deletes the tag
-  (`git push origin :refs/tags/vX.Y.Z`, and `gh release delete vX.Y.Z --yes`
-  for a draft) and tags the fixed commit.
+  deploy it. For a code fix the owner deletes the tag locally and remotely
+  (`git tag -d vX.Y.Z`, `git push origin :refs/tags/vX.Y.Z`, and
+  `gh release delete vX.Y.Z --yes` for a draft) and tags the fixed commit.
 - **A settings fix only, after publication started:** fix the settings, then
   rerun the failed jobs of the same run. Publication is idempotent and
   reconciles an already accepted set.
