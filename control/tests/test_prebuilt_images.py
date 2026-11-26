@@ -1,7 +1,6 @@
 """Catalog prebuilt images retain their accepted content through retries.
 
-These run the real producer and consumer seams: the CI planner keys a real
-recipe package, the signed index carries the pushed digest, catalog sync
+These run the real producer and consumer seams: the signed index carries the pushed digest, catalog sync
 records it, build planning prefers it without admitting any Spark resources,
 the build job is executed by the Controller importer, and the result is the
 same reusable build receipt a Spark upload leaves.
@@ -165,18 +164,14 @@ def _sync(
 
 
 def _published_library(
-    tmp_path: Path, *, build_key: str | None = None, pinned: bool = True
+    tmp_path: Path, *, pinned: bool = True
 ) -> tuple[sessionmaker[Session], str]:
     """Sync a one-recipe signed library whose index pins a prebuilt image.
 
-    The key comes from the CI planner run over the real package, exactly as
-    the recipe repository's image workflow computes it, unless a test
-    supplies a different one.
+    The pin carries an arbitrary key; the Controller never reads it.
     """
 
-    pin = (
-        {"reference": REFERENCE, "build_key": build_key or "a" * 64} if pinned else None
-    )
+    pin = {"reference": REFERENCE, "build_key": "a" * 64} if pinned else None
     engine = create_engine(f"sqlite:///{tmp_path / 'controller.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -302,13 +297,6 @@ def _start(
     return plan, job
 
 
-def test_the_controller_derives_no_prebuilt_build_key() -> None:
-    # Wrong implementation: forge keeps a planner or key derivation that
-    # recipes CI (which now plans its own builds) could drift from.
-    assert not hasattr(prebuilt_images, "executable_build_key")
-    assert not hasattr(prebuilt_images, "write_library_image_plan")
-
-
 def test_a_recipe_the_controller_refuses_is_reported_with_the_finding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -344,6 +332,8 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
     plan, job = _start(builds, operations, revision_id)
     assert plan.policy_report is not None
     assert plan.policy_report["prebuilt_image"] == REFERENCE
+    decision = require_mapping(plan.policy_report["prebuilt_decision"], "decision")
+    assert decision["code"] == PrebuiltImageCode.USED
     with sessions() as session:
         assert session.scalars(select(AgentOperation)).all() == []
         assert session.scalars(select(ResourceReservation)).all() == []
@@ -377,26 +367,6 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
     resolution = builds.resolve(revision_id)
     assert resolution.cached
     assert resolution.build_id == plan.build_id
-
-
-def test_a_pin_whose_key_forge_never_computed_is_pulled(tmp_path: Path) -> None:
-    # Wrong implementation: the Controller re-derives the key and falls back to
-    # a Spark build (here: refused for missing inventory) whenever recipes CI
-    # keyed the image differently, so an older Controller never finds the
-    # image a newer catalog pins.
-    sessions, revision_id = _published_library(tmp_path, build_key="0" * 64)
-    builds, operations = _services(sessions, tmp_path)
-
-    plan, _job = _start(builds, operations, revision_id)
-
-    assert plan.policy_report is not None
-    assert plan.policy_report["prebuilt_image"] == REFERENCE
-    decision = require_mapping(plan.policy_report["prebuilt_decision"], "decision")
-    assert decision["code"] == PrebuiltImageCode.USED
-    assert plan.policy_report["builder_binary_digest"] == ADDRESS
-    with sessions() as session:
-        assert session.scalars(select(AgentOperation)).all() == []
-        assert session.scalars(select(ResourceReservation)).all() == []
 
 
 def test_a_pin_recorded_for_other_content_is_never_used(tmp_path: Path) -> None:

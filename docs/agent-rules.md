@@ -444,7 +444,7 @@ A recipe image is identified by its manifest digest. Build planning uses the
 image the signed catalog pins for a revision's exact content digest and never
 derives or reads the pin's `build_key`, the recipes CI's own handle (the
 `prebuilt-key` added-line guard refuses `executable_build_key(` or a
-`build_key` read in `control/src/` outside catalog ingest). The privileged
+`build_key` read in `control/src/`, `src/` or `scripts/` outside catalog ingest). The privileged
 helper authorizes an image by the signed plan's digest and its Linux/ARM64
 platform, never by an image label or the image's own `USER`; the launch forces
 the plan's numeric user, the read-only rootfs with its `/tmp` tmpfs,
