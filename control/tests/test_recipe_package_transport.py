@@ -47,6 +47,7 @@ from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -102,7 +103,7 @@ def _repack(files: dict[str, bytes]) -> bytes:
 
 
 def _canonical_package_fixture(
-    *, adapter_source: bytes | None = None
+    *, adapter_source: bytes | None = None, slug: str = "tiny-recipe"
 ) -> tuple[bytes, dict[str, object], bytes]:
     """Create a tiny valid package without depending on another checkout."""
     model = ModelDefinition.model_validate(
@@ -139,7 +140,7 @@ def _canonical_package_fixture(
     model_digest = document_sha256(model_document)
     recipe = RecipeDefinition.model_validate(
         {
-            "identity": {"publisher": "fixture", "slug": "tiny-recipe"},
+            "identity": {"publisher": "fixture", "slug": slug},
             "models": [
                 {
                     "id": "primary",
@@ -278,7 +279,7 @@ def _canonical_package_fixture(
     }
     package = _repack({"manifest.json": _canonical(manifest) + b"\n", **files})
     row = {
-        "source_path": "recipes/tiny-recipe.json",
+        "source_path": f"recipes/{slug}.json",
         "source_bundle_sha256": source_digest,
         "document": recipe_document,
         "display": published_json(
@@ -291,7 +292,7 @@ def _canonical_package_fixture(
         ),
         "content_sha256": recipe_digest,
         "package": {
-            "path": "packages/tiny-recipe.tar.gz",
+            "path": f"packages/{slug}.tar.gz",
             "source_bundle_sha256": source_digest,
             "sha256": hashlib.sha256(package).hexdigest(),
             "expected_bytes": len(package),
@@ -807,7 +808,11 @@ def test_an_envelope_the_contract_refuses_rejects_the_signed_index(
 def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    """Principle 1: the envelope is read through the contract, the entries one by one."""
+    """Principle 1: the envelope is read through the contract, the entries one by one.
+
+    An entry of a kind a newer contract added needs a newer platform: it is
+    withheld with a note, never a problem that holds up the rest.
+    """
     index, _, package = _canonical_package_fixture()
     document = json.loads(index)
     newer = {"kind": "from-a-newer-contract"}
@@ -817,33 +822,35 @@ def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
     client = _client(release, tmp_path / "packages")
     try:
         snapshot = client.list()
-        [problem] = snapshot.problems
-        assert problem.detail.startswith("index catalog_entities entry")
-        assert "is skipped: document" in problem.detail
+        assert snapshot.problems == ()
+        [withheld] = snapshot.withheld
+        assert "catalog_entities" in withheld.detail
         assert snapshot.items
         assert not snapshot.catalog_entities
     finally:
         client.close()
 
 
-def test_an_unknown_served_capability_is_left_out_not_fatal(
+def test_an_unknown_served_capability_is_kept_by_name(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    """A capability a newer contract adds must not stop the index sync."""
+    """A capability a newer contract adds is served by its name; a word longer
+    than a served name is left out, and neither stops the index sync."""
     index_bytes, _, package = _canonical_package_fixture()
     index = json.loads(index_bytes)
-    index["recipes"][0]["served_capabilities"] = ["text-generation", "teleportation"]
+    index["recipes"][0]["served_capabilities"] = [
+        "text-generation",
+        "teleportation",
+        "x" * 65,
+    ]
     release = _release_for(_canonical(index) + b"\n", package)
     client = _client(release, tmp_path / "packages")
     try:
         snapshot = client.list()
-        assert snapshot.items
+        assert snapshot.problems == ()
         assert tuple(snapshot.items[0].served_capabilities or ()) == (
             "text-generation",
-        )
-        assert any(
-            "'teleportation' is unknown to this Controller" in problem.detail
-            for problem in snapshot.display_notes
+            "teleportation",
         )
     finally:
         client.close()
@@ -856,6 +863,14 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
     index_bytes, _, package = _canonical_package_fixture()
     index = json.loads(index_bytes)
     index["catalog_entities"][0]["display"]["capabilities"].append("teleportation")
+    index["vocabulary"]["capabilities"].append(
+        {
+            "name": "teleportation",
+            "label": "Teleportation",
+            "description": "Moves a thing elsewhere.",
+            "category": "other",
+        }
+    )
     recipe_entry = index["recipes"][0]
     del recipe_entry["display"]
     recipe_entry["prebuilt_image"] = {
@@ -912,8 +927,8 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
         assert f"'{word}' is unknown to this Controller" in details
     # What the Library serves: each block read without its unknown word. The
     # recipe is titled by its identity, builds from source, keeps its API facts
-    # minus the endpoint and reads "not yet verified"; the Model keeps its
-    # known capabilities.
+    # minus the endpoint and reads "not yet verified"; the Model keeps every
+    # capability by name, the newer one labelled by the release's vocabulary.
     library = LibraryProjection(sessions, cursors=cursors, clock=lambda: now)
     library.refresh_catalog(observe_storage=False)
     (recipe,) = library.recipe_library(limit=10).recipes
@@ -925,12 +940,105 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
     assert list(recipe.projected.api.api.endpoints) == endpoints
     assert recipe.qualification is not None
     assert recipe.qualification.status == QualificationStatus.NOT_YET_VERIFIED
+    shown = ["image-generation", "teleportation", "text-generation"]
     (model,) = library.models(limit=10).models
     assert model.model_display is not None
-    assert list(model.model_display.capabilities) == [
-        "image-generation",
-        "text-generation",
-    ]
+    assert sorted(model.model_display.capabilities) == shown
+    assert model.usage == shown
+    vocabulary = library.library_vocabulary()
+    assert vocabulary is not None
+    assert {"teleportation": "Teleportation"}.items() <= {
+        word.name: word.label for word in vocabulary.capabilities
+    }.items()
+    # A restart reads the stored display back from the database: the kept
+    # word is still readable, never an unreadable row.
+    engine.dispose()
+    restarted = LibraryProjection(
+        sessionmaker(
+            create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}"),
+            expire_on_commit=False,
+        ),
+        cursors=cursors,
+        clock=lambda: now,
+    )
+    restarted.refresh_catalog(observe_storage=False)
+    (model,) = restarted.models(limit=10).models
+    assert model.model_display is not None
+    assert sorted(model.model_display.capabilities) == shown
+    assert model.usage == shown
+
+
+def test_an_entry_needing_a_newer_platform_is_withheld_and_the_sync_completes(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """A recipe whose new revision uses an executed kind a newer contract added
+    is withheld with a note: every other entry applies and the sync is current.
+    The view is incomplete, so nothing is retracted: the older revision stays
+    offered and a saved profile naming it still resolves to it."""
+    first_bytes, _, first_package = _canonical_package_fixture()
+    _, other, other_package = _canonical_package_fixture(slug="other-recipe")
+
+    def release(index: dict[str, object], tag: str) -> _Release:
+        index["contract_version"] = tag.removeprefix("v")
+        return _Release(
+            tag,
+            {
+                "catalog-index.json": _canonical(index) + b"\n",
+                "tiny-recipe.tar.gz": first_package,
+                "other-recipe.tar.gz": other_package,
+            },
+        )
+
+    readable = json.loads(first_bytes)
+    readable["recipes"].append(other)
+    served = release(deepcopy(readable), f"v{MAJOR}.1.0")
+    newer = deepcopy(readable)
+    newer["source_commit"] = "b" * 40
+    newer["updated_at"] = "2026-11-26T12:00:00Z"
+    withheld = newer["recipes"][1]
+    withheld["document"]["settings"]["kind"] = "teleportation"
+    digest = document_sha256(withheld["document"])
+    withheld["content_sha256"] = digest
+    withheld["package"]["recipe_content_sha256"] = digest
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 11, 26, tzinfo=UTC)
+    catalog = CatalogService(
+        sessions,
+        clock=lambda: now,
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        source_bundles=SourceBundleStore(tmp_path / "bundles"),
+    )
+    sync = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=catalog,
+        reader=_client(served, tmp_path / "packages"),
+        clock=lambda: now,
+    )
+    assert sync.automatic().imported_count == 2
+    key = ("fixture", "other-recipe")
+    older = catalog.recipe_catalog_local_revisions([key])[key]
+
+    _replace_with(served, release(newer, f"v{MAJOR}.1.1"))
+    status = sync.automatic()
+
+    assert status.state == CatalogSyncState.CURRENT
+    assert status.skipped_count == 0
+    [note] = status.problems
+    assert note.recipe_uri is None
+    assert "fixture/other-recipe" in note.detail
+    assert status.withdrawn_count == 0
+    assert catalog.recipe_catalog_local_revisions([key])[key] == older
+    with sessions() as session:
+        [kept] = session.scalars(
+            select(CatalogDocumentRevision.id).where(
+                CatalogDocumentRevision.slug == "other-recipe"
+            )
+        ).all()
+        resolved = FleetProfileService._recipe_identity(session, "fixture/other-recipe")
+    assert isinstance(resolved, tuple)
+    assert resolved[1] == kept
 
 
 def test_an_unknown_blame_leaves_out_only_its_evidence_record() -> None:

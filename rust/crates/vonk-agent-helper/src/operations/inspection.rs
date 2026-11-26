@@ -692,8 +692,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 if (image.0 != *config && image.0 != *manifest)
                     || image.1 != "linux"
                     || image.2 != "arm64"
-                    || image.3 != "v1"
-                    || !numeric_non_root_user(&image.4)
                 {
                     return Err(OperationError::RuntimeImageIdentityInvalid);
                 }

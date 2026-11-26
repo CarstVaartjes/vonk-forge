@@ -240,8 +240,11 @@ The pre-commit hook (`scripts/dev/check-staged-code`) also runs the CI added-lin
 guards on the staged diff, so a violation fails before push; it skips with a
 message only when a staged file also has unstaged edits.
 A plain path literal in a guard module, `scripts/ci/select-ci-areas` or a `tools/*.json` allowlist must name a path or the prefix of one (`tests/test_guard_paths_exist.py`); write guard scopes as plain full-path literals (composed or regex scopes are invisible to it), and move or delete the literal with the code.
-`cross-repo-nightly.yml` validates the recipes `main` library with the platform `main` validator every
-night; a red run is the drift alarm.
+`cross-repo-nightly.yml` validates the recipes `main` library with the published dev recipe-tools
+bundle every night, verified and run as recipes CI runs it; a red run is the drift alarm.
+Recipes CI validates with that signed per-channel bundle; its `platform-features.json` comes only
+from the tables the platform executes (`scripts/recipes/platform-features`), never typed by hand
+(docs/runbooks/platform-release-publication.md, Recipe-tools bundle).
 `fuzz.yml` (daily, dispatch only otherwise) fuzzes the parsers in `rust/fuzz` (outside the Cargo workspace); a red run is a crash, and the fix adds one case to the parser's existing test (docs/testing-and-ci.md, Fuzzing).
 
 One uv workspace owns every Python package: the root `vonk-cluster-profiles`
@@ -436,6 +439,19 @@ route is published. NAS reconciliation removes unused local model-cache
 entries while preserving profile and active-workload references. Spark-local
 copies are execution caches only: they may be reused or rehydrated, but they
 never become profile authority.
+
+A recipe image is identified by its manifest digest. Build planning uses the
+image the signed catalog pins for a revision's exact content digest and never
+derives or reads the pin's `build_key`, the recipes CI's own handle (the
+`prebuilt-key` added-line guard refuses `executable_build_key(` or a
+`build_key` read in `control/src/` outside catalog ingest). The privileged
+helper authorizes an image by the signed plan's digest and its Linux/ARM64
+platform, never by an image label or the image's own `USER`; the launch forces
+the plan's numeric user, the read-only rootfs with its `/tmp` tmpfs,
+`--cap-drop=ALL`, `no-new-privileges` and `--workdir /tmp`. A forge change to
+the Spark-local adaptation stage, `runtime/writable_paths.py` or the harness
+wrapper table still changes installed revisions' `build_input_sha256` and so
+re-plans them locally; such a change needs a Carry-lane run.
 
 Keep these readiness and admission facts separate from repository, CI and
 publication evidence, Controller deployment evidence, and physical Spark or

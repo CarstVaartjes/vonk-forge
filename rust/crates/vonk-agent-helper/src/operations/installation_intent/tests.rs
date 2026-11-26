@@ -22,7 +22,11 @@ impl CommandRunner for IntentRunner {
         let image = args.first().map(String::as_str) == Some("image");
         let missing = args.get(1).map(String::as_str) == Some("inspect") && !image;
         let stdout = if image {
-            format!("{}\tlinux\tarm64\tv1\t10001:10001\n", self.config).into_bytes()
+            rendered_inspection(
+                args.get(3).map_or("{{.Id}}", String::as_str),
+                &self.config,
+                "",
+            )
         } else if args.first().map(String::as_str) == Some("run") {
             "f".repeat(64).into_bytes()
         } else {

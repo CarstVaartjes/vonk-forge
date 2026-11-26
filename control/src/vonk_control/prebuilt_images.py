@@ -6,17 +6,22 @@ records ``{reference, build_key}`` beside the recipe in the signed catalog
 index.  ``reference`` pins the image by manifest digest; ``build_key`` names
 the executable build inputs the image was produced from.
 
-The Controller prefers that image.  When a revision's own build key matches
-the catalog's, build planning skips Spark build admission (no Spark memory or
-disk is used) and the Controller pulls the pinned digest into its image cache
-instead of dispatching a Spark build.  The digest is verified once, where the
-bytes enter: skopeo pulls by digest and checks the manifest and every blob
-against it.  The resulting archive then takes exactly the path a Spark-built
-archive takes (receipt, authorization, distribution), so a prebuilt image and
-a Spark-built image for the same inputs are interchangeable.  A missing,
-mismatched or failed prebuilt image falls back to the Spark build, and the
-fallback is never silent: every plan carries a :class:`PrebuiltDecision` that
-names why the image was or was not used.
+The Controller prefers that image.  When the signed catalog pins an image for
+the revision's content digest, build planning skips Spark build admission (no
+Spark memory or disk is used) and the Controller pulls the pinned digest into
+its image cache instead of dispatching a Spark build.  The Controller never
+reads ``build_key``: the manifest digest is the image's identity, and the key
+is only the recipes CI's handle for finding or skipping a build.  The digest
+is verified once, where the bytes enter: skopeo pulls by digest and checks the
+manifest and every blob against it.  The resulting archive then takes exactly
+the path a Spark-built archive takes (receipt, authorization, distribution), so
+a prebuilt image and a Spark-built image for the same inputs are
+interchangeable.  A missing or failed prebuilt image falls back to the Spark
+build, and the fallback is never silent: every plan carries a
+:class:`PrebuiltDecision` that names why the image was or was not used.
+
+:func:`executable_build_key` and :func:`write_library_image_plan` remain the
+recipes CI's planner until that repository plans its own builds.
 """
 
 from __future__ import annotations
@@ -100,7 +105,6 @@ _CONVERSION_BACKOFF_CAP = timedelta(hours=2)
 _REFERENCE = re.compile(PREBUILT_REFERENCE_PATTERN)
 
 PREBUILT_NOT_PINNED = PrebuiltImageCode.NOT_PINNED
-PREBUILT_KEY_MISMATCH = PrebuiltImageCode.BUILD_KEY_MISMATCH
 
 
 def executable_build_key(identity: Mapping[str, object]) -> str:
@@ -845,7 +849,6 @@ class PrebuiltImageImporter:
 
 
 __all__ = [
-    "PREBUILT_KEY_MISMATCH",
     "PREBUILT_KEY_SCHEMA_VERSION",
     "PREBUILT_NOT_PINNED",
     "PrebuiltImageImporter",

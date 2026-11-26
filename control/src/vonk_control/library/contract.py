@@ -78,6 +78,10 @@ _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 
 Text32 = Annotated[str, StringConstraints(min_length=1, max_length=32)]
 Text64 = Annotated[str, StringConstraints(min_length=1, max_length=64)]
+#: A capability by name. The release's vocabulary labels it, so a name a newer
+#: contract minor added is served as published (the reader keeps only a word of
+#: this shape). Its own schema definition keeps the published ``$ref`` target.
+type CapabilityName = Text64
 Text80 = Annotated[str, StringConstraints(min_length=1, max_length=80)]
 Text128 = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 Text200 = Annotated[str, StringConstraints(min_length=1, max_length=200)]
@@ -298,6 +302,16 @@ def recipe_actions(local: LibraryLocalState) -> list[LibraryCacheAction]:
     )
 
 
+class LibraryModelDisplay(ModelDisplay):
+    """The published Model display as the Library serves it.
+
+    The contract's ``ModelDisplay`` with each capability as its name, so a
+    capability this Controller's contract does not list is shown, not refused.
+    """
+
+    capabilities: list[CapabilityName] = Field(max_length=64)  # pyright: ignore[reportIncompatibleVariableOverride]  # served by name, not the contract's closed set
+
+
 class LibraryModelProjection(StrictModel):
     """One exact canonical model variant with operator-facing projections."""
 
@@ -305,7 +319,7 @@ class LibraryModelProjection(StrictModel):
     identity: LibraryModelIdentity
     projected: ModelRevisionProjection
     # The published library text; null until the first sync that carries it.
-    model_display: ModelDisplay | None
+    model_display: LibraryModelDisplay | None
     # The Family and Line slugs of the display lineage (Family → Line → Model,
     # the Model release and variant kind are in ``model_display.lineage``);
     # null for a helper Model or before the display is synced.
@@ -656,7 +670,7 @@ class TopologyPlacement(StrictModel):
 class LibraryRecipeModel(StrictModel):
     selection: RecipeModelSelection
     model_document: ModelDefinition
-    model_display: ModelDisplay | None
+    model_display: LibraryModelDisplay | None
 
 
 class RecipeAlternative(StrictModel):

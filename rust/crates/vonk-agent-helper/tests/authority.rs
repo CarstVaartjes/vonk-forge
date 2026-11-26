@@ -409,7 +409,7 @@ impl CommandRunner for RecordingRunner {
         } else if executable == std::path::Path::new("/usr/bin/docker")
             && arguments.get(..2) == Some(&["image".to_owned(), "inspect".to_owned()])
         {
-            format!("{}\tlinux\tarm64\tv1\t10001:10001\n", runtime_config_id()).into_bytes()
+            format!("{}\tlinux\tarm64\n", runtime_config_id()).into_bytes()
         } else if executable == std::path::Path::new("/usr/bin/docker")
             && arguments.get(..2) == Some(&["container".to_owned(), "inspect".to_owned()])
         {

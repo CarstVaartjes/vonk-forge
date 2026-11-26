@@ -11,7 +11,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
     /// Controller binds the manifest digest and its config digest in the
     /// signed request; Docker verifies each blob against the manifest while
     /// pulling, and the helper requires the pulled image to be exactly that
-    /// config with the platform runtime identity before tagging it locally.
+    /// linux/arm64 config before tagging it locally. Image labels and the
+    /// image's own user never authorize: the signed digest does, and the
+    /// launch forces the user (`--user`, validated in `validation.rs`).
     #[expect(
         clippy::wildcard_enum_match_arm,
         reason = "every other error passes through unchanged"
@@ -47,8 +49,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
             (inspected.0 == *config_digest || inspected.0 == *manifest_digest)
                 && inspected.1 == "linux"
                 && inspected.2 == "arm64"
-                && inspected.3 == "v1"
-                && numeric_non_root_user(&inspected.4)
         };
         // An earlier pull of the same pinned image is reused as is.
         if let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)?
@@ -151,11 +151,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             image_config_id,
             platform_manifest_digest,
         )?;
-        if inspected.1 != "linux"
-            || inspected.2 != "arm64"
-            || inspected.3 != "v1"
-            || inspected.4 != *user
-        {
+        if inspected.1 != "linux" || inspected.2 != "arm64" {
             return Err(OperationError::RuntimeImageIdentityInvalid);
         }
         self.project_image_receipt(RuntimeImageReceipt {
@@ -195,7 +191,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     ) -> Result<Option<RuntimeImageInspection>, OperationError> {
         let output = self.run_docker(&Self::image_inspection_arguments(
             image,
-            "{{.Id}}\t{{.Os}}\t{{.Architecture}}\t{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t{{.Config.User}}",
+            "{{.Id}}\t{{.Os}}\t{{.Architecture}}",
         ))?;
         if !output.success {
             // Docker writes a newline to stdout for some missing image
@@ -213,15 +209,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .ok()
             .map(str::trim)
             .map_or_default(|value| value.split('\t').map(str::to_owned).collect::<Vec<_>>());
-        if output.exit_code != Some(0) || fields.len() != 5 || !valid_oci_digest(&fields[0]) {
+        if output.exit_code != Some(0) || fields.len() != 3 || !valid_oci_digest(&fields[0]) {
             return Err(OperationError::RuntimeImageInspectFailed);
         }
         Ok(Some((
             fields[0].clone(),
             fields[1].clone(),
             fields[2].clone(),
-            fields[3].clone(),
-            fields[4].clone(),
         )))
     }
 }

@@ -11,7 +11,6 @@ from vonk_forge_contracts import (
     read_recipe,
 )
 from vonk_forge_contracts.model import (
-    GitHubLfsSource,
     GitHubReleaseSource,
     ModelReference,
 )
@@ -21,7 +20,7 @@ from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog.revision_contract import read_shared_catalog_document
 from vonk_control.categorized_errors import InvalidType
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, _is_hex
-from vonk_control.model_cache.constants import _DIGEST_LENGTH, ProviderKind
+from vonk_control.model_cache.constants import _DIGEST_LENGTH
 from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheResolutionError,
@@ -31,7 +30,10 @@ from vonk_control.model_cache.input_contracts import (
     CatalogArtifact,
     CatalogArtifactPart,
 )
-from vonk_control.model_cache.providers import PROVIDERS
+from vonk_control.model_cache.providers import (
+    PROVIDERS,
+    model_source_kind,
+)
 from vonk_control.models.catalog import CatalogDocumentRevision
 
 
@@ -147,30 +149,27 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[CatalogArti
             "canonical model definition is invalid",
         ) from error
     source = definition.source
+    provider_kind = model_source_kind(type(source))
+    if provider_kind is None:
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.SOURCE_INVALID, "model source provider is not supported"
+        )
     if isinstance(source, GitHubReleaseSource):
         repository = source.repository
         revision = f"github-release:{source.release_id}"
         release_id = source.release_id
         assets = {asset.file_id: asset.asset_id for asset in source.assets}
-        provider_kind = ProviderKind.GITHUB_RELEASE_ASSET
-    elif isinstance(source, GitHubLfsSource):
-        repository = source.repository
-        revision = source.revision
-        release_id = None
-        assets = {}
-        provider_kind = ProviderKind.GITHUB_LFS_OBJECT
     else:
         repository = source.repository
         revision = source.revision
         release_id = None
         assets = {}
-        provider_kind = ProviderKind.HUGGINGFACE_FILE
     result: list[CatalogArtifact] = []
     result.extend(
         CatalogArtifact(
             id=value.id,
             path=value.path,
-            kind=provider_kind.value,
+            kind=provider_kind,
             repository=repository,
             revision=revision,
             sha256=value.sha256,

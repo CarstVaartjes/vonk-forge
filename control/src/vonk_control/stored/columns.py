@@ -204,6 +204,9 @@ bind(
     },
     nullable=True,
     discriminator="kind",
+    # As the sync stored it: a Model display keeps a capability a newer
+    # contract minor added (``recipe_packages.known_words``).
+    keeps_unrecognised=True,
 )
 bind(
     "catalog_document_revisions",

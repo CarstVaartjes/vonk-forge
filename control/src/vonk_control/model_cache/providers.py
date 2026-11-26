@@ -5,12 +5,16 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 from urllib.parse import quote, urlsplit
 
 import httpx2
-from pydantic import ValidationError
-from vonk_forge_contracts.model import GitHubReleaseSource
+from pydantic import BaseModel, ValidationError
+from vonk_forge_contracts.model import (
+    GitHubLfsSource,
+    GitHubReleaseSource,
+    ModelSource,
+)
 
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.model_cache.constants import (
@@ -60,6 +64,9 @@ class Provider:
     # Detail of the typed error a transport failure becomes, if the provider
     # owns one; otherwise the transport error propagates unchanged.
     transport_failure: str | None = None
+    # The contract Model source class that downloads as this kind; None when
+    # no Model source does.
+    model_source: type[BaseModel] | None = None
 
 
 def _repository_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | None]:
@@ -354,6 +361,9 @@ def _github_lfs_binding(spec: ArtifactSpec) -> tuple[str, str, str, str]:
     return owner, name, revision, spec.path
 
 
+# A Model source with no ``provider`` word is a Hugging Face repository.
+HUGGINGFACE_SOURCE = "huggingface"
+
 PROVIDERS: dict[str, Provider] = {
     ProviderKind.HUGGINGFACE_FILE: Provider(
         catalog_source=_huggingface_catalog_source,
@@ -362,6 +372,7 @@ PROVIDERS: dict[str, Provider] = {
         open=_open_http,
         production=True,
         parts=True,
+        model_source=ModelSource,
     ),
     ProviderKind.GITHUB_RELEASE_ASSET: Provider(
         catalog_source=_github_release_catalog_source,
@@ -370,6 +381,7 @@ PROVIDERS: dict[str, Provider] = {
         open=_open_github_release,
         production=True,
         transport_failure="GitHub release asset transfer failed",
+        model_source=GitHubReleaseSource,
     ),
     ProviderKind.GITHUB_LFS_OBJECT: Provider(
         catalog_source=_github_lfs_catalog_source,
@@ -378,6 +390,7 @@ PROVIDERS: dict[str, Provider] = {
         open=_open_github_lfs,
         production=True,
         transport_failure="GitHub LFS object transfer failed",
+        model_source=GitHubLfsSource,
     ),
     ProviderKind.HTTP_FILE: Provider(
         catalog_source=_repository_catalog_source,
@@ -406,6 +419,45 @@ def provider_for(kind: str) -> Provider:
             ModelCacheCode.ARTIFACT_INVALID, "cache artifact kind is unsupported"
         )
     return provider
+
+
+def source_provider_word(source: type[BaseModel]) -> str:
+    """The ``provider`` word a contract Model source class carries.
+
+    Read from the class's ``provider`` Literal; a class without one (a Hugging
+    Face repository) is ``HUGGINGFACE_SOURCE``.
+    """
+
+    field = source.model_fields.get("provider")
+    if field is None:
+        return HUGGINGFACE_SOURCE
+    (word,) = get_args(field.annotation)
+    return str(word)
+
+
+def model_source_kind(source: type[BaseModel]) -> str | None:
+    """The artifact kind a contract Model source class downloads as, by identity.
+
+    None for a class no entry names: the caller refuses it, never guesses.
+    """
+
+    return next(
+        (
+            str(kind)
+            for kind, entry in PROVIDERS.items()
+            if entry.model_source is source
+        ),
+        None,
+    )
+
+
+# The Model source provider words this cache downloads;
+# scripts/recipes/platform-features publishes them to recipes CI.
+MODEL_SOURCE_PROVIDERS = frozenset(
+    source_provider_word(entry.model_source)
+    for entry in PROVIDERS.values()
+    if entry.model_source is not None
+)
 
 
 def source_is_repository(kind: str) -> bool:

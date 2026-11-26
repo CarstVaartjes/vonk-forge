@@ -22,6 +22,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts import ModelDisplay, published_json
+from vonk_forge_contracts.unrecognised import read_context
 
 from cluster_profiles import cli
 from cluster_profiles.cli_json_contract import (
@@ -40,6 +42,7 @@ from vonk_control.model_primitives import Base
 from vonk_control.operation_api.durable import durable_operation_services
 
 from .conftest import load_tools_module
+from .display_fixtures import display_of_model
 from .test_catalog_entities import _model, _recipe
 from .test_catalog_head_reads import _library, _publish, catalog  # noqa: F401
 from .test_fleet_profile_api import _client as _profile_api
@@ -411,6 +414,44 @@ def test_schema_version_is_required_and_owned_by_one_model() -> None:
             assert "schema_version" in member.get("required", []), kind
     # The review's number lives on its Controller model alone.
     assert DocumentKind.PROFILE_REVIEW not in DOCUMENT_VERSIONS
+
+
+def test_a_newer_capability_reaches_vonkctl_by_name(
+    catalog,  # noqa: F811
+    tmp_path,
+    capsys,
+) -> None:
+    """A capability this contract does not list validates against the published
+    schema and is printed as sent."""
+
+    model = _model()
+    _publish(catalog, model)
+    first = _publish(catalog, _recipe(model))
+    display = display_of_model(model)
+    shared = published_json(display)
+    shared["capabilities"] = [*map(str, display.capabilities), "zz-new-capability"]
+    assert not catalog.apply_displays(
+        [ModelDisplay.model_validate(shared, context=read_context())]
+    )
+    app = FastAPI()
+    install_library_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("test", "administrator")),
+        projection=_library(catalog),
+    )
+    client = _control_client(TestClient(app), tmp_path, "synthetic-token")
+    detail = _published(
+        client, capsys, set(), "recipe", "detail", f"{first.publisher}/{first.slug}"
+    )
+    [model_entry] = detail["model_documents"]
+    assert "zz-new-capability" in model_entry["model_display"]["capabilities"]
+
+
+def test_capability_names_are_open_in_the_published_schema() -> None:
+    """A capability a newer contract adds never changes ``schemas/vonkctl``."""
+
+    shared = json.loads((SCHEMAS / _contract.DEFINITIONS_FILENAME).read_text())
+    assert "enum" not in shared["$defs"]["CapabilityName"]
 
 
 def test_published_schema_files_are_the_models_current_export() -> None:

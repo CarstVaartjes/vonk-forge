@@ -42,7 +42,7 @@ fn removed(host: &Host, target: &str) -> Option<usize> {
         .lock()
         .unwrap()
         .iter()
-        .position(|call| call == &["rm".to_owned(), id.clone()])
+        .position(|call| call == &["rm".to_owned(), "--volumes".to_owned(), id.clone()])
 }
 
 #[test]

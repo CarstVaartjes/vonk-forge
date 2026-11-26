@@ -564,7 +564,12 @@ jobs:
       queue: max
     permissions:
       actions: read
+      # Keyless attestation of the accepted recipe-tools bundle: recipes CI
+      # verifies it with `gh attestation verify --signer-workflow` naming this
+      # file, so the attesting job stays in this workflow.
+      attestations: write
       contents: read
+      id-token: write
       packages: write
     steps:
       - name: Check out exact promotion tooling
@@ -585,6 +590,50 @@ jobs:
         with:
           name: installer-acceptance-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
           path: ${{ runner.temp }}/acceptance
+
+      - name: Download the accepted recipe-tools bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: recipe-tools-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
+          path: ${{ runner.temp }}/recipe-tools
+
+      # The attestation binds the bundle to this run's source and ref, which
+      # recipes CI checks against the pointer (--source-digest, --source-ref).
+      # Revalidate the source authority first, as the agent package does
+      # before its attestation, so a refused source is never attested.
+      - name: Revalidate source before recipe-tools attestation
+        shell: bash
+        env:
+          CHANNEL: ${{ needs.authority.outputs.channel }}
+          SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          AUTHORITY_REF: ${{ needs.authority.outputs.authority_ref }}
+          TAG_OID: ${{ needs.authority.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$AUTHORITY_REF" = "$GITHUB_REF"
+          test -f "$RUNNER_TEMP/recipe-tools/recipe-tools.tar.gz"
+          case "$CHANNEL" in
+            dev)
+              test "$GITHUB_REF" = refs/heads/main
+              git fetch --force --no-tags origin \
+                +refs/heads/main:refs/remotes/origin/main
+              git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
+              ;;
+            stable)
+              scripts/release/verify-release-tag-authority \
+                "${AUTHORITY_REF#refs/tags/}" "$TAG_OID" "$SOURCE_SHA"
+              ;;
+            *)
+              exit 64
+              ;;
+          esac
+
+      - name: Attest the accepted recipe-tools bundle
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/recipe-tools/recipe-tools.tar.gz
 
       - name: Install publication clients
         shell: bash
@@ -624,6 +673,7 @@ jobs:
             "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" \
             "r2:$R2_INSTALLER_PUBLIC_BUCKET" \
             "$CHANNEL" "$AUTHORITY_REF" "$SOURCE_SHA" "$TAG_OID" \
+            "$RUNNER_TEMP/recipe-tools/recipe-tools.tar.gz" \
             | tee "$RUNNER_TEMP/promotion-receipt.jsonl"
 
       - name: Upload promotion receipt

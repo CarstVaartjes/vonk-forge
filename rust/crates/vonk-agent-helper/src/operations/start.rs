@@ -60,6 +60,13 @@ fn launch_shared_memory_as_declared(arguments: &mut [String], image_index: usize
 /// helper upgrade in either order.
 const WORKLOAD_MEMLOCK: [&str; 2] = ["--ulimit", vonk_agent_protocol::WORKLOAD_MEMLOCK_ULIMIT];
 
+/// Every workload starts in `/tmp`, the tmpfs validation requires under the
+/// read-only rootfs. An adapted image sets the same `WORKDIR`; an image the
+/// platform did not adapt keeps whatever its creator set, so the launch names
+/// it. Helper-owned and outside the run identity digest: a run started before
+/// this option is still adopted as is.
+const WORKLOAD_WORKDIR: [&str; 2] = ["--workdir", "/tmp"];
+
 /// The exit a job reports when the helper itself ended it -- at its deadline or
 /// on the Controller's cancellation (the `timeout(1)` convention). Never a
 /// stand-in for an exit that was not observed.
@@ -244,6 +251,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // passwd adaptation. Keep files durable for delayed Docker starts.
         let identity_mounts = self.runtime_identity_mounts(validated.uid, validated.gid)?;
         let mut launch_options: Vec<String> = WORKLOAD_MEMLOCK.map(str::to_owned).into();
+        launch_options.extend(WORKLOAD_WORKDIR.map(str::to_owned));
         launch_options.extend([
             WORKLOAD_OOM_SCORE_ADJ.to_owned(),
             "--label".to_owned(),

@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Print the recipe discriminator values this platform executes, as JSON.
+
+Recipes CI reads this document from the signed recipe-tools bundle
+(``platform-features.json``) to refuse a recipe that uses a value the platform
+of that channel cannot run. Every set comes from the table the platform
+dispatches on, never from a list typed here and never from the contracts
+wheel's vocabularies, so a contracts lock refresh cannot declare support the
+code does not have:
+
+* ``serving_kinds``: the HTTP check kinds ``cluster_profiles.serving_execution``
+  evaluates, plus ``<adapter>.output`` for each job interface adapter (every
+  adapter not published through the gateway), whose check runs as an artifact
+  job through that adapter;
+* ``effort_kinds``: the reasoning-effort shapes the gateway renders;
+* ``api_modes``: the route modes the gateway renders;
+* ``adapters``: the interface adapters the Controller executes;
+* ``source_providers``: the Model ``source.provider`` words the model cache
+  downloads (``huggingface`` stands for a source with no provider word).
+
+Run it in the locked workspace environment:
+``uv run --project control --frozen scripts/recipes/platform-features``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Any, TypedDict, get_args
+
+from cluster_profiles.serving_execution import HTTP_KINDS
+from vonk_control.gateway.litellm import LiteLlmModelInfo, VonkReasoningEffort
+from vonk_control.interface_adapters import INTERFACE_ADAPTERS
+from vonk_control.model_cache.providers import MODEL_SOURCE_PROVIDERS
+
+ROOT = Path(__file__).resolve().parents[2]
+LOCK = ROOT / "control/packaging/public-contracts.lock"
+_LOCK_PACKAGE = re.compile(
+    r'^package\s*=\s*"vonk-forge-public-contracts==([0-9]+)\.([0-9]+)\.([0-9]+)"\s*$',
+    re.MULTILINE,
+)
+
+
+class PlatformFeatures(TypedDict):
+    """``platform-features.json``: what recipes CI reads from the bundle."""
+
+    contracts_version: str
+    contract_major: int
+    serving_kinds: list[str]
+    effort_kinds: list[str]
+    api_modes: list[str]
+    adapters: list[str]
+    source_providers: list[str]
+
+
+def _literal_words(annotation: Any) -> list[str]:
+    return sorted(str(word) for word in get_args(annotation))
+
+
+def contracts_version(lock_text: str) -> tuple[str, int]:
+    """The locked contracts version and its major (pure)."""
+
+    found = _LOCK_PACKAGE.findall(lock_text)
+    if len(found) != 1:
+        raise ValueError("the lock must pin vonk-forge-public-contracts exactly once")
+    return ".".join(found[0]), int(found[0][0])
+
+
+def features(lock_text: str) -> PlatformFeatures:
+    version, major = contracts_version(lock_text)
+    job_adapters = [
+        name
+        for name, adapter in INTERFACE_ADAPTERS.items()
+        if adapter.publication != "litellm"
+    ]
+    efforts = get_args(get_args(VonkReasoningEffort)[0])
+    return PlatformFeatures(
+        contracts_version=version,
+        contract_major=major,
+        serving_kinds=sorted(
+            [*HTTP_KINDS, *(f"{name}.output" for name in job_adapters)]
+        ),
+        effort_kinds=sorted(
+            word
+            for shape in efforts
+            for word in _literal_words(shape.model_fields["kind"].annotation)
+        ),
+        api_modes=_literal_words(LiteLlmModelInfo.model_fields["mode"].annotation),
+        adapters=sorted(INTERFACE_ADAPTERS),
+        source_providers=sorted(MODEL_SOURCE_PROVIDERS),
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--lock", type=Path, default=LOCK)
+    arguments = parser.parse_args()
+    document = features(arguments.lock.read_text(encoding="utf-8"))
+    json.dump(document, sys.stdout, indent=2, sort_keys=True)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

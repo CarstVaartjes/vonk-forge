@@ -44,8 +44,16 @@ never breaks the catalog; only integrity edges refuse it:
   `recipe_package.schema_incompatible`; any other envelope fault is
   `recipe_package.response_invalid`. A document that differs from its digest is
   `recipe_package.digest_mismatch`. Each refuses the whole index.
-- An entry whose document, package, digests or source path this release cannot
-  read is skipped. It is listed under the sync-status `problems`
+- An entry whose document uses a word this release cannot keep (an executed
+  discriminator a newer minor added, such as a new document, settings or
+  serving kind) needs a newer platform. It is withheld with a note (`index
+  recipes entry <name> is withheld: <field> needs a newer platform`); the rest
+  applies and the sync stays current. The view is incomplete, so retraction
+  pauses: the recipe's older revision stays offered, a saved profile naming it
+  keeps resolving and its model files keep their protection. A Controller on the
+  newer contract offers it on its first sync.
+- Any other entry whose document, package, digests or source path this release
+  cannot read is skipped. It is listed under the sync-status `problems`
   (`recipe_package.document_incompatible`, `index recipes entry <name> is
   skipped: <field> is <reason>`), counts in `skipped_count`, makes the sync
   partial and pauses retraction; the rest applies.
@@ -57,13 +65,18 @@ never breaks the catalog; only integrity edges refuse it:
   N entries (...)`); a note neither counts as skipped nor makes the sync
   partial.
 - A word a newer minor added (a capability, status or API format) is kept by
-  the reader; the Controller reads its block without it, so no unknown word is
-  stored or served, and lists one note per word (`index recipes
-  api.api.endpoints word '<word>' is unknown to this Controller; read without
-  it for N entries (...)`):
-  - a word in a list (an endpoint, format, tool choice, capability, modality,
-    qualification change or quality note), and one in an entry's own list
-    (`served_capabilities`), is left out; the rest of the block
+  the reader, and the Controller lists one note per word (`index recipes
+  api.api.endpoints word '<word>' is unknown to this Controller for N entries
+  (...)`):
+  - a capability (a Model display's `capabilities` and an entry's
+    `served_capabilities`) is kept by its name when it is at most 64
+    characters long, and any other is left out. It is stored and served as its name, survives a restart, and the
+    Library page and vonkctl label it from the release's own vocabulary
+    (`GET /api/library/vocabulary`), showing the name when the vocabulary does
+    not list it. A new capability therefore never needs a Controller or
+    vonkctl release;
+  - any other word in a list (an endpoint, format, tool choice, modality,
+    qualification change or quality note) is left out; the rest of the block
     applies, so `model_info` still lists the known endpoints;
   - a scalar word becomes a cautious neutral value: a published status reads
     `Not yet verified` (never Working), an unverified reason and a recorded
@@ -75,7 +88,9 @@ never breaks the catalog; only integrity edges refuse it:
     choice;
   - only when nothing optional encloses the word, or the block is invalid
     without it, is the block withheld, with one more note (`index recipes api
-    withheld for N entries (...): it cannot stand without an unknown word`).
+    withheld for N entries (...): it cannot stand without an unknown word`;
+    any other failure to rebuild a block withholds only that block, and the
+    note names the failure).
     That is the case for an unknown reasoning-switch placement, an unknown
     `remaining` context word in the default output tokens, and a Model display
     whose only modality is unknown. A withheld display leaves the stored one

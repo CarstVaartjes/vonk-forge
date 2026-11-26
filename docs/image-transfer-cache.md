@@ -10,9 +10,10 @@ the recipe library builds each distinct image on a GitHub-hosted ARM64 runner
 with the same build flags and platform adaptation stage a Spark uses, pushes
 it to GHCR (public), and pins the pushed manifest digest beside the recipe in
 the signed catalog index (`prebuilt_image: {reference, build_key}`). The
-`build_key` names the executable build inputs (source bundle, Dockerfile,
-pinned base images, build options and capabilities, runtime adapter); recipes
-that build the same adapter directory the same way share one image.
+pinned manifest digest is the image's identity. The `build_key` is the recipes
+CI's own handle for finding or skipping a build; the Controller never derives
+or reads it (the `prebuilt-key` added-line guard), so a change to how recipes
+CI keys its builds never re-plans an installed revision.
 
 Runtime images live in one content-addressed OCI layout in
 `image-cache/oci/` on the Controller. Images share layers there: a recipe
@@ -23,8 +24,10 @@ that digest's hex (its address in the layout), `image_bytes` is the size of
 its layers and the compiled plan's `local_image_config_id` is its config
 digest.
 
-Build planning prefers the prebuilt image when the Controller derives the same
-key for the revision. The plan then admits no Spark inventory, disk or memory,
+Build planning uses the prebuilt image whenever the signed catalog pins one
+for the revision's content digest (catalog sync records each pin per exact
+`(publisher, slug, content digest)`, so a pin never follows a slug onto other
+recipe bytes). The plan then admits no Spark inventory, disk or memory,
 and its `recipe.build.v1` job gets no Spark operation: the worker's prebuilt
 importer copies the pinned digest into the layout with
 `skopeo copy --preserve-digests`. Skopeo fetches only the blobs the layout
@@ -36,13 +39,10 @@ loop under a renewable lease, so a restarted worker resumes it; cancelling the
 build discards a late copy. One image is written into the layout at a time; a
 copy that finds the store busy hands its job back and the next tick retries it.
 
-A Spark build remains the fallback: when the catalog pins no image, when the
-image was built from other inputs (for example under a different platform
-adapter), or when this Controller already failed to copy that digest. The
-fallback is never silent. Every plan records a named decision in the build's
-policy report (`prebuilt_decision`) and logs it: `prebuilt.used`,
-`prebuilt.not_pinned`, `prebuilt.build_key_mismatch` (with the catalog key and
-the Controller key) or `prebuilt.pull_failed_recently`. The image preparation
+A Spark build remains the fallback when the catalog pins no image for the
+content. The fallback is never silent. Every plan records a named decision in
+the build's policy report (`prebuilt_decision`) and logs it: `prebuilt.used` or
+`prebuilt.not_pinned`. The image preparation
 operation shows the same code as a blocker beside its build wait, and a wait on
 a prebuilt pull reads "waiting for the Controller to pull prebuilt image ..."
 instead of naming the Spark, which is only the nominal builder of that job. A failed
@@ -75,8 +75,14 @@ agent identities. For one pull the agent serves those routes on a loopback port
 through its authenticated client (Docker treats loopback registries as plain
 HTTP); Docker fetches only the layers it lacks and verifies each against the
 manifest, and the helper's `image-pull` action requires the pulled image to
-carry the pinned identity before tagging it
-`localhost/vonk/compiled-runtime-<manifest hex>` and writing its receipt. A
+be the pinned config for linux/arm64 before tagging it
+`localhost/vonk/compiled-runtime-<manifest hex>` and writing its receipt. Image labels and the image's own `USER` never authorize a pull or a start: the
+signed plan's digest does, and the launch forces the plan's numeric user, a
+read-only rootfs with a `/tmp` tmpfs, `--cap-drop=ALL` and
+`no-new-privileges`. The helper starts every workload in `/tmp`
+(`--workdir /tmp`, outside the run identity digest), the directory the
+platform adaptation stage sets, so an image built without that stage runs the
+same way. A
 Spark that already holds the image skips the pull. On success the Controller
 records the image as present on that Spark, so the next plan does not
 distribute it again. Distribution progress and per-Spark readiness are reported

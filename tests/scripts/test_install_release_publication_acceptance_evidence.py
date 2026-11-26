@@ -631,6 +631,7 @@ def test_installer_acceptance_signer_requires_current_gate_report_set() -> None:
         "spark-upgrade-acceptance",
         "spark-recipe-refresh",
         "match-pr-acceptance",
+        "recipe-tools-acceptance",
     ]
     # The upgrade-carry and recipe-refresh lanes gate signing: a candidate
     # that drops a serving workload across the upgrade, or cannot refresh a

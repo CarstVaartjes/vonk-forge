@@ -623,7 +623,7 @@ provenance comparisons, security refusals outside ingress owners, unbounded wait
 read refusals, a captured Docker listing or ranged inspection in the helper (read it line by line),
 anti-principle
 test assertions, vonkctl tests that assert wording in printed output (`printed-output`), short wall-clock limits on test work, and the existing
-coordination syntax violations. The `job-limits` guard refuses an added `MAX_INPUT_*`, `MAX_OUTPUT_*` or `MAX_TIMEOUT_SECONDS` assignment outside `agent_protocol/src/vonk_agent_protocol/job_limits.py`, the one owner of artifact-job limits. The retry guard also rejects attempt/repetition
+coordination syntax violations. The `job-limits` guard refuses an added `MAX_INPUT_*`, `MAX_OUTPUT_*` or `MAX_TIMEOUT_SECONDS` assignment outside `agent_protocol/src/vonk_agent_protocol/job_limits.py`, the one owner of artifact-job limits. The `prebuilt-key` guard refuses an added `executable_build_key(` call or `build_key` read (attribute, subscript or `.get`) in `control/src/` outside `control/src/vonk_control/catalog/` ingest: the Controller trusts the signed pin's digest. The retry guard also rejects attempt/repetition
 comparisons that end standing intent or remove its next action; explicit
 cancellation and request-local retries remain valid. A broad handler that parks
 or defers work must consult `disposition()` or `is_definite()` first
@@ -862,12 +862,15 @@ rebinds them. A moved test keeps its body, so the per-test time budget does not 
 ### Cross-repo nightly
 
 Every other lane pins `vonk-forge-recipes` to a reviewed revision.
-`.github/workflows/cross-repo-nightly.yml` runs nightly (and on demand) with
-`main` of vonk-forge and `main` of vonk-forge-recipes and runs the recipe
-validator that `validate-recipe-library.yml` runs. It only reads, and a failed
-job is the alarm; the fix is a pin move or a contract fix in the repository that
-drifted, never a gate on unrelated pull requests. The recipes repository owns
-its `platform_ref` pin (see `docs/runbooks/supply-chain.md`).
+`.github/workflows/cross-repo-nightly.yml` runs nightly (and on demand) and
+validates `main` of vonk-forge-recipes with the published dev recipe-tools
+bundle, exactly as recipes CI does: it fetches `artifacts/dev/recipe-tools.json`,
+checks the bundle's digest and its keyless attestation from
+`installer-publication.yml`, and runs the bundle's
+`scripts/recipes/validate-recipe-checkout`. It only reads, and a failed job is
+the alarm; the fix is a contract fix in the repository that drifted, never a
+gate on unrelated pull requests. The bundle is described in
+[Recipe-tools bundle](runbooks/platform-release-publication.md#recipe-tools-bundle).
 
 ### Fuzzing
 
@@ -961,7 +964,10 @@ pruner reads the package versions one page at a time, each request with its own
 timeout; a timeout, 5xx, rate limit or connection error skips only that work
 with a notice and the next weekly run continues, while any other failure fails.
 It reads every page on every run (newest first with no cursor, a page cap would
-strand the oldest caches), and a delete of an already-gone version counts as done. The mirror job copies with
+strand the oldest caches), and a delete of an already-gone version counts as done.
+Deletes run serially and stop starting after 7 of the job's 10 minutes
+(`RUN_BUDGET_SECONDS`) with a notice of how many closed caches remain, so a large
+backlog ends green and the next weekly run continues. The mirror job copies with
 the lock's pinned skopeo image (`build_bases.skopeo`), not the runner's apt skopeo,
 which cannot keep some OCI indexes digest-exact.
 

@@ -253,8 +253,18 @@ text of this section:
   acceptance are distinct claims; record exact revisions and remaining gaps.
 - The coordination scanner detects defined syntax patterns only. New violations
   fail only on added lines; there are no debt counts or ledgers to update.
-- `cross-repo-nightly.yml` validates the recipes `main` library with the platform
-  `main` validator every night (a red run is the drift alarm); `fuzz.yml` fuzzes
+- Recipes CI validates with the signed per-channel recipe-tools bundle
+  (`scripts/recipes/build-recipe-tools-bundle`, entry point
+  `scripts/recipes/validate-recipe-checkout`). Its `platform-features.json`
+  comes only from the tables the platform executes (`scripts/recipes/platform-features`;
+  a serving kind, adapter or source provider without a handler fails
+  `control/tests/test_platform_features.py`); never type a feature value by hand.
+  Recipes CI addresses the bundle's `scripts/recipes/validate-recipe-checkout`,
+  `platform-features.json` and `.tool-versions` by path: move them only together with the recipes reader. Release acceptance runs the extracted
+  bundle against the pinned library, and promotion writes its pointer last; see
+  [Recipe-tools bundle](docs/runbooks/platform-release-publication.md#recipe-tools-bundle).
+- `cross-repo-nightly.yml` validates the recipes `main` library with the published
+  dev recipe-tools bundle every night (a red run is the drift alarm); `fuzz.yml` fuzzes
   the parsers in `rust/fuzz` (the fix adds one case to the parser's existing test).
 
 ## Current contracts only: no legacy compatibility
@@ -331,6 +341,12 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
 
 ## Recipe-library checks
 
+A recipe image is identified by its manifest digest: the Controller uses the
+signed catalog's pin for a revision's content digest and never derives or reads
+its `build_key` (the `prebuilt-key` guard), and the helper authorizes by the
+signed digest, never by an image label or the image's `USER`. See
+[Profile cache contract](docs/agent-rules.md#profile-cache-contract).
+
 Build and validate the sibling recipe checkout against the exact platform
 worktree using [the recipe-library procedure](docs/operators/recipe-library.md#validate-a-checkout-locally)
 before calling its contract installable. Record both commits, the recipe digest,
@@ -346,7 +362,11 @@ release's own words: the Controller stores them at sync and serves
 `GET /api/library/vocabulary`, and the Library page and `vonkctl model|recipe
 library|detail` render them from there. Never type one in a client; a name the
 release does not list shows as the name, and a missing value is `Not reported`
-in both clients.
+in both clients. A capability is served as its name (`LibraryModelDisplay`, the
+open `CapabilityName` in `schemas/vonkctl`), so the sync keeps one a newer
+contract minor added and a new capability needs no Controller or vonkctl
+release; an executed word it cannot keep withholds only that entry, with a
+note, and pauses retraction so its older revision stays offered.
 
 ## Deployment and fleet safety
 

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Build and validate one recipe checkout with this platform's validator.
+#
+# The entry point of the recipe-tools bundle: recipes CI, the forge release
+# acceptance and the cross-repo nightly all run exactly this, from an extracted
+# bundle (or a forge checkout). It builds the checkout's catalog index and
+# packages in place, then runs the validator in this platform's locked
+# environment with the checkout's own contracts. It needs uv on PATH; a
+# checkout without git history passes its commit and commit time.
+set -euo pipefail
+
+if [[ $# != 1 && $# != 3 ]]; then
+  echo "usage: validate-recipe-checkout LIBRARY_ROOT [SOURCE_COMMIT SOURCE_DATE_EPOCH]" >&2
+  exit 64
+fi
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
+library=$(cd "$1" && pwd -P)
+shift
+"$root/scripts/build-recipe-library" "$library" "$@"
+exec uv run --project "$root/control" --frozen --no-dev \
+  --with-editable "$library/contracts" \
+  "$root/scripts/recipes/validate-recipe-library" \
+  --library-root "$library" --platform-root "$root" --json

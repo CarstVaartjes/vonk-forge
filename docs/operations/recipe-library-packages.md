@@ -37,8 +37,9 @@ package reader's `prepare` hook validates all packages in a candidate release
 before the managed catalog sync writes its first revision or link. An
 integrity or transport failure rejects the whole candidate. The index is read
 through the contract's `read_catalog`: an entry it cannot read is skipped on
-its own and reported as a `recipe_package.document_incompatible` problem, and
-an unreadable optional block or an unknown word is a note
+its own and reported as a `recipe_package.document_incompatible` problem; an
+entry that needs a newer platform (an executed word it cannot keep) is withheld
+with a note; and an unreadable optional block or an unknown word is a note
 (see [the operator guide](../operators/recipe-library.md)); the rest of the
 release still applies. When a release of a newer contract major is published than this
 Controller reads, the sync result carries one note, code

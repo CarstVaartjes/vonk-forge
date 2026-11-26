@@ -67,6 +67,34 @@ def test_only_closed_caches_are_deleted_and_a_slow_page_waits_a_week() -> None:
     assert deleted == [f"{PACKAGE}/versions/2", f"{PACKAGE}/versions/6"]
 
 
+def test_a_spent_budget_stops_deletes_and_reports_the_rest(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Catches a pruner that keeps deleting past its time budget (the job is
+    then cancelled red) or exits non-zero or silently when it stops early."""
+    module = _module()
+    deleted: list[str] = []
+
+    def api(*args: str) -> str:
+        endpoint = args[-1]
+        if args[:2] == ("--method", "DELETE"):
+            deleted.append(endpoint)
+            return ""
+        if "/pulls?" in endpoint:
+            return ""
+        if endpoint == PACKAGE:
+            return json.dumps({"version_count": 5})
+        return json.dumps([_version(i, f"buildcache-pr-{i}") for i in range(1, 6)])
+
+    # The clock reads the start, then once before each delete: two fit the budget.
+    ticks = iter([0, 0, 1, module.RUN_BUDGET_SECONDS, module.RUN_BUDGET_SECONDS])
+    assert module.prune(api, "owner", "owner/repo", clock=lambda: next(ticks)) == 0
+    assert deleted == [f"{PACKAGE}/versions/1", f"{PACKAGE}/versions/2"]
+    assert "::notice::time budget spent; 3 closed caches remain" in (
+        capsys.readouterr().out
+    )
+
+
 @pytest.mark.parametrize(
     "stderr",
     ["gh: Not Found (HTTP 404)", "gh: To use GitHub CLI, set the GH_TOKEN variable"],
