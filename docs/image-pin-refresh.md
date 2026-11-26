@@ -193,6 +193,23 @@ rather than treating it as a failure. `unverified` means the registry could not
 be read at all, which is a network condition and never a reason to block a
 merge.
 
+## Regenerate the LiteLLM surface with every LiteLLM bump
+
+`deploy/compose/litellm/surface.json` records the providers and the
+`litellm_params` and `model_info` fields the pinned LiteLLM accepts, and the pin's
+digest. After changing `build_bases.litellm`, regenerate it from the new image
+and commit the result:
+
+```bash
+image=$(python3 -c 'import json; print(json.load(open("deploy/compose/images.lock.json"))["build_bases"]["litellm"])')
+docker run --rm -i -e "VONK_LITELLM_IMAGE_DIGEST=${image##*@}" \
+  --entrypoint python "$image" - < tools/litellm_surface.py \
+  > deploy/compose/litellm/surface.json
+```
+
+CI regenerates it from the pinned image and fails on any difference, and a unit
+test fails while the surface's digest differs from `images.lock.json`.
+
 ## Patched release images are a different flow
 
 Bumping `build_bases.litellm` changes only the upstream

@@ -6,6 +6,8 @@ from vonk_agent_protocol.wire_model import WireEnum
 class ProfileReasonCode(WireEnum):
     """Reasons a fleet profile cannot be applied or is waiting."""
 
+    #: A model name an external model serves; the profile cannot take it.
+    ALIAS_TAKEN = "profile.alias_taken"
     ADMISSION_BUSY = "profile.admission_busy"
     ADMISSION_DEFECT = "profile.admission_defect"
     ADMISSION_EFFECT_BUSY = "profile.admission_effect_busy"

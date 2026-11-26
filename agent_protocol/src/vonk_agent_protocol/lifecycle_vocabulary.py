@@ -57,6 +57,7 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentProfileState,
     EnrollmentPurpose,
     EnrollmentRecordState,
+    ExternalPublicationState,
     GatewayRouteState,
     InstallationNodeState,
     InstallationState,
@@ -716,6 +717,7 @@ class LifecycleVocabulary(WireModel):
     run_state: RunState
     route_state: RouteState
     route_publication_state: RoutePublicationState
+    external_publication_state: ExternalPublicationState
     certificate_state: CertificateState
     enrollment_grant_state: EnrollmentGrantState
     enrollment_record_state: EnrollmentRecordState

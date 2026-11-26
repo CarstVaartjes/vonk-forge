@@ -60,7 +60,7 @@ target-version = "py314"
 # LiteLLM image's Python), scripts and tests/nodes that a runner's or host's
 # system python3 starts, the stdlib-only tools module such scripts import, and
 # tests/acceptance, whose sources the Spark lane parses with the runner's 3.12.
-per-file-target-version = { "agent_protocol/**" = "py312", "deploy/**" = "py313", "scripts/**" = "py313", "tests/nodes/**" = "py313", "tests/acceptance/**" = "py313", "tools/generated_contracts.py" = "py313" }
+per-file-target-version = { "agent_protocol/**" = "py312", "deploy/**" = "py313", "scripts/**" = "py313", "tests/nodes/**" = "py313", "tests/acceptance/**" = "py313", "tools/generated_contracts.py" = "py313", "tools/litellm_surface.py" = "py313" }
 # Every extensionless executable in scripts/ and bin/ is Python unless excluded
 # here by name: a new shell script that is not listed fails Ruff loudly (a parse
 # error) instead of a new Python script being skipped silently.
