@@ -149,9 +149,12 @@ what is missing; a failure is a warning, and the tests that read those files fai
 ### Fresh checkout build and contract smoke checks
 
 The exact uv release is owned by `.tool-versions`; Actions and container builds
-read that file. Each project declares an equal `tool.uv.required-version` floor,
-so newer local installations remain usable. The single-source guard rejects
-independent pins and floors that differ from the CI release. A uv bump also refreshes the
+read that file. Each project declares the same `tool.uv.required-version` floor, at or below
+the CI release, so newer local installations remain usable. The floor stays at
+the oldest uv that reads the lock (0.13.7, Dependabot's bundled uv): raising it
+past that stops Dependabot's Python updates (`tool_version_not_supported`). Raise
+it only when the lock format needs it. The single-source guard rejects
+independent pins, unequal floors and floors above the CI release. A uv bump also refreshes the
 `deploy/compose/uv-bootstrap.lock` wheel hashes. Container bootstrap
 installs use hash-locked PyPI wheels, including uv with its owner-derived version.
 
