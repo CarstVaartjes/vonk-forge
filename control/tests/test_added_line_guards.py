@@ -4400,7 +4400,7 @@ def test_a_controller_prebuilt_key_read_is_flagged() -> None:
     path = "control/src/vonk_control/recipe_builds/planning.py"
     for source in (
         "key = executable_build_key(identity)\n",
-        "if image.build_key != expected:\n",
+        "stale = image.build_key != expected\n",
     ):
         assert check_source(path, source, {1}, modes=("prebuilt-key",))
     assert not check_source(
