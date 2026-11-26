@@ -61,7 +61,7 @@ jobs:
           printf '#!/bin/sh\nexec docker run --rm --volume "$HOME/.docker/config.json:/auth.json:ro" --env REGISTRY_AUTH_FILE=/auth.json %s "$@"\n' \
             "$skopeo_image" >"$skopeo"
           chmod +x "$skopeo"
-          scripts/ci/retry-dependency-fetch "$skopeo" copy --all --preserve-digests \
+          scripts/ci/retry-dependency-fetch "$RUNNER_TEMP/bin/skopeo" copy --all --preserve-digests \
             "docker://${name}@${digest}" \
             "docker://ghcr.io/${owner}/ci-mirror/${name}:${digest#sha256:}"
 
