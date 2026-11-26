@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+PYTHON = (ROOT / ".python-version").read_text().strip()
 
 
 def test_native_bootstraps_bound_and_retry_every_download() -> None:
@@ -130,7 +131,7 @@ def _run_bootstrap(
         commands,
         "uv",
         '[ "$1" = run ] && [ "$2" = --isolated ] && [ "$3" = --no-project ]\n'
-        '[ "$4" = --python ] && [ "$5" = 3.15 ] && [ "$6" = --with ]\n'
+        f'[ "$4" = --python ] && [ "$5" = {PYTHON} ] && [ "$6" = --with ]\n'
         'wheel=$7; [ -f "$wheel" ]; case "$wheel" in *.whl) ;; *) exit 98 ;; esac\n'
         'shift 7; [ "$1" = vonk-nas-setup ]; shift\nexec sh "$wheel" "$@"\n',
     )

@@ -266,8 +266,10 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
   file-level `# ruff: noqa`, or a per-file ignore; the per-file entries that
   exist are guard-blocked sites awaiting their class follow-up.
 - Python code runs on 3.15 (`.python-version` is the single owner; a guard
-  checks every CI/script spelling against it). Ruff stays at py314 on purpose:
-  py314 rejects PEP 810 `lazy import` as invalid syntax, enforcing the
+  checks the spellings in `.github/`, `install/`, `scripts/`, `src/` and the
+  Controller/LiteLLM images against it, allowing 3.12 only at the adapter-venv
+  sites). Ruff stays at py314 on purpose: py314 rejects PEP 810 `lazy import` as
+  invalid syntax, enforcing the
   no-lazy-imports rule. A file another interpreter runs (a container image's
   Python, a runner's or host's `python3`), and every repository module such a
   file imports, sits under a py313/py312 `per-file-target-version` entry in

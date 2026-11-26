@@ -607,18 +607,29 @@ PYTHON = (ROOT / ".python-version").read_text().strip()
 def test_python_version_has_one_owner() -> None:
     """`.python-version` owns the interpreter; every spelling follows it.
 
-    3.12 is the adapter-image interpreter the protocol wheel is proven on."""
+    3.12 is allowed only at the adapter-image venv sites the protocol wheel is
+    proven on."""
     spelled = re.compile(
-        r"python-version: \"(\d+\.\d+)\"|--python (\d+\.\d+)|python:(\d+\.\d+)-slim"
+        r"--python[= ][\"']?(\d+\.\d+)"
+        r"|\"--python\",\s*\"(\d+\.\d+)\""
+        r"|python-version: [\"']?(\d+\.\d+)"
+        r"|python:(\d+\.\d+)(?:\.\d+)?-"
+        r"|PYTHON_VERSION=(\d+\.\d+)"
     )
+    adapter_venv = {".github/workflows/ci.yml", "scripts/test-changed"}
+    surfaces = {
+        "control/Dockerfile",
+        "deploy/compose/litellm/Dockerfile",
+        "deploy/compose/images.lock.json",
+    }
     wrong = [
         f"{path}: {m.group(0)}"
         for path in tracked_files(ROOT)
-        if path.startswith((".github/", "install/", "scripts/", "control/Dockerfile"))
-        or path
-        in {"deploy/compose/litellm/Dockerfile", "deploy/compose/images.lock.json"}
+        if path.startswith((".github/", "install/", "scripts/", "src/"))
+        or path in surfaces
         for m in spelled.finditer((ROOT / path).read_text(errors="ignore"))
-        if next(g for g in m.groups() if g) not in {PYTHON, "3.12"}
+        if next(g for g in m.groups() if g) != PYTHON
+        and not (path in adapter_venv and m.group(0).endswith("3.12"))
     ]
     assert wrong == []
 

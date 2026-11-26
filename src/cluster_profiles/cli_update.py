@@ -285,6 +285,25 @@ def _signed_release(
     return release, base
 
 
+def _wheel_python_floor(wheel: bytes) -> str:
+    """The verified wheel's own `Requires-Python` floor, as `uv --python` takes it.
+
+    A release that raises its floor installs on that interpreter, so an
+    installed CLI does not need a re-install because the floor moved. A wheel
+    that declares no floor installs on the interpreter the CLI runs on.
+    """
+    with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
+        for name in archive.namelist():
+            if name.endswith(".dist-info/METADATA"):
+                text = archive.read(name).decode("utf-8", "replace")
+                match = re.search(
+                    r"^Requires-Python:\s*>=\s*(\d+\.\d+)", text, re.MULTILINE
+                )
+                if match:
+                    return match.group(1)
+    return f"{sys.version_info.major}.{sys.version_info.minor}"
+
+
 def run_update(
     *,
     channel: str,
@@ -448,7 +467,7 @@ def run_update(
             "install",
             "--force",
             "--python",
-            "3.15",
+            _wheel_python_floor(wheel),
             str(wheel_path),
         ]
         for attempt in range(3):
