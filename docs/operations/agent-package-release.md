@@ -113,6 +113,30 @@ canary row's two Tailscale entries are the whole of that environment's tailnet
 authority; the `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_*` names belong to a
 child tailnet created at run time and are never stored as environment secrets.
 
+Stable releases use three more environments, all restricted to tag `v*`:
+
+| Environment | Variables | Secrets |
+| --- | --- | --- |
+| `agent-release` | `VONK_AGENT_RELEASE_KEY_FINGERPRINT` (equal to `agent-development`) | `VONK_AGENT_RELEASE_PRIVATE_KEY` |
+| `apt-release` | `APT_REPOSITORY_GPG_FINGERPRINT`, `R2_APT_PUBLIC_BUCKET`, `R2_APT_STATE_BUCKET` | `APT_GPG_PASSPHRASE`, `APT_REPOSITORY_GPG_PRIVATE_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
+| `platform-release` | none | none |
+
+Each stable environment carries a deployment policy; the owner is a required
+reviewer (`prevent_self_review` off) on `apt-release` and
+`installer-acceptance-stable`, and nowhere else:
+
+| Environment | Deployment policy |
+| --- | --- |
+| `agent-release`, `apt-release`, `platform-release`, `installer-candidate-stable`, `installer-acceptance-stable` | tag `v*` |
+| `installer-canary-stable` | tag `v*` and branch `main` (manual upgrade-acceptance dispatch) |
+| `installer-promotion-stable` | tag `v*` and branch `main` (the daily refresh runs from `main`) |
+
+`installer-acceptance-stable` and `installer-promotion-stable` hold the same
+`VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT`, the SHA-256 of the DER public key.
+Both canary environments hold the same factory Tailscale client.
+`scripts/release/stable-preflight` checks all of this; see the
+[stable release runbook](../runbooks/stable-release.md).
+
 Set `INSTALLER_PUBLIC_ORIGIN=https://install.vonkforge.ai`. Use one dedicated
 public R2 bucket and a token restricted to object read/write in only that
 bucket. Configure that token independently in candidate and promotion

@@ -6,6 +6,8 @@ Compose file, the portable Python NAS setup wheel, and the native `arm64`
 Spark installer and agent package with checksums, SBOMs, provenance, and
 Sigstore bundles. A signed installer-channel manifest binds those assets to
 the stable curl endpoints.
+The order of work for a release, and for moving a deployment between channels,
+is in the [stable release runbook](stable-release.md).
 The same signed candidate includes a source-stamped `vonkctl` wheel; operators
 [check and install it explicitly](../operators/cli-updates.md).
 
