@@ -339,9 +339,10 @@ def healthy_count() -> int:
 def prove_with_health(client: openai.OpenAI, a: Member, b: Member) -> None:
     wait_until("both members to report healthy", lambda: healthy_count() == 2)
 
-    # Every member unhealthy: the sample says so. What the gateway then does is
-    # recorded, not assumed. TODO: pin the value the first batch CI run prints
-    # here and in docs/architecture-overview.md.
+    # Every member unhealthy: the sample says so, and health-driven cooldown makes
+    # the gateway refuse without reaching a member (observed at v1.106.7: 429).
+    # The exact status is not required: the gap between health passes can let one
+    # request through to one member, which answers 401.
     for member in (a, b):
         member.behaviour = Behaviour.UNAUTHORIZED
     wait_until("both members to report unhealthy", lambda: unhealthy_count() == 2)
@@ -352,6 +353,13 @@ def prove_with_health(client: openai.OpenAI, a: Member, b: Member) -> None:
     print(
         f"ALL_UNHEALTHY_OUTCOME: status={status} members_reached={sum(reached)}",
         flush=True,
+    )
+    check(
+        status != 200, f"an all-unhealthy group answered 200 (observed 429): {reached}"
+    )
+    check(
+        sum(reached) == 0 or (sum(reached) == 1 and status == 401),
+        f"all-unhealthy: status {status}, reached {reached} (observed 429, none reached)",
     )
 
     # Failures end in cooldown exhaustion: an error that never reached a member.
