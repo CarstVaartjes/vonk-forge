@@ -443,7 +443,7 @@ NAS/project setup and admin tooling are Python. The standalone `nas_setup`
 project builds one portable wheel, bundling the canonical protocol source. The
 signed schema-2 release binds `nas-setup-wheel` and the NAS template payload to
 exact digests. The shell entry point verifies both before installed `uv` runs the
-wheel in an isolated Python 3.14 environment. It prepares the same Compose
+wheel in an isolated Python 3.15 environment. It prepares the same Compose
 project on Intel or ARM Linux and macOS; there is no native NAS executable
 matrix or desktop installer. `vonkctl` remains the separate Python admin CLI.
 
@@ -525,9 +525,11 @@ serving one alias and a client key. It asserts that simple-shuffle reaches both
 members, a stream stays on one member, `num_retries: 0` leaves a failed
 member's error with the client (no request reaches two members), a missing
 health sample counts as eligible, and a member that answers again is served
-without manual action. What an all-unhealthy group does is recorded by the
-proof (`ALL_UNHEALTHY_OUTCOME`), as is the status code of cooldown exhaustion
-(`cooldown exhaustion status`); both are pinned here after the first run.
+without manual action. When every member is unhealthy,
+health-driven cooldown makes LiteLLM refuse with 429 without reaching any member
+(observed at v1.106.7; the proof pins "not 200 and no member reached", or one
+member reached answering 401 when a request lands between health passes).
+An all-unhealthy pool therefore refuses requests until a member recovers.
 
 The Compose project keeps PostgreSQL, agent ingress, revision authority,
 and inference networks separate. Only Caddy
@@ -864,6 +866,41 @@ capped at 300 seconds after its oldest admitted observation; observations must
 be at most 120 seconds old when admitted. This covers the permitted transition
 without requiring renewal during the acknowledgement wait. Expiry still denies
 serving, and an expired generation cannot restart its startup budget.
+
+### External models and the alias namespace
+
+An external model is one LiteLLM `model_list` entry that points at a provider
+outside the fleet. Local routes are unchanged: a bundle without external entries
+renders the same bytes as before, so shipping this contract restarts no gateway.
+The tables `gateway_external_deployments` (the operator's desired and the
+applied spec and the publication state; its wait columns arrive with the publisher that redrives them), `gateway_credential_bindings`
+(a binding name and the destinations its secret may reach; never a secret) are additive and are reconciled from the
+models at startup.
+
+- **One rule.** `external_validation.validate_external_entry` accepts one entry
+  or returns every problem with its field path and rule code. A field must be
+  declared in the pinned LiteLLM surface (`deploy/compose/litellm/surface.json`,
+  generated from the pinned image and compared in CI); hooks, file access,
+  proxy-wide settings, client-side credentials, retries, fallbacks and
+  `custom_llm_provider` are refused; a credential is only a reference to an approved binding
+  (`os.environ/VONK_CREDENTIAL_<BINDING>`); every URL is `https` with a public
+  host (a dotless host, a trailing dot, an IPv4 shorthand such as `127.1` and an
+  embedded-IPv4 IPv6 form count as private) unless a binding approves that exact private origin; and the binding must
+  approve every origin and the region of the entry. No submitted secret value is
+  ever repeated in a problem.
+- **One namespace.** A model name decides where a client's data goes, so the
+  names of local runs and external models share one namespace. Nothing locks: a
+  producer asks `alias_owner` who serves it (an external row, an active run, or
+  the selected profile's assignments) and writes; a race is settled by the unique
+  alias of the external row and by the renderer. Local
+  owners replace each other as before (the newest accepted request owns a
+  name); an external owner is never replaced, and an external model is refused a
+  name another owner serves (`alias_taken`). The renderer leaves out an
+  external entry whose alias a local route serves, so the local route wins.
+- **Publication.** The external publication states are `ExternalPublicationState`;
+  the publisher and the credential custody follow in later changes. Every
+  gateway generation restarts LiteLLM, so adding, changing or removing an
+  external model cuts in-flight streams after at most 30 seconds.
 
 ## Scaling and networking
 

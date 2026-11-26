@@ -3,7 +3,7 @@
 These are not Controller messages: each is a small JSON document one Spark
 process writes and a later process (often after a restart or a package upgrade)
 reads back.  They are data classes all the same, so the Pydantic model here is
-the one definition and ``scripts/generate-agent-wire`` generates the Rust type.
+the one definition and ``scripts/dev/generate-agent-wire`` generates the Rust type.
 """
 
 from __future__ import annotations

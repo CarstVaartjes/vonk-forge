@@ -18,7 +18,7 @@ from typing import Any, Self
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts/tailscale-acceptance-tailnet"
+SCRIPT = ROOT / "scripts/ci/tailscale-acceptance-tailnet"
 CHILD_POLICY = {
     "acls": [],
     "autoApprovers": {

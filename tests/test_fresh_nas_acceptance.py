@@ -25,8 +25,8 @@ from vonk_nas_setup.setup import prepare
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tests/acceptance/test_fresh_nas_install.py"
-PAYLOAD_BUILDER = ROOT / "scripts/build-nas-compose-bundle"
-PRODUCTION_RENDERER = ROOT / "scripts/render-production-compose"
+PAYLOAD_BUILDER = ROOT / "scripts/release/build-nas-compose-bundle"
+PRODUCTION_RENDERER = ROOT / "scripts/release/render-production-compose"
 COMPOSE_TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 
 

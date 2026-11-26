@@ -165,7 +165,7 @@ def _structural_counter_tree(tree: ast.AST) -> list[int]:
         if isinstance(node, ast.Name):
             return node.id in contents
         if isinstance(node, ast.DictComp):
-            return reads_source(node.value)
+            return node.value is not None and reads_source(node.value)
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
             return reads_source(node.elt)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):

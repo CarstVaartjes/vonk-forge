@@ -1,7 +1,7 @@
 # Direct ConnectX-7 fabric
 
-The local `scripts/validate_fabric.py` entry point delegates to
-`scripts/fabric_validation/`; its SSH boundary uses the same
+The local `scripts/fleet/validate_fabric.py` entry point delegates to
+`scripts/fleet/fabric_validation/`; its SSH boundary uses the same
 developer-machine transport selection as the repository node tooling: `ssh` on macOS and native
 Linux, `ssh.exe` on WSL when available, and `VONK_SSH_BIN` as an explicit
 override. This applies only to local-to-GPU node commands. The pinned
@@ -203,7 +203,7 @@ site. A fresh cluster uses NVIDIA Sync's generated network inspection and speed
 report; do not install host CUDA, MPI, NCCL, or benchmark source trees merely
 to reproduce this old evidence.
 
-On the existing site, run `scripts/validate-fabric` with `--inventory
+On the existing site, run `scripts/fleet/validate-fabric` with `--inventory
 <operator inventory>/cluster.toml`, both ordered `--expected-node
 <SPARK_NODE_ID>=<INVENTORY_SSH_ALIAS>` bindings, and `--output
 <operator reports>/rdma-nccl.json` from the controller only after the recorded
@@ -230,7 +230,7 @@ trees; it verifies the completed pinned artifacts before testing the fabric.
 Before a source tree is created, run the non-mutating worker-first gate:
 
 ```bash
-scripts/validate-fabric --inventory <operator inventory>/cluster.toml \
+scripts/fleet/validate-fabric --inventory <operator inventory>/cluster.toml \
   --expected-node '<SPARK_1_NODE_ID>=vonk-node-1' \
   --expected-node '<SPARK_2_NODE_ID>=vonk-node-2' \
   --output /tmp/rdma-nccl-preflight.json --nccl-preflight-only

@@ -21,6 +21,7 @@ from vonk_control.gateway.litellm import (
     LiteLlmConfig,
     LiteLlmGeneration,
     LiteLlmPolicy,
+    LocalRouteEntry,
     RouteState,
     ServedModelInfo,
     render_config,
@@ -144,7 +145,11 @@ class AtomicRecipeRoutePublisher:
             )
         except ValueError:
             return None
-        entries = [item for item in runtime.model_list if item.model_name == alias]
+        entries = [
+            item
+            for item in runtime.model_list
+            if isinstance(item, LocalRouteEntry) and item.model_name == alias
+        ]
         if len(entries) != 1:
             return None
         params = entries[0].litellm_params
@@ -193,7 +198,11 @@ class AtomicRecipeRoutePublisher:
         if active is None:
             return ServedModelInfo()
         _, routes, runtime = active
-        info = {item.model_name: item.model_info for item in runtime.model_list}
+        info = {
+            item.model_name: item.model_info
+            for item in runtime.model_list
+            if isinstance(item, LocalRouteEntry)
+        }
         return ServedModelInfo(
             {
                 alias: (run_id, info[alias])

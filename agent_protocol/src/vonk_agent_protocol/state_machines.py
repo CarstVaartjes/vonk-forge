@@ -6,7 +6,7 @@ flight but the *condition of a thing*: an installation on a Spark, an artifact
 distribution assignment, a run and the route that publishes it, a certificate, an
 enrollment grant, a node's model file, a catalog sync, a resource reservation.
 Each has its own closed set of words.  This module is the one definition of them;
-``scripts/export-agent-wire-schema`` publishes them through
+``scripts/dev/export-agent-wire-schema`` publishes them through
 :class:`~vonk_agent_protocol.lifecycle_vocabulary.LifecycleVocabulary` into
 ``wire.json``, and the generators turn that into Rust, OpenAPI and TypeScript.
 The Controller's CHECK constraints, its models and its readers use the enums, and
@@ -84,6 +84,16 @@ class RoutePublicationState(WireEnum):
     PUBLICATION_PENDING = "publication-pending"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class ExternalPublicationState(WireEnum):
+    """Where an external model deployment stands on its way into, and out of, the gateway."""
+
+    PENDING = "pending"
+    PUBLISHED = "published"
+    BLOCKED = "blocked"
+    WITHDRAWING = "withdrawing"
+    WITHDRAWN = "withdrawn"
 
 
 class CertificateState(WireEnum):
@@ -219,6 +229,7 @@ MACHINES: Mapping[str, type[WireEnum]] = {
     "run": RunState,
     "route": RouteState,
     "route-publication": RoutePublicationState,
+    "external-publication": ExternalPublicationState,
     "certificate": CertificateState,
     "enrollment-grant": EnrollmentGrantState,
     "model-file": ModelFileState,
@@ -312,6 +323,7 @@ __all__ = [
     "DistributionAssignmentState",
     "EndpointState",
     "EnrollmentGrantState",
+    "ExternalPublicationState",
     "InstallationNodeState",
     "InstallationState",
     "ModelCacheOperatorStatus",

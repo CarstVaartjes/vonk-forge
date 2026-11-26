@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Local "test what my change touches" (scripts/test changed [--base REF]):
+# the fast guards, then only the test files the diff edits or that import a
+# touched module. Full suites run in batch CI.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+cd "$root"
+
+base=origin/main
+while (($#)); do
+    case "$1" in
+        --base) base=${2:?--base needs a ref}; shift 2 ;;
+        -h|--help) echo "Usage: scripts/test changed [--base REF]"; exit 0 ;;
+        *) echo "Usage: scripts/test changed [--base REF]" >&2; exit 2 ;;
+    esac
+done
+
+status=0
+echo "== guards =="
+scripts/test guards -- -n 2 || status=1
+
+# Committed and working-tree changes since the merge base, plus untracked files.
+patch=$(mktemp "${TMPDIR:-/tmp}/test-changed-patch.XXXXXX")
+selected=$(mktemp "${TMPDIR:-/tmp}/test-changed-files.XXXXXX")
+trap 'rm -f "$patch" "$selected"' EXIT
+git diff -M "$(git merge-base "$base" HEAD)" >"$patch"
+untracked=()
+while IFS= read -r path; do untracked+=("$path"); done < <(git ls-files --others --exclude-standard)
+python3 -m tools.touched_tests "$patch" "${untracked[@]}" >"$selected"
+
+if [[ ! -s "$selected" ]]; then
+    echo "== no test file edited or importing a touched module; guards only =="
+    exit "$status"
+fi
+
+echo "== selected test files =="
+cat "$selected"
+# Marked tests are deselected below; name the files that hold them.
+ci_only=$(grep -lE 'mark\.(postgres|built_image|corpus_acceptance)|pytestmark' \
+    $(awk '{print $2}' "$selected") 2>/dev/null || true)
+if [[ -n "$ci_only" ]]; then
+    echo "built_image, corpus_acceptance and postgres tests in these files run in CI (or scripts/dev/test-vm-lane):"
+    echo "$ci_only" | sed 's/^/  /'
+fi
+
+# agent_protocol tests consume the installed protocol wheel in their own
+# environment with the producer's source path off, exactly as the CI step does.
+run_agent_protocol() {
+    local consumer=${VONK_PROTOCOL_CONSUMER_VENV:-${TMPDIR:-/tmp}/vonk-protocol-consumer}
+    scripts/dev/generate-agent-wire
+    scripts/build-control-wheel
+    [[ -x "$consumer/bin/python" ]] || uv venv --python 3.12 "$consumer"
+    uv pip install --python "$consumer/bin/python" --reinstall-package vonk-agent-protocol \
+        "inventory/wheels/$(scripts/release/protocol-wheel-name)" 'pytest==9.1.1'
+    # The Rust-peer tests run in CI's connected lane, as in the CI step.
+    "$consumer/bin/python" -m pytest -q -c /dev/null -p no:cacheprovider \
+        --ignore=agent_protocol/tests/test_schema2_recipe_wire.py \
+        --ignore=agent_protocol/tests/test_schema2_recipe_rust_compat.py \
+        "$@"
+}
+
+for suite in control repository compose agent_protocol; do
+    files=$(mktemp "${TMPDIR:-/tmp}/test-changed-suite.XXXXXX")
+    awk -v suite="$suite" '$1 == suite {print $2}' "$selected" >"$files"
+    if [[ -s "$files" ]]; then
+        echo "== $suite =="
+        if [[ "$suite" == agent_protocol ]]; then
+            mapfile -t paths <"$files"
+            run_agent_protocol "${paths[@]}" || status=1
+        else
+            scripts/test "$suite" --files-from "$files" --markers "not postgres and not built_image and not corpus_acceptance" -- -n 2 || status=1
+        fi
+    fi
+    rm -f "$files"
+done
+exit "$status"

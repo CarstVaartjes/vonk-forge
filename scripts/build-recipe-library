@@ -25,6 +25,6 @@ fi
 if [[ -z "$epoch" ]]; then
     epoch=$(git -C "$root" show -s --format=%ct "$commit")
 fi
-exec uv run --python 3.14 --no-project --with-editable "$root/contracts" \
+exec uv run --python 3.15 --no-project --with-editable "$root/contracts" \
     python "$root/tools/build-catalog-index" \
     --source-commit "$commit" --source-date-epoch "$epoch"

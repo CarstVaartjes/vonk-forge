@@ -157,7 +157,7 @@ def unseal(sealed: Path, output: Path) -> Path:
     return Path(
         run(
             "/usr/bin/python3",
-            str(ROOT / "scripts/seal-agent-deb"),
+            str(ROOT / "scripts/agent/seal-agent-deb"),
             "--sealed",
             str(sealed),
             "--output-dir",
@@ -189,7 +189,7 @@ def seal(unsealed: Path, key: Path, output: Path) -> Package:
     path = Path(
         run(
             "/usr/bin/python3",
-            str(ROOT / "scripts/seal-agent-deb"),
+            str(ROOT / "scripts/agent/seal-agent-deb"),
             "--unsealed",
             str(unsealed),
             "--release-private-key",

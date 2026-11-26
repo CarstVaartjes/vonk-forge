@@ -3,7 +3,7 @@
 ``tools/stamp_build_identity.py`` writes ``build-identity.json`` into this
 package at image build time; this module only reads it. The same writer stamps
 the CLI wheel, so one source tree gives the Controller and vonkctl the same
-``control_contract_sha256``. scripts/generate-control-clients ships a copy of
+``control_contract_sha256``. scripts/dev/generate-control-clients ships a copy of
 ``control_limits`` to the CLI; the CLI keeps its own stdlib
 ``contract_fingerprint`` (control/tests/test_cli_update_contract.py keeps the two equal).
 """

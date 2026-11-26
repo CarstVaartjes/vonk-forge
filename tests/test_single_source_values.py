@@ -31,12 +31,12 @@ def test_registered_values_have_one_owner() -> None:
 def test_guard_rejects_copied_policy_in_executable_surfaces(
     tmp_path: Path, suffix: str
 ) -> None:
-    (tmp_path / "scripts").mkdir()
-    registry = "scripts/single-source-values.toml"
+    (tmp_path / "scripts/release").mkdir(parents=True)
+    registry = "scripts/release/single-source-values.toml"
     (tmp_path / registry).write_text(
         (ROOT / registry).read_text().split("[[values.exceptions]]")[0]
     )
-    owner = "scripts/image_policy.py"
+    owner = "scripts/release/image_policy.py"
     (tmp_path / owner).write_text(
         'FLOATING_TAGS = frozenset({"latest", "main", "edge"})\n'
     )
@@ -53,14 +53,14 @@ def test_guard_rejects_copied_policy_in_executable_surfaces(
 
 
 def test_missing_owner_and_duplicate_registration_fail(tmp_path: Path) -> None:
-    (tmp_path / "scripts").mkdir()
-    registry = "scripts/single-source-values.toml"
+    (tmp_path / "scripts/release").mkdir(parents=True)
+    registry = "scripts/release/single-source-values.toml"
     text = (ROOT / registry).read_text().split("[[values.exceptions]]")[0]
     (tmp_path / registry).write_text(text + text)
     with pytest.raises(ValueError, match="duplicate"):
         violations(tmp_path, [registry])
     (tmp_path / registry).write_text(text)
-    (tmp_path / "scripts/image_policy.py").write_text("unrelated = 32\n")
+    (tmp_path / "scripts/release/image_policy.py").write_text("unrelated = 32\n")
     with pytest.raises(ValueError, match="owner selector"):
         violations(tmp_path, [registry])
 
@@ -75,7 +75,11 @@ def test_mirror_matrix_follows_changed_lock(tmp_path: Path) -> None:
     lock["images"]["tailscale"] = changed
     lock_path.write_text(json.dumps(lock))
     output = subprocess.check_output(
-        [sys.executable, str(ROOT / "scripts/ci-image-mirror-inputs"), str(tmp_path)],
+        [
+            sys.executable,
+            str(ROOT / "scripts/ci/ci-image-mirror-inputs"),
+            str(tmp_path),
+        ],
         text=True,
     )
     images = json.loads(output)
@@ -93,7 +97,7 @@ def test_mirror_matrix_follows_changed_lock(tmp_path: Path) -> None:
         "fromJSON(needs.inputs.outputs.images)"
         in jobs["mirror"]["strategy"]["matrix"]["image"]
     )
-    assert "scripts/ci-image-mirror-inputs" in jobs["inputs"]["steps"][-1]["run"]
+    assert "scripts/ci/ci-image-mirror-inputs" in jobs["inputs"]["steps"][-1]["run"]
 
 
 @pytest.fixture
@@ -102,8 +106,8 @@ def registered_tree(tmp_path: Path) -> Path:
     files = tracked_files(ROOT)
     for file in files:
         if file.endswith("/single-source-values.toml") or file in (
-            "scripts/protocol_wheel.py",
-            "scripts/image_policy.py",
+            "scripts/release/protocol_wheel.py",
+            "scripts/release/image_policy.py",
             "agent_protocol/pyproject.toml",
             "deploy/compose/images.lock.json",
             "control/pyproject.toml",
@@ -166,7 +170,7 @@ def test_unrelated_domains_are_not_floating_tag_policy(registered_tree: Path) ->
 def test_registry_refuses_debt_allowances(registered_tree: Path, field: str) -> None:
 
     root = registered_tree
-    registry = root / "scripts/single-source-values.toml"
+    registry = root / "scripts/release/single-source-values.toml"
     registry.write_text(
         registry.read_text().split("[[values.exceptions]]")[0] + field + "\n"
     )
@@ -176,7 +180,7 @@ def test_registry_refuses_debt_allowances(registered_tree: Path, field: str) -> 
 
 def test_registry_refuses_broad_fixture_exemptions(registered_tree: Path) -> None:
     root = registered_tree
-    registry = root / "scripts/single-source-values.toml"
+    registry = root / "scripts/release/single-source-values.toml"
     registry.write_text(
         registry.read_text().replace(
             'function = "test_guard_rejects_copied_policy_in_executable_surfaces"',
@@ -192,7 +196,7 @@ def test_all_image_policy_consumers_follow_owner_change(
 ) -> None:
     # Wrong implementation: a packager/verifier retains its own copy when policy changes.
 
-    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    monkeypatch.syspath_prepend(str(ROOT / "scripts/release"))
     policy = importlib.import_module("image_policy")
     monkeypatch.setattr(policy, "FLOATING_TAGS", policy.FLOATING_TAGS | {"canary"})
     modules = []
@@ -202,7 +206,7 @@ def test_all_image_policy_consumers_follow_owner_change(
         "verify-supply-chain",
     ):
         loader = importlib.machinery.SourceFileLoader(
-            script, str(ROOT / "scripts" / script)
+            script, str(ROOT / "scripts/release" / script)
         )
         spec = importlib.util.spec_from_loader(script, loader)
         assert spec is not None
@@ -226,11 +230,11 @@ def test_all_image_policy_consumers_follow_owner_change(
 
 def test_owner_file_cannot_define_another_copy(registered_tree: Path) -> None:
     root = registered_tree
-    owner = root / "scripts/image_policy.py"
+    owner = root / "scripts/release/image_policy.py"
     source = owner.read_text()
     owner.write_text(source + source.replace("FLOATING_TAGS", "OTHER_POLICY"))
     assert any(
-        "images.floating_tags" in error and "scripts/image_policy.py:" in error
+        "images.floating_tags" in error and "scripts/release/image_policy.py:" in error
         for error in violations(root, fixture_files(root))
     )
 
@@ -601,11 +605,45 @@ def test_isolated_wheel_build_guard_rejects_a_rebuilt_contract_wheel(
     assert isolated_wheel_build_violations(tmp_path, [path.name]) == []
 
 
-def test_python_targets_agree_across_projects() -> None:
-    """CI runs Python 3.14; the agent protocol wheel also runs on adapter 3.12.
+PYTHON = (ROOT / ".python-version").read_text().strip()
 
-    So three projects require 3.14 and the protocol wheel requires 3.12. Ruff
-    checks the protocol at its own 3.12 floor and the projects at 3.14.
+
+def test_python_version_has_one_owner() -> None:
+    """`.python-version` owns the interpreter; every spelling follows it.
+
+    3.12 is allowed only at the adapter-image venv sites the protocol wheel is
+    proven on."""
+    spelled = re.compile(
+        r"--python[= ][\"']?(\d+\.\d+)"
+        r"|\"--python\",\s*\"(\d+\.\d+)\""
+        r"|python-version: [\"']?(\d+\.\d+)"
+        r"|python:(\d+\.\d+)(?:\.\d+)?-"
+        r"|PYTHON_VERSION=(\d+\.\d+)"
+    )
+    adapter_venv = {".github/workflows/ci.yml", "scripts/dev/test-changed"}
+    surfaces = {
+        "control/Dockerfile",
+        "deploy/compose/litellm/Dockerfile",
+        "deploy/compose/images.lock.json",
+    }
+    wrong = [
+        f"{path}: {m.group(0)}"
+        for path in tracked_files(ROOT)
+        if path.startswith((".github/", "install/", "scripts/", "src/"))
+        or path in surfaces
+        for m in spelled.finditer((ROOT / path).read_text(errors="ignore"))
+        if next(g for g in m.groups() if g) != PYTHON
+        and not (path in adapter_venv and m.group(0).endswith("3.12"))
+    ]
+    assert wrong == []
+
+
+def test_python_targets_agree_across_projects() -> None:
+    """CI runs Python 3.15; the agent protocol wheel also runs on adapter 3.12.
+
+    So three projects require 3.15 and the protocol wheel requires 3.12. Ruff
+    checks the protocol at its own 3.12 floor and the projects at py314, which
+    rejects PEP 810 `lazy import`.
     """
 
     def load(path: str) -> dict[str, Any]:
@@ -617,7 +655,7 @@ def test_python_targets_agree_across_projects() -> None:
         "control/pyproject.toml",
         "nas_setup/pyproject.toml",
     ):
-        assert load(path)["project"]["requires-python"] == ">=3.14", path
+        assert load(path)["project"]["requires-python"] == f">={PYTHON}", path
     protocol = load("agent_protocol/pyproject.toml")
     assert protocol["project"]["requires-python"] == ">=3.12"
     targets = root["tool"]["ruff"]["per-file-target-version"]
@@ -627,4 +665,4 @@ def test_python_targets_agree_across_projects() -> None:
     assert {"root": "agent_protocol/src", "pythonVersion": "3.12"}.items() <= (
         environments[0].items()
     )
-    assert root["tool"]["pyright"]["pythonVersion"] == "3.14"
+    assert root["tool"]["pyright"]["pythonVersion"] == PYTHON

@@ -11,7 +11,7 @@ import json
 
 from vonk_control.fleet_profile_contract.review import FleetProfileLoadRequest
 
-from scripts.development_slice_client import Client
+from scripts.fleet.development_slice_client import Client
 from tests.acceptance.controller_contract import ControllerContract
 import runpy
 

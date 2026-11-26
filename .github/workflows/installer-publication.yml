@@ -7,7 +7,7 @@ name: Release
 # needs has succeeded.
 #
 # Development agent packages are versioned X.Y.Z~dev.<seconds>+g<sha>: the
-# source commit's committer time (scripts/dev-publication-sequence), the same
+# source commit's committer time (scripts/images/dev-publication-sequence), the same
 # scheme as a pull request candidate, and above every run-numbered version
 # apt dev published before.
 on:
@@ -64,7 +64,7 @@ jobs:
           # Each output is empty when the producer must run in this release,
           # or the run ID, run number and source of reusable evidence.
           for producer in agent images setups; do
-            if evidence=$(scripts/resolve-publication-producer "$producer" "$GITHUB_SHA"); then
+            if evidence=$(scripts/ci/resolve-publication-producer "$producer" "$GITHUB_SHA"); then
               echo "$producer reuses release run evidence: $evidence"
             else
               status=$?
@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           diagnostic="$RUNNER_TEMP/tested-ci.stderr"
-          if run_id=$(scripts/resolve-tested-ci "$GITHUB_SHA" 2>"$diagnostic"); then
+          if run_id=$(scripts/ci/resolve-tested-ci "$GITHUB_SHA" 2>"$diagnostic"); then
             printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
             echo "Source checks reuse successful PR run $run_id for the identical Git tree" >> "$GITHUB_STEP_SUMMARY"
           else
@@ -143,7 +143,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if evidence=$(scripts/resolve-pr-setups "$RUN_ID" "$(git rev-parse "$GITHUB_SHA^{tree}")"); then
+          if evidence=$(scripts/ci/resolve-pr-setups "$RUN_ID" "$(git rev-parse "$GITHUB_SHA^{tree}")"); then
             printf 'setups=%s\n' "$evidence" >> "$GITHUB_OUTPUT"
             echo "Setup programs reuse pull request run $RUN_ID for the identical Git tree" >> "$GITHUB_STEP_SUMMARY"
           else
@@ -157,7 +157,7 @@ jobs:
     # Newest-only: this main source makes older in-flight main releases that
     # have not committed to publication obsolete, so they stop holding the
     # release groups and runners in front of it. The oldest in-flight release
-    # always finishes (no starvation); see scripts/supersede-release-runs.
+    # always finishes (no starvation); see scripts/ci/supersede-release-runs.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -173,7 +173,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          scripts/supersede-release-runs --repository "$GITHUB_REPOSITORY"
+          scripts/ci/supersede-release-runs --repository "$GITHUB_REPOSITORY"
           --run-number "$GITHUB_RUN_NUMBER" --sha "$GITHUB_SHA"
 
   ci:
@@ -292,7 +292,7 @@ jobs:
 
   producers:
     name: Record accepted development producers
-    # Later releases reuse what this run produced (scripts/resolve-publication-
+    # Later releases reuse what this run produced (scripts/ci/resolve-publication-
     # producer). An agent counts only once apt dev also published it, so a
     # failed apt publication is healed by the next release building again.
     needs: [changes, agent, apt, images, setups]
@@ -410,7 +410,7 @@ jobs:
                 < <(evidence "$AGENT_EVIDENCE")
               # A set main sealed from a pull request keeps that version.
               metadata=$(
-                scripts/agent-package-versions read \
+                scripts/agent/agent-package-versions read \
                   "$package_run_id" "$package_source_sha"
               )
               IFS=$'\t' read -r compose_run_id _ compose_source_sha \
@@ -425,10 +425,10 @@ jobs:
               authority_ref="refs/tags/$release_tag"
               test "$(git cat-file -t "$authority_ref")" = tag
               tag_oid=$(git rev-parse --verify "$authority_ref")
-              scripts/verify-release-tag-authority \
+              scripts/release/verify-release-tag-authority \
                 "$release_tag" "$tag_oid" "$SOURCE_SHA"
               metadata=$(
-                scripts/agent-package-metadata \
+                scripts/agent/agent-package-metadata \
                   production tag "$release_tag" "$SOURCE_SHA" 0
               )
               # CI built the tagged agent package and production Compose, and
@@ -590,7 +590,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/ci-apt-install rclone skopeo
+          scripts/ci/ci-apt-install rclone skopeo
 
       - name: Log in to GHCR for accepted channel promotion
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
@@ -618,7 +618,7 @@ jobs:
           set -euo pipefail
           [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
           [[ "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
-          scripts/promote-accepted-channel run \
+          scripts/images/promote-accepted-channel run \
             "$RUNNER_TEMP/installer-publication/installer-publication" \
             "$RUNNER_TEMP/acceptance" \
             "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" \

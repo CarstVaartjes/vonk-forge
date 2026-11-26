@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _module():
     loader = importlib.machinery.SourceFileLoader(
-        "generate_control_clients", str(ROOT / "scripts/generate-control-clients")
+        "generate_control_clients", str(ROOT / "scripts/dev/generate-control-clients")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
