@@ -101,6 +101,30 @@ signing, and promotion. Create each environment for both `dev` and `stable`:
 | `installer-acceptance-<channel>` | `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT` | `VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY` |
 | `installer-promotion-<channel>` | `R2_INSTALLER_PUBLIC_BUCKET`, `VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT`, `VONK_INSTALLER_RELEASE_KEY_FINGERPRINT` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `VONK_INSTALLER_RELEASE_PRIVATE_KEY` |
 
+Stable releases use three more environments, all restricted to tag `v*`:
+
+| Environment | Variables | Secrets |
+| --- | --- | --- |
+| `agent-release` | `VONK_AGENT_RELEASE_KEY_FINGERPRINT` (equal to `agent-development`) | `VONK_AGENT_RELEASE_PRIVATE_KEY` |
+| `apt-release` | `APT_REPOSITORY_GPG_FINGERPRINT`, `R2_APT_PUBLIC_BUCKET`, `R2_APT_STATE_BUCKET` | `APT_GPG_PASSPHRASE`, `APT_REPOSITORY_GPG_PRIVATE_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
+| `platform-release` | none | none |
+
+Each stable environment carries a deployment policy; the owner is a required
+reviewer (`prevent_self_review` off) on `apt-release` and
+`installer-acceptance-stable`, and nowhere else:
+
+| Environment | Deployment policy |
+| --- | --- |
+| `agent-release`, `apt-release`, `platform-release`, `installer-candidate-stable`, `installer-acceptance-stable` | tag `v*` |
+| `installer-canary-stable` | tag `v*` and branch `main` (manual upgrade-acceptance dispatch) |
+| `installer-promotion-stable` | tag `v*` and branch `main` (the daily refresh runs from `main`) |
+
+`installer-acceptance-stable` and `installer-promotion-stable` hold the same
+`VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT`, the SHA-256 of the DER public key.
+Both canary environments hold the same factory Tailscale client.
+`scripts/stable-preflight` checks all of this; see the
+[stable release runbook](../runbooks/stable-release.md).
+
 The table is the complete list of environment secrets in each environment. The
 canary row's two Tailscale entries are the whole of that environment's tailnet
 authority; the `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_*` names belong to a

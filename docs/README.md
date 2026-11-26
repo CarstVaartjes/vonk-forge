@@ -21,6 +21,7 @@ does not require routine SSH.
 | Configure Tailscale before first install | [Tailscale fresh-install preflight](runbooks/tailscale.md#fresh-install-preflight) |
 | Understand identities and trust | [Security threat model](security/threat-model.md) |
 | Contribute or verify changes | [Testing and CI](testing-and-ci.md) |
+| Cut a stable release or switch a deployment between channels | [Stable release and channel switch](runbooks/stable-release.md) |
 | Keep main current, integrate agent work, and land PRs | [Development workflow](runbooks/development-workflow.md) |
 | Understand shared Python, Rust, and API contracts | [Contract ownership and handoffs](api-contracts.md) |
 | Read `vonkctl --json` from another tool | [`--json` client contract](vonkctl-json-contract.md) |
