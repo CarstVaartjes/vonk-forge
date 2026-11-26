@@ -836,6 +836,12 @@ def test_model_and_recipe_library_use_final_singular_routes_and_facets() -> None
         "cached": True,
     }
 
+    # The bare listing asks for the largest page, not the server's default 100.
+    bare = FakeClient({("GET", "/api/recipe/library"): {"recipes": []}})
+    status, _ = run(("recipe", "--json"), bare)
+    assert status == 0
+    assert bare.calls[0][3] == {"cached": True, "limit": 512}
+
 
 def test_download_is_one_step_and_repeated_calls_keep_server_operation_states() -> None:
     client = FakeClient(

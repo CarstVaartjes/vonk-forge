@@ -93,9 +93,12 @@ never breaks the catalog; only integrity edges refuse it:
     note names the failure).
     That is the case for an unknown reasoning-switch placement, an unknown
     `remaining` context word in the default output tokens, and a Model display
-    whose only modality is unknown. A withheld display leaves the stored one
-    shown; a withheld API block or qualification is withdrawn by the automatic
-    sync until a Controller on the newer contract is deployed.
+    whose only modality is unknown. A block withheld this way is unknown to
+    this Controller, not withdrawn: the sync keeps what it recorded for that
+    revision (a display stays shown, and a running route keeps its API facts
+    and `model_info`), and a Controller on the newer contract records the new
+    block on its first sync. Only a block the index no longer carries is
+    withdrawn, by the complete automatic sync.
 
 ## Development versus production
 

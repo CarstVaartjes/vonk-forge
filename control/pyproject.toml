@@ -25,10 +25,11 @@ dependencies = [
 vonk-agent-protocol = { workspace = true }
 vonk-cluster-profiles = { workspace = true }
 vonk-nas-setup = { workspace = true }
-# Resolve the public contract from the recipe repository's moving main branch.
-# control/packaging/public-contracts.lock records the exact commit consumed by
-# each lock/build update; the image build uses that same commit explicitly.
-vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "fca82a965c4978b259f0ae83771ca0f7c0ac3407", subdirectory = "contracts" }
+# The public contract is the attested wheel of one recipes release, committed
+# under inventory/wheels and recorded in control/packaging/public-contracts.lock;
+# uv, the image build and CI install those same bytes
+# (scripts/dev/refresh-public-contracts moves it).
+vonk-forge-public-contracts = { path = "../inventory/wheels/vonk_forge_public_contracts-5.8.1-py3-none-any.whl" }
 
 [tool.uv]
 required-version = ">=0.13.7"

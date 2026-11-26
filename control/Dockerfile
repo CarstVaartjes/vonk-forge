@@ -92,7 +92,9 @@ COPY agent_protocol/pyproject.toml ./agent_protocol/
 # complete local editable project in this build stage; it never reaches runtime.
 COPY nas_setup/pyproject.toml nas_setup/hatch_build.py ./nas_setup/
 COPY nas_setup/src/ ./nas_setup/src/
-# Install the locked generator dependencies before any application source.
+# Install the locked generator dependencies before any application source. The
+# locked public-contracts wheel is a uv path source, so it must be present.
+COPY inventory/wheels/vonk_forge_public_contracts-5.8.1-py3-none-any.whl ./inventory/wheels/
 RUN uv sync --project control --frozen --no-install-workspace
 COPY tools/openapi-client/ ./tools/openapi-client/
 RUN npm ci --prefix tools/openapi-client --ignore-scripts
@@ -151,14 +153,14 @@ COPY inventory/wheels/vonk_agent_protocol-*.whl /wheels/
 # The reviewed public-contracts wheel is installed by its locked digest, never
 # rebuilt: a rebuild resolves a build backend at build time and its bytes follow
 # whichever release is newest.
-COPY inventory/wheels/vonk_forge_public_contracts-5.7.0-py3-none-any.whl /wheels/
+COPY inventory/wheels/vonk_forge_public_contracts-5.8.1-py3-none-any.whl /wheels/
 COPY agent_protocol/pyproject.toml ./agent_protocol/
 COPY scripts/release/protocol-wheel-name scripts/release/protocol_wheel.py ./scripts/release/
 COPY deploy/compose/python-bootstrap.lock /tmp/python-bootstrap.lock
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates \
     && python -m pip install --no-cache-dir --require-hashes -r /tmp/python-bootstrap.lock \
-    && test "$(sha256sum /wheels/vonk_forge_public_contracts-5.7.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
+    && test "$(sha256sum /wheels/vonk_forge_public_contracts-5.8.1-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /var/lib/apt/lists/*
 # Third-party dependencies resolve to the newest allowed release, so this layer
 # is only reused within one UTC day: CI passes the date, and a fix released
@@ -185,7 +187,7 @@ COPY --from=server-identity /build-identity.json ./src/vonk_control/build-identi
 RUN PYTHONPATH="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib", vars={"base": "/install", "platbase": "/install"}))')" \
     python -m pip install --no-cache-dir --prefix=/install \
     "/wheels/$(scripts/release/protocol-wheel-name)" \
-    /wheels/vonk_forge_public_contracts-5.7.0-py3-none-any.whl \
+    /wheels/vonk_forge_public_contracts-5.8.1-py3-none-any.whl \
     .
 
 FROM ${PYTHON_IMAGE} AS runtime-root

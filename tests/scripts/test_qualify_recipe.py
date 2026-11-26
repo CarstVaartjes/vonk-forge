@@ -453,3 +453,21 @@ def test_qualifier_runs_the_audio_serving_checks_of_the_contract_example() -> No
         "transcribe": "audio.transcription",
         "speak": "audio.speech",
     }
+
+
+def test_an_argument_bound_to_a_setting_reads_as_the_setting_value() -> None:
+    """``default_output_tokens`` may name a runtime argument; its launched integer is the budget."""
+
+    recipe = read_recipe(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-options.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    value = _qualify_module()._argument_value(recipe)
+
+    assert value("max-model-len") == 1024  # settings.context_tokens
+    assert value("language-model-only") is None  # the default choice's boolean
+    assert value("unknown-option") is None  # a string
+    assert value("absent") is None

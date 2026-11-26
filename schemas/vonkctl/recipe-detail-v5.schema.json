@@ -140,7 +140,7 @@
       "$ref": "definitions.schema.json#/$defs/LibraryResourceProjection"
     },
     "schema_version": {
-      "const": 4,
+      "const": 5,
       "title": "Schema Version",
       "type": "integer"
     },
@@ -183,6 +183,6 @@
     "model_documents",
     "schema_version"
   ],
-  "title": "vonkctl recipe-detail document (schema_version 4)",
+  "title": "vonkctl recipe-detail document (schema_version 5)",
   "type": "object"
 }

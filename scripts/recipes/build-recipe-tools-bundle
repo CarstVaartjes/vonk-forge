@@ -39,6 +39,8 @@ PATHS = (
     "agent_protocol/src",
     "nas_setup/pyproject.toml",
     "control/pyproject.toml",
+    # control/pyproject.toml resolves the locked contracts wheel as a path source.
+    "inventory/wheels",
     "control/alembic.ini",
     "control/migrations",
     "control/src",

@@ -43,6 +43,8 @@ pub struct OciSecurityOptions {
     pub memory_bytes: u64,
     pub shared_memory_bytes: u64,
     pub pids_limit: u64,
+    /// Rendered as `--tmpfs` and part of the run identity digest; the helper
+    /// launches `/tmp` as a bind of the run's disk temp directory instead.
     pub tmpfs: String,
 }
 

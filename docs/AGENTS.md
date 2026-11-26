@@ -17,7 +17,8 @@ lease inheritance, stale-attempt fencing, and failure isolation. Do not claim
 that documentation or a timeout alone proves current code cannot deadlock.
 
 Distinguish target contracts from implemented behavior
-and tested/deployed evidence. Keep operator commands accurate until the matching
+and tested/deployed evidence. A reader's tolerance of a newer recipes minor is
+evidenced by the future vector gate ([testing-and-ci.md](testing-and-ci.md#release-acceptance-before-merge)). Keep operator commands accurate until the matching
 implementation ships. Remove superseded architecture instructions and update
 their references; retain useful product rationale with an explicit historical
 scope rather than letting it override the current architecture.
@@ -27,6 +28,10 @@ Document operation, endpoint path, received status, safe canonical code,
 request ID, source classification, and retry/defer/exit decision when those
 values are available. Never document credentials, private keys, cookies,
 authorization headers, token-bearing URLs, or raw request and response bodies.
+Document the public-contracts pin as a recipes release's attested wheel, verified once at
+ingress by `scripts/dev/refresh-public-contracts`; never as a recipes git revision. The
+acceptance library revision is a separate pin.
+
 Keep repository, Controller, and physical Spark evidence boundaries explicit;
 do not claim route-wide or Rust coverage until the owning producer and
 consumer tests have passed.

@@ -263,6 +263,17 @@ text of this section:
   `platform-features.json` and `.tool-versions` by path: move them only together with the recipes reader. Release acceptance runs the extracted
   bundle against the pinned library, and promotion writes its pointer last; see
   [Recipe-tools bundle](docs/runbooks/platform-release-publication.md#recipe-tools-bundle).
+- The public contracts are the attested wheel asset of one recipes release
+  (`control/packaging/public-contracts.lock`: `package`, `release`, `wheel`,
+  `sha256`; a uv `path` source to the committed wheel). Only
+  `scripts/dev/refresh-public-contracts` moves it: it verifies the wheel's
+  attestation at ingress and regenerates what the contract feeds; the build and
+  `verify-supply-chain` check the committed digest offline. The acceptance pin
+  (`tests/acceptance/recipe-library-revision.txt`) is its own input. At every
+  forge batch cut the merge captain runs
+  `scripts/dev/refresh-public-contracts --latest --acceptance-latest` and commits
+  any change as the batch's first commit
+  ([supply chain](docs/runbooks/supply-chain.md)).
 - `cross-repo-nightly.yml` validates the recipes `main` library with the published
   dev recipe-tools bundle every night (a red run is the drift alarm); `fuzz.yml` fuzzes
   the parsers in `rust/fuzz` (the fix adds one case to the parser's existing test).
@@ -288,7 +299,11 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
 
 - Published Model and Recipe structures are defined by the canonical Pydantic
   package in vonk-forge-recipes; read the signed index only through
-  `catalog_reader.read_catalog`. Controller APIs and Controller/Spark messages
+  `catalog_reader.read_catalog`. The recipes future vector
+  (`control/tests/fixtures/future-canary-index.json`, G4) is the gate on that
+  reader: `tests/acceptance/future_vector_read.py` runs in `control/tests` and
+  inside the clean-Spark lane's installed Controller; fix what it exposes in the
+  reader, never by special-casing its words. Controller APIs and Controller/Spark messages
   use their authoritative nested Pydantic models, validated on every persisted
   read and write; generate OpenAPI and the Python/TypeScript clients, and
   generate Rust wire structures with typify from the Pydantic JSON Schemas.

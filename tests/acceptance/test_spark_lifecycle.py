@@ -198,6 +198,7 @@ RENEWAL_HELPER_INPUTS = (
 )
 CONTROLLER_ADDRESS = "127.0.0.1"
 CANARY_CATALOG_IMPORT = Path(__file__).with_name("spark_canary_catalog_import.py")
+FUTURE_VECTOR_READ = Path(__file__).with_name("future_vector_read.py")
 SPARK_CONFIG = Path("/etc/vonk-forge-agent/agent.toml")
 AGENT_BINARY = Path("/usr/lib/vonk-forge/vonk-agent")
 AGENT_DATA = Path("/var/lib/vonk-forge-agent")
@@ -3107,6 +3108,8 @@ class SparkLifecycle:
     def observe(self) -> dict[str, object]:
         if self.control is None or self.bundle is None or self.temporary_root is None:
             raise LifecycleError("candidate controller is not ready")
+        with TIMINGS.phase("future-vector"):
+            self._read_future_vector(self.arguments.future_vector.read_bytes())
         with TIMINGS.phase("install"):
             grant_id, enrollment_url, ca_sha256, pairing_token = self._create_grant()
             try:
@@ -3354,6 +3357,46 @@ class SparkLifecycle:
                 "synthetic canary catalog import returned no sync view"
             ) from error
         return require_object(sync, "synthetic canary catalog sync")
+
+    def _read_future_vector(self, vector: bytes) -> dict[str, object]:
+        """The installed Controller's parser survives the recipes future vector (G4).
+
+        The vector's bytes go to the running control-api container, whose own
+        index parser reads them; the program checks the snapshot it made and
+        loads no package.
+        """
+        assert self.bundle is not None
+        result = self._run_command(
+            self._compose(
+                "exec",
+                "-T",
+                "--user",
+                "10001:10001",
+                "control-api",
+                "python",
+                "-c",
+                FUTURE_VECTOR_READ.read_text(encoding="utf-8"),
+            ),
+            cwd=self.bundle,
+            timeout=120,
+            report_failure_output=True,
+            allowed_returncodes=(0, 1),
+            input_text=vector.decode("utf-8"),
+        )
+        lines = result.stdout.strip().splitlines()
+        try:
+            verdict = require_object(json.loads(lines[-1]), "future vector verdict")
+        except (IndexError, json.JSONDecodeError) as error:
+            raise LifecycleError(
+                "future vector read returned no verdict; "
+                + self._redact_diagnostics(result.stderr)
+            ) from error
+        if result.returncode != 0 or verdict.get("failures") != []:
+            raise LifecycleError(
+                f"the installed Controller does not survive the future vector: "
+                f"{verdict.get('failures')!r}"[:2000]
+            )
+        return verdict
 
     def _library_withdrawal(self) -> dict[str, object] | None:
         """The Controller's own sync that withdrew Recipes, when it is the newest.
@@ -5756,6 +5799,8 @@ def _arguments() -> argparse.Namespace:
     run.add_argument("--generation", required=True)
     run.add_argument("--run-id", type=int, required=True)
     run.add_argument("--platform", required=True)
+    # The recipes future vector the installed Controller must survive (G4).
+    run.add_argument("--future-vector", type=Path, required=True)
     return parser.parse_args()
 
 

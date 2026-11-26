@@ -88,6 +88,13 @@ def test_facts_are_withdrawn_only_by_a_complete_automatic_view() -> None:
 
     # The index no longer carries the facts: a manual view is partial and keeps
     # what it does not name; the complete automatic view withdraws them.
+    # A newer minor's word this Controller cannot read withholds the block
+    # under the same digest: unknown, not withdrawn, so the stored facts stay.
+    reader.snapshot = replace(
+        reader.snapshot, items=(replace(item, withheld_blocks=frozenset({"api"})),)
+    )
+    assert run(CatalogSyncTrigger.AUTOMATIC) == api
+
     reader.snapshot = replace(reader.snapshot, items=(item,))
     assert run(CatalogSyncTrigger.MANUAL) == api
     assert run(CatalogSyncTrigger.AUTOMATIC) is None

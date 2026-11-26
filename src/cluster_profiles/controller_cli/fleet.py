@@ -28,6 +28,7 @@ from cluster_profiles.control_client.errors import (
 )
 from cluster_profiles.control_client.schema import validate_control_document
 from cluster_profiles.controller_cli.common import (
+    MAX_PAGE_LIMIT,
     ControllerClient,
     _known_http_refusal_status,
     _log_since,
@@ -63,7 +64,8 @@ def _overview(
         path = "/api/fleet"
     elif noun in {"model", "recipe"}:
         path = f"/api/{noun}/library"
-        query = {"cached": True}
+        # The library API's largest page, so the bare listing shows every cached entry.
+        query = _query(cached=True, limit=MAX_PAGE_LIMIT)
     else:
         path = f"/api/profile/{_profile_number(args)}"
     return _poll_path(

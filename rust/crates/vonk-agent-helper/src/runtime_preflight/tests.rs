@@ -13,7 +13,7 @@ fn probe_cleanup_follows_the_work_it_undoes_never_a_fixed_second() {
 }
 #[test]
 fn serving_probe_has_no_device_mount_capability_or_network_grants() {
-    let args = run_arguments("probe-name", "probe-image");
+    let args = run_arguments("probe-name", "probe-image", Path::new("/probe-tmp"));
     for flag in [
         "--network=none",
         "--cap-drop=ALL",
@@ -29,4 +29,19 @@ fn serving_probe_has_no_device_mount_capability_or_network_grants() {
         || arg.starts_with("--volume")
         || arg == "--privileged"
         || arg == "--pid=host"));
+}
+
+/// The probe's `/tmp` is on disk, as a workload's is: never a RAM tmpfs.
+#[test]
+fn serving_probe_tmp_is_its_staging_directory_on_disk() {
+    let args = run_arguments("probe-name", "probe-image", Path::new("/staging/tmp"));
+    assert!(
+        !args.iter().any(|arg| arg.starts_with("--tmpfs")),
+        "{args:?}"
+    );
+    assert!(
+        args.windows(2)
+            .any(|pair| pair == ["--mount", "type=bind,src=/staging/tmp,dst=/tmp"]),
+        "{args:?}"
+    );
 }

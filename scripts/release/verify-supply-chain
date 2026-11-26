@@ -114,29 +114,35 @@ def packages_web(lock: bytes) -> list[tuple[str, str]]:
 
 
 def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
-    """Verify the pinned third-party contract wheel and its source revision."""
+    """Verify the pinned contract wheel against its lock, offline.
+
+    ``scripts/dev/refresh-public-contracts`` verified the wheel's attestation at
+    ingress and recorded its digest here; this checks that the committed files
+    still agree: lock, wheel bytes, the uv path source, ``uv.lock`` and the
+    Dockerfile.
+    """
 
     lock = tomllib.loads((root / PUBLIC_CONTRACT_LOCK).read_text())
-    # The lock owns the version; the wheel path and the Dockerfile follow it.
-    named = PUBLIC_CONTRACT_PACKAGE.fullmatch(str(lock.get("package")))
+    if set(lock) != {"package", "release", "wheel", "sha256"}:
+        raise ValueError("public contract lock does not have the release-asset keys")
+    # The lock owns the version; the release, wheel path and spellings follow it.
+    named = PUBLIC_CONTRACT_PACKAGE.fullmatch(str(lock["package"]))
     if named is None:
         raise ValueError("public contract lock does not select the canonical package")
-    wheel_path = (
-        f"inventory/wheels/vonk_forge_public_contracts-{named[1]}-py3-none-any.whl"
+    version = named[1]
+    wheel_name = f"vonk_forge_public_contracts-{version}-py3-none-any.whl"
+    wheel_path = f"inventory/wheels/{wheel_name}"
+    release = (
+        f"https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v{version}"
     )
-    expected = {
-        "source": "https://github.com/CarstVaartjes/vonk-forge-recipes.git",
-        "subdirectory": "contracts",
-        "wheel": wheel_path,
-    }
-    if any(lock.get(key) != value for key, value in expected.items()):
+    if lock["release"] != release or lock["wheel"] != wheel_path:
         raise ValueError("public contract lock does not select the canonical package")
-    if Path(wheel_path).name not in (root / "control/Dockerfile").read_text():
+    if wheel_name not in (root / "control/Dockerfile").read_text():
         raise ValueError("control image does not install the locked public contract")
-    revision = lock.get("revision")
-    wheel_sha256 = lock.get("sha256")
-    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
-        raise ValueError("public contract source revision is invalid")
+    project = (root / "control/pyproject.toml").read_text()
+    if f'vonk-forge-public-contracts = {{ path = "../{wheel_path}" }}' not in project:
+        raise ValueError("control does not resolve the locked public contract wheel")
+    wheel_sha256 = lock["sha256"]
     if (
         not isinstance(wheel_sha256, str)
         or re.fullmatch(r"[0-9a-f]{64}", wheel_sha256) is None
@@ -149,14 +155,12 @@ def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
         for package in uv_lock_packages(control_lock)
         if package["name"] == "vonk-forge-public-contracts"
     ]
-    source = (
-        'source = { git = "https://github.com/CarstVaartjes/'
-        f'vonk-forge-recipes.git?subdirectory=contracts&rev={revision}#{revision}" }}'
-    )
+    record = packages[0]["record"].splitlines() if len(packages) == 1 else []
     if (
         len(packages) != 1
-        or packages[0]["version"] != named[1]
-        or source not in packages[0]["record"].splitlines()
+        or packages[0]["version"] != version
+        or f'source = {{ path = "{wheel_path}" }}' not in record
+        or not any(f'hash = "sha256:{wheel_sha256}"' in line for line in record)
     ):
         raise ValueError("control lock does not resolve the reviewed public contract")
 

@@ -32,11 +32,11 @@ number belongs to the document kind, not to the vonkctl release.
 | `profile-application` | `profile load`, `progress`, `cancel` | `FleetProfileApplicationView` | 1 | `profile-application-v1.schema.json` |
 | `profile-endpoints` | `profile endpoint` | `FleetProfileEndpointsView` | 1 | `profile-endpoints-v1.schema.json` |
 | `recipe-library` | `recipe`, `recipe library` | `RecipeLibraryResponse` | 4 | `recipe-library-v4.schema.json` |
-| `recipe-detail` | `recipe detail` | `RecipeDetailResponse` | 4 | `recipe-detail-v4.schema.json` |
+| `recipe-detail` | `recipe detail` | `RecipeDetailResponse` | 5 | `recipe-detail-v5.schema.json` |
 | `artifact-job` | `job create`, `detail`, `submit`, `cancel`, `run --no-wait` (and `run` when the job did not succeed) | `ArtifactJobResponse` | 1 | `artifact-job-v1.schema.json` |
 | `artifact-download` | `job download`, `job run` (finished) | `ArtifactDownloadDocument` | 1 | `artifact-download-v1.schema.json` |
-| `observation` | any followed command that timed out or was interrupted | `ObservationDocument` | 3 | `observation-v3.schema.json` |
-| `error` | any failure | `ErrorDocument` | 3 | `error-v3.schema.json` |
+| `observation` | any followed command that timed out or was interrupted | `ObservationDocument` | 4 | `observation-v4.schema.json` |
+| `error` | any failure | `ErrorDocument` | 4 | `error-v4.schema.json` |
 
 `schema_version` is required in every published schema. A document the
 Controller already answers is that Controller response plus `schema_version`;
@@ -88,7 +88,7 @@ the page is the last.
   it does not guess at the fields. `--check-connection --json` `.client.version`
   identifies the CLI build.
 - Regeneration refuses to rewrite a published file with an incompatible schema
-  (checked with the shared definitions inlined; a removed property, a `required` list that grew or shrank, a changed type). A test
+  (checked with the shared definitions the kind reaches inlined, so a change to a definition only another kind uses keeps this kind's version; a removed property, a `required` list that grew or shrank, a changed type). A test
   fails when a committed file (shared definitions included) is not exactly the model's current export, so a
   stale or hand-edited file is caught. Telling an incompatible change from a
   compatible one needs the previously published file, which only that

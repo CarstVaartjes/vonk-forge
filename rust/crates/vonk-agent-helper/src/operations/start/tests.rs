@@ -290,6 +290,16 @@ fn image_after_intact_options(run: &[String]) -> usize {
     image
 }
 
+/// The launch's identity label is the digest of the signed argv: a run an
+/// older helper started from that argv is adopted as is.
+fn assert_identity_is_the_signed_argv(signed: &[String], run: &[String]) {
+    let identity = format!(
+        "ai.vonkforge.runtime-request-sha256={}",
+        hex_sha256(&canonical_json(&signed[4..].to_vec()).unwrap())
+    );
+    assert!(run.contains(&identity), "{run:?}");
+}
+
 #[test]
 fn a_job_launches_with_its_entrypoint_and_labels_intact() {
     let run = launched_run(job_plan(recipe_start_plan_for_authority(1)));
@@ -439,11 +449,7 @@ fn a_workload_is_launched_without_a_container_memory_limit() {
         );
         assert!(run.iter().any(|a| a == "--shm-size"), "{run:?}");
         assert!(signed.iter().any(|a| a == "--memory"), "{signed:?}");
-        let identity = format!(
-            "ai.vonkforge.runtime-request-sha256={}",
-            hex_sha256(&canonical_json(&signed[4..].to_vec()).unwrap())
-        );
-        assert!(run.contains(&identity), "{run:?}");
+        assert_identity_is_the_signed_argv(&signed, &run);
     }
 }
 
@@ -465,11 +471,7 @@ fn a_workload_is_launched_with_shared_memory_as_declared_and_an_unchanged_identi
     assert_eq!(flag(&run, "--shm-size"), 100_000_000_000);
     assert_eq!(flag(&signed, "--memory"), 100_000_000_000);
     assert_eq!(flag(&signed, "--shm-size"), 12_500_000_000);
-    let identity = format!(
-        "ai.vonkforge.runtime-request-sha256={}",
-        hex_sha256(&canonical_json(&signed[4..].to_vec()).unwrap())
-    );
-    assert!(run.contains(&identity), "{run:?}");
+    assert_identity_is_the_signed_argv(&signed, &run);
 }
 
 /// An image the platform did not adapt (no labels, no `USER`, its creator's
@@ -493,11 +495,44 @@ fn an_unadapted_image_starts_in_tmp_as_the_signed_user_with_an_unchanged_identit
         assert_eq!(named("--workdir", "/tmp"), 1, "{run:?}");
         assert_eq!(named("--user", "10001:10001"), 1, "{run:?}");
         assert!(!signed.iter().any(|a| a == "--workdir"), "{signed:?}");
-        let identity = format!(
-            "ai.vonkforge.runtime-request-sha256={}",
-            hex_sha256(&canonical_json(&signed[4..].to_vec()).unwrap())
+        assert_identity_is_the_signed_argv(&signed, &run);
+    }
+}
+
+/// Memory is for the models: every workload's `/tmp` is the run's own disk
+/// temp directory (the one behind `/outputs/tmp`), never a RAM tmpfs. The
+/// signed argv still carries the exact tmpfs an older helper requires, and
+/// the identity label is its digest, so an older helper accepts what a newer
+/// agent sends and a run an older helper started is adopted as is.
+#[test]
+fn every_workload_gets_a_disk_tmp_and_an_unchanged_identity() {
+    for plan in [
+        recipe_start_plan_for_authority(1),
+        job_plan(recipe_start_plan_for_authority(1)),
+    ] {
+        let (signed, run) = launched(plan);
+        let image = image_after_intact_options(&run);
+        let mounts: Vec<&str> = run[..image]
+            .windows(2)
+            .filter(|pair| pair[0] == "--mount")
+            .map(|pair| pair[1].as_str())
+            .collect();
+        let outputs = mounts
+            .iter()
+            .find_map(|mount| mount.strip_suffix(",dst=/outputs"))
+            .expect("the run's outputs are bound");
+        assert!(
+            mounts.contains(&format!("{outputs}/tmp,dst=/tmp").as_str()),
+            "{run:?}"
         );
-        assert!(run.contains(&identity), "{run:?}");
+        assert!(!run.iter().any(|a| a.starts_with("--tmpfs")), "{run:?}");
+        assert!(
+            signed
+                .windows(2)
+                .any(|pair| pair == ["--tmpfs", "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824"]),
+            "{signed:?}"
+        );
+        assert_identity_is_the_signed_argv(&signed, &run);
     }
 }
 

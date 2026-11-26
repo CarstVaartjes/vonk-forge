@@ -865,6 +865,12 @@ class ManagedRecipeCatalogSyncService:
         # qualification status changes whenever new hardware evidence is
         # published, so every sync records both for unchanged revisions too.
         record_facts = getattr(self._catalog, "record_published_facts", None)
+
+        def observed(item: RecipeLibraryItem, block: str) -> bool:
+            """An absent block withdraws the recorded one only when observed:
+            a complete view, and not withheld for a word this release lacks."""
+            return withdrawals_observed and block not in item.withheld_blocks
+
         if callable(record_facts):
             try:
                 record_facts(
@@ -873,19 +879,21 @@ class ManagedRecipeCatalogSyncService:
                             item.prebuilt_image
                         )
                         for item in snapshot.items
-                        if item.prebuilt_image is not None or withdrawals_observed
+                        if item.prebuilt_image is not None
+                        or observed(item, "prebuilt_image")
                     },
                     {
                         (item.publisher, item.slug, item.content_sha256): (
                             item.qualification
                         )
                         for item in snapshot.items
-                        if item.qualification is not None or withdrawals_observed
+                        if item.qualification is not None
+                        or observed(item, "qualification")
                     },
                     {
                         (item.publisher, item.slug, item.content_sha256): item.api
                         for item in snapshot.items
-                        if item.api is not None or withdrawals_observed
+                        if item.api is not None or observed(item, "api")
                     },
                     {
                         (
@@ -894,7 +902,8 @@ class ManagedRecipeCatalogSyncService:
                             item.content_sha256,
                         ): item.measured_memory
                         for item in snapshot.items
-                        if item.measured_memory is not None or withdrawals_observed
+                        if item.measured_memory is not None
+                        or observed(item, "measured_memory")
                     },
                     {
                         (item.publisher, item.slug, item.content_sha256): (
@@ -903,7 +912,8 @@ class ManagedRecipeCatalogSyncService:
                             else list(item.served_capabilities)
                         )
                         for item in snapshot.items
-                        if item.served_capabilities is not None or withdrawals_observed
+                        if item.served_capabilities is not None
+                        or observed(item, "served_capabilities")
                     },
                 )
             except Exception as error:  # noqa: BLE001 - images are optional; recipes still apply
