@@ -34,6 +34,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 import httpx2
 from vonk_forge_contracts import ModelDefinition
 
+from vonk_control.model_cache.constants import _GITHUB_USER_AGENT
+
 VECTOR = json.loads(
     (Path(__file__).parent / "fixtures/github_lfs_batch_response.json").read_text()
 )
@@ -43,7 +45,7 @@ REVISION = "45c03facbf848e0c743091b7d9c17952096ff908"
 BATCH_URL = f"https://github.com/{OWNER}/{REPO}.git/info/lfs/objects/batch"
 OBJECT_HOST = "github-cloud.githubusercontent.com"
 LFS_MEDIA_TYPE = "application/vnd.git-lfs+json"
-USER_AGENT = "vonk-forge/0.1.1"
+USER_AGENT = _GITHUB_USER_AGENT
 LINK_SECONDS = 3600
 _RECORDED_HREF = urlsplit(VECTOR["body"]["objects"][0]["actions"]["download"]["href"])
 _RECORDED_QUERY_KEYS = [key for key, _ in parse_qsl(_RECORDED_HREF.query)]

@@ -12,6 +12,7 @@ VERSION_FILES = (
     (ROOT / "Cargo.toml", ("workspace", "package", "version")),
     (ROOT / "pyproject.toml", ("project", "version")),
     (ROOT / "control/pyproject.toml", ("project", "version")),
+    (ROOT / "nas_setup/pyproject.toml", ("project", "version")),
 )
 SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 SEMVER_RE = re.compile(rf"^{SEMVER}$")

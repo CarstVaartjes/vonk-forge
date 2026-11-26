@@ -105,6 +105,7 @@ PRODUCERS = {
             "agent_protocol/tests/fixtures/runtime_scan_cutoffs.json",
             "uv.lock",
             "control/pyproject.toml",
+            "nas_setup/pyproject.toml",
             "control/src/vonk_control/resources/site-ports.json",
             "control/src/vonk_control/settings.py",
             "scripts/agent/verify-agent-deb",
