@@ -54,7 +54,7 @@ def test_the_report_lists_only_code_no_test_executes(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "scripts/coverage-unexecuted"),
+            str(ROOT / "scripts/dev/coverage-unexecuted"),
             "--python",
             str(report),
         ],

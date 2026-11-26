@@ -54,7 +54,7 @@ def test_new_scan_cannot_hide_behind_a_helper_or_a_scoped_directory(
 def test_guard_runner_and_heavy_suite_use_complementary_selections() -> None:
     def selection(*args: str) -> list[str]:
         return subprocess.run(
-            [sys.executable, str(ROOT / "scripts/repository-guards"), *args],
+            [sys.executable, str(ROOT / "scripts/ci/repository-guards"), *args],
             check=True,
             capture_output=True,
             text=True,
@@ -81,7 +81,7 @@ def test_ci_guards_run_on_full_runs_prepared_and_required() -> None:
     run_index = next(
         i
         for i, step in enumerate(steps)
-        if "scripts/repository-guards" in step.get("run", "")
+        if "scripts/ci/repository-guards" in step.get("run", "")
     )
     assert prepared < run_index
     assert "if" not in steps[run_index]
@@ -105,7 +105,7 @@ def test_control_change_keeps_guards_and_transitive_repository_consumers(
     result = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "scripts/select-ci-areas"),
+            str(ROOT / "scripts/ci/select-ci-areas"),
             "--event",
             event,
             "--github-output",
@@ -129,7 +129,7 @@ def test_shards_are_split_from_the_tree_without_a_collection_pass(
     shards a file the guard job already owns."""
     for file in (
         "scripts/test",
-        "scripts/repository-guards",
+        "scripts/ci/repository-guards",
         "scripts/ci/select-pytest-shard-files",
         "tests/repository_guards.py",
     ):
@@ -144,7 +144,8 @@ def test_shards_are_split_from_the_tree_without_a_collection_pass(
     assert "::" not in guard
     (tmp_path / guard).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / guard).write_text("def test_guard():\n    pass\n")
-    prepare = tmp_path / "scripts/sync-cli-dependencies"
+    prepare = tmp_path / "scripts/dev/sync-cli-dependencies"
+    prepare.parent.mkdir(parents=True, exist_ok=True)
     prepare.write_text("#!/bin/sh\nexit 0\n")
     prepare.chmod(0o755)
     bin_dir = tmp_path / "bin"
@@ -187,14 +188,15 @@ def test_real_suite_runner_applies_reviewed_selection(
     # argument wiring is tested without collecting an expensive product suite.
     for file in (
         "scripts/test",
-        "scripts/repository-guards",
+        "scripts/ci/repository-guards",
         "tests/repository_guards.py",
     ):
         destination = tmp_path / file
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / file, destination)
     (tmp_path / "tests/__init__.py").write_text("")
-    prepare = tmp_path / "scripts/sync-cli-dependencies"
+    prepare = tmp_path / "scripts/dev/sync-cli-dependencies"
+    prepare.parent.mkdir(parents=True, exist_ok=True)
     prepare.write_text("#!/bin/sh\nexit 0\n")
     prepare.chmod(0o755)
     bin_dir = tmp_path / "bin"

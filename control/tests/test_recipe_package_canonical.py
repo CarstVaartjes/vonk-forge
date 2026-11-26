@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from scripts.canary_package import canary_package_path
+from scripts.fleet.canary_package import canary_package_path
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_agent_protocol.build_import import RecipeBuildRequest

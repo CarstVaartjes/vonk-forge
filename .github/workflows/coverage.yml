@@ -68,7 +68,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Pull the pinned test images once
-        run: scripts/pull-test-images postgres python
+        run: scripts/ci/pull-test-images postgres python
       - name: Measure every Python process the suite starts
         shell: bash
         run: |
@@ -110,11 +110,11 @@ jobs:
         run: |
           set -euo pipefail
           rustup set profile minimal
-          scripts/retry-dependency-fetch rustup toolchain install
-          scripts/retry-dependency-fetch rustup component add llvm-tools-preview
+          scripts/ci/retry-dependency-fetch rustup toolchain install
+          scripts/ci/retry-dependency-fetch rustup component add llvm-tools-preview
           cargo install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
       - name: Fetch locked crates
-        run: scripts/retry-dependency-fetch cargo fetch --locked
+        run: scripts/ci/retry-dependency-fetch cargo fetch --locked
       - name: Run the Rust tests under coverage
         # The same command as ci.yml's Rust shard, measured.
         continue-on-error: true
@@ -157,7 +157,7 @@ jobs:
           if [[ -f coverage-input/coverage-rust/rust-coverage.json ]]; then
             args+=(--rust coverage-input/coverage-rust/rust-coverage.json)
           fi
-          scripts/coverage-unexecuted "${args[@]}" | tee report/unexecuted.md >> "$GITHUB_STEP_SUMMARY"
+          scripts/dev/coverage-unexecuted "${args[@]}" | tee report/unexecuted.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload the report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

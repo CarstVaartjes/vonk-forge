@@ -74,7 +74,7 @@ def test_installed_cli_canonicalizes_media_without_contract_runtime(
 import importlib.metadata
 import importlib.util
 import json
-from cluster_profiles.cli_artifact_jobs import _canonical_create
+from cluster_profiles.cli_artifact_jobs.inputs import _canonical_create
 
 for package in ("pydantic", "vonk_agent_protocol", "vonk_forge_contracts"):
     assert importlib.util.find_spec(package) is None, package

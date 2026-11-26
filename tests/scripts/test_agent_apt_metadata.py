@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/agent-apt-metadata"
+SCRIPT = ROOT / "scripts/agent/agent-apt-metadata"
 
 
 def run_metadata(*arguments: str) -> subprocess.CompletedProcess[str]:

@@ -36,9 +36,9 @@ runs:
         save-cache: ${{ github.ref == 'refs/heads/main' }}
     - name: Sync the locked workspace environment
       shell: bash
-      run: scripts/retry-dependency-fetch uv sync --project control --frozen
+      run: scripts/ci/retry-dependency-fetch uv sync --project control --frozen
     - name: Record the prepared workspace environment
-      # Generators and Cargo build scripts call scripts/check_environment.py,
+      # Generators and Cargo build scripts call scripts/dev/check_environment.py,
       # which resyncs unless its stamps match. Leave them here so a later
       # caller under another environment (for example SOURCE_DATE_EPOCH during
       # a package build, or the offline signed-update lane) never syncs.
@@ -49,7 +49,7 @@ runs:
         import sys
         from pathlib import Path
 
-        sys.path.insert(0, "scripts")
+        sys.path.insert(0, "scripts/dev")
         from check_environment import DEFAULT_ENVIRONMENT, ensure_control, ensure_protocol
 
         root = Path.cwd().resolve()
@@ -61,12 +61,12 @@ runs:
     - name: Generate and stamp every contract consumer
       if: inputs.contracts == 'full'
       shell: bash
-      run: scripts/prepare-generated-contracts
+      run: scripts/dev/prepare-generated-contracts
     - name: Generate Python client and publication contract resources
       if: inputs.contracts == 'python'
       shell: bash
-      run: scripts/generate-control-clients --python-only
+      run: scripts/dev/generate-control-clients --python-only
     - name: Sync the CLI's own dependencies for the installed-CLI tests
       if: inputs.cli-dependencies == 'true'
       shell: bash
-      run: scripts/sync-cli-dependencies
+      run: scripts/dev/sync-cli-dependencies

@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""Reject recognizable credentials from files copied into public images."""
+
+from __future__ import annotations
+
+import re
+import stat
+import sys
+import zipfile
+from pathlib import Path, PurePosixPath
+
+INPUTS = (
+    ".tool-versions",
+    "pyproject.toml",
+    "src/cluster_profiles",
+    "tools/hatch_build.py",
+    "tools/stamp_build_identity.py",
+    "control/Dockerfile",
+    "control/pyproject.toml",
+    "control/src",
+    "control/web",
+    "inventory/wheels",
+    # Runtime configuration the Controller image ships and stages.
+    "deploy/compose/Caddyfile",
+    "deploy/compose/caddy/entrypoint.sh",
+    "deploy/compose/postgres",
+    "deploy/compose/litellm/bootstrap-config.json",
+    "deploy/compose/litellm/entrypoint.sh",
+    "deploy/compose/litellm/config_supervisor.py",
+    "deploy/compose/prometheus",
+    "deploy/compose/tailscale/configure.sh",
+    # Read only to embed the Compose template digest.
+    "deploy/compose/compose.yaml",
+    "deploy/compose/tailscale/compose.yaml",
+    "scripts/release/render-dev-compose",
+    "scripts/release/image_policy.py",
+)
+
+EXCLUDED_DIRECTORIES = frozenset(
+    {
+        "__pycache__",
+        ".pytest_cache",
+        "coverage",
+        "htmlcov",
+        "build",
+        "dist",
+        "node_modules",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".ssh",
+        ".aws",
+        ".kube",
+        "test-results",
+        "playwright-report",
+    }
+)
+EXCLUDED_FILES = frozenset(
+    {
+        ".npmrc",
+        ".netrc",
+        ".pypirc",
+        ".git-credentials",
+        "credentials.json",
+        "credentials.yaml",
+        "credentials.yml",
+        "credentials.toml",
+        "secrets.json",
+        "secrets.yaml",
+        "secrets.yml",
+        "secrets.toml",
+        "id_rsa",
+        "id_ed25519",
+    }
+)
+EXCLUDED_SUFFIXES = (
+    ".pyc",
+    ".pyo",
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".crt",
+    ".der",
+)
+
+PATTERNS = {
+    "private-key": rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+    "github-token": rb"(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})",
+    "tailscale-key": rb"tskey-[A-Za-z0-9_-]{10,}",
+    "aws-access-key": rb"AKIA[0-9A-Z]{16}",
+    "model-api-key": rb"sk-[A-Za-z0-9]{32,}",
+}
+
+MAX_ARCHIVE_FILES = 10_000
+MAX_ARCHIVE_MEMBER_BYTES = 32 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
+
+
+def files_in(path: Path) -> list[Path]:
+    if path.is_symlink():
+        return [path]
+    if path.is_file():
+        return [path]
+    if path.is_dir():
+        return sorted(path.rglob("*"))
+    return []
+
+
+def dockerignored(path: Path, root: Path) -> bool:
+    relative = path.relative_to(root)
+    parts = relative.parts
+    name = path.name
+    if any(part in EXCLUDED_DIRECTORIES for part in parts[:-1]) or (
+        name in EXCLUDED_DIRECTORIES and (path.is_dir() or path.is_symlink())
+    ):
+        return True
+    if name in EXCLUDED_FILES or name.endswith(EXCLUDED_SUFFIXES):
+        return True
+    if name == ".env" or name.startswith((".env.", ".coverage")):
+        return True
+    if len(parts) >= 2 and parts[-2:] == (".docker", "config.json"):
+        return True
+    return any(
+        parts[index : index + 2] == (".config", "gcloud")
+        for index in range(len(parts) - 1)
+    )
+
+
+def scan_content(
+    display: str,
+    content: bytes,
+    patterns: dict[str, re.Pattern[bytes]],
+    findings: list[tuple[str, str]],
+) -> None:
+    for name, pattern in patterns.items():
+        if pattern.search(content):
+            findings.append((display, name))
+
+
+def scan_wheel(
+    path: Path,
+    display: str,
+    patterns: dict[str, re.Pattern[bytes]],
+    findings: list[tuple[str, str]],
+) -> None:
+    """Scan a wheel's uncompressed regular files without trusting the archive."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_ARCHIVE_FILES:
+                findings.append((display, "archive-too-many-files"))
+                return
+
+            seen: set[str] = set()
+            total_bytes = 0
+            for member in members:
+                member_name = member.filename
+                member_path = PurePosixPath(member_name)
+                member_display = f"{display}!/{member_name}"
+                if (
+                    not member_name
+                    or member_name in seen
+                    or member_path.is_absolute()
+                    or ".." in member_path.parts
+                    or "\\" in member_name
+                    or (member_path.parts and member_path.parts[0].endswith(":"))
+                ):
+                    findings.append((member_display, "archive-unsafe-path"))
+                    continue
+                seen.add(member_name)
+                if member.flag_bits & 0x1:
+                    findings.append((member_display, "archive-encrypted"))
+                    continue
+
+                mode = (member.external_attr >> 16) & 0xFFFF
+                file_type = stat.S_IFMT(mode)
+                if file_type not in (0, stat.S_IFREG, stat.S_IFDIR):
+                    findings.append((member_display, "archive-special-file"))
+                    continue
+                if member.is_dir():
+                    continue
+                if member.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+                    findings.append((member_display, "archive-member-too-large"))
+                    continue
+                total_bytes += member.file_size
+                if total_bytes > MAX_ARCHIVE_TOTAL_BYTES:
+                    findings.append((display, "archive-too-large"))
+                    return
+
+                try:
+                    with archive.open(member) as source:
+                        content = source.read(MAX_ARCHIVE_MEMBER_BYTES + 1)
+                except (OSError, RuntimeError, zipfile.BadZipFile):
+                    findings.append((member_display, "archive-invalid"))
+                    continue
+                if len(content) > MAX_ARCHIVE_MEMBER_BYTES:
+                    findings.append((member_display, "archive-member-too-large"))
+                    continue
+                scan_content(member_display, content, patterns, findings)
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
+        findings.append((display, "archive-invalid"))
+
+
+def main(argv: list[str]) -> int:
+    root = (
+        Path(argv[1]).resolve()
+        if len(argv) == 2
+        else Path(__file__).resolve().parents[2]
+    )
+    patterns = {name: re.compile(pattern) for name, pattern in PATTERNS.items()}
+    findings: list[tuple[str, str]] = []
+
+    for relative in INPUTS:
+        input_path = root / relative
+        if not input_path.exists() and not input_path.is_symlink():
+            continue
+        for path in files_in(input_path):
+            display = path.relative_to(root).as_posix()
+            if dockerignored(path, root):
+                continue
+            if path.is_symlink():
+                findings.append((display, "symlink"))
+                continue
+            if not path.is_file():
+                continue
+            content = path.read_bytes()
+            scan_content(display, content, patterns, findings)
+            if path.suffix == ".whl":
+                scan_wheel(path, display, patterns, findings)
+
+    if findings:
+        for path, name in findings:
+            print(f"{path}: {name}", file=sys.stderr)
+        return 1
+    print("public image inputs: PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

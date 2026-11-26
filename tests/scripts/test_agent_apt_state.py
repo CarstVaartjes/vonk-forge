@@ -18,7 +18,7 @@ from control.tests.insert_collision_support import Rendezvous
 pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/agent-apt-state"
+SCRIPT = ROOT / "scripts/agent/agent-apt-state"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 PACKAGE_BYTES = {"arm64": b"arm64 package bytes"}
 

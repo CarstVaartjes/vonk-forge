@@ -4,7 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts/sign-package-keyless"
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts/release/sign-package-keyless"
 CONFLICT = "[POST /api/v1/log/entries][409] createLogEntryConflict"
 
 # A fake cosign: sign-blob fails ``FAIL_SIGNS`` times with Rekor's 409 and then

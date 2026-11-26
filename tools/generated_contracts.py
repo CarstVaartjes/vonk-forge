@@ -36,14 +36,14 @@ INPUTS: tuple[str, ...] = (
     "control/pyproject.toml",
     "uv.lock",
     "pyproject.toml",
-    "scripts/check_environment.py",
-    "scripts/export-agent-wire-schema",
-    "scripts/generate-control-clients",
+    "scripts/dev/check_environment.py",
+    "scripts/dev/export-agent-wire-schema",
+    "scripts/dev/generate-control-clients",
 )
 _SKIPPED_DIRECTORIES = frozenset({"__pycache__", "node_modules", ".venv"})
 
-#: Outputs of scripts/generate-control-clients, compared byte for byte by
-#: scripts/check-generated-determinism.
+#: Outputs of scripts/dev/generate-control-clients, compared byte for byte by
+#: scripts/dev/check-generated-determinism.
 CLIENT_OUTPUTS: tuple[str, ...] = (
     "control/openapi.json",
     "src/cluster_profiles/schemas/control-openapi.json",
@@ -54,7 +54,7 @@ CLIENT_OUTPUTS: tuple[str, ...] = (
     "control/web/src/api/runtime.generated.js",
     "control/web/src/api/vocabulary.generated.ts",
 )
-#: Outputs of scripts/generate-agent-wire: the exported schema and the Rust
+#: Outputs of scripts/dev/generate-agent-wire: the exported schema and the Rust
 #: it renders. Cargo renders its own copy into OUT_DIR.
 WIRE_OUTPUTS: tuple[str, ...] = (
     "rust/crates/vonk-agent-protocol/schema/wire.json",
@@ -64,8 +64,8 @@ WIRE_OUTPUTS: tuple[str, ...] = (
 PREPARED_OUTPUTS: tuple[str, ...] = (*CLIENT_OUTPUTS, WIRE_OUTPUTS[0])
 
 COMMANDS: tuple[tuple[str, ...], ...] = (
-    ("scripts/generate-control-clients",),
-    ("scripts/export-agent-wire-schema", "--output", WIRE_OUTPUTS[0]),
+    ("scripts/dev/generate-control-clients",),
+    ("scripts/dev/export-agent-wire-schema", "--output", WIRE_OUTPUTS[0]),
 )
 
 

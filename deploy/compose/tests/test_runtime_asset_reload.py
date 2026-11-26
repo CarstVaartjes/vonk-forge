@@ -53,7 +53,7 @@ RESTART_ONLY = {
 
 def _services() -> dict[str, dict]:
     loader = importlib.machinery.SourceFileLoader(
-        "runtime_asset_reload_compose", str(ROOT / "scripts/render-dev-compose")
+        "runtime_asset_reload_compose", str(ROOT / "scripts/release/render-dev-compose")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None

@@ -13,7 +13,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from control.tests.parsed_sources import parse_file
-from scripts.protocol_wheel import protocol_wheel_name
+from scripts.release.protocol_wheel import protocol_wheel_name
 
 
 class Family(StrEnum):

@@ -11,7 +11,7 @@ usage() {
 Usage: scripts/test SUITE [--markers EXPR] [--shard I/N] [--durations FILE] [-- PYTEST_ARGS...]
 
 SUITE is one of:
-  changed     the guards plus only the tests your diff touches (scripts/test-changed)
+  changed     the guards plus only the tests your diff touches (scripts/dev/test-changed)
   guards      fast cross-area checks in tests/repository_guards.py
   repository  tests/, excluding guards
   control     control/tests, except the built-image and corpus-acceptance checks, the Rust wire
@@ -40,7 +40,7 @@ USAGE
 suite=$1
 shift
 if [[ "$suite" == changed ]]; then
-    exec scripts/test-changed "$@"
+    exec scripts/dev/test-changed "$@"
 fi
 files_from=
 shard=
@@ -65,7 +65,7 @@ case "$suite" in
     # eighty slow scenarios no longer keeps a worker busy while the others
     # idle; the few module-scoped fixtures are set up once per worker instead.
     guards)
-        guard_paths=$(python3 scripts/repository-guards)
+        guard_paths=$(python3 scripts/ci/repository-guards)
         paths=() selection=() parallel=(-n auto) prefix= suite_markers=
         while IFS= read -r path; do paths+=("$path"); done <<< "$guard_paths"
         ;;
@@ -100,7 +100,7 @@ esac
 # Guards have their own unconditional CI job; exclude exactly its reviewed
 # file/node selection before both collection and execution of the heavy suite.
 if [[ "$suite" == repository ]]; then
-    guard_exclusions=$(python3 scripts/repository-guards --exclusions)
+    guard_exclusions=$(python3 scripts/ci/repository-guards --exclusions)
     while IFS= read -r exclusion; do
         selection+=("$exclusion")
     done <<< "$guard_exclusions"
@@ -119,7 +119,7 @@ run() {
 # The installed-CLI tests link the CLI's locked dependencies from this
 # environment; keep it current so a dependency change cannot leave it stale.
 if [[ "$suite" == repository || "$suite" == control || "$suite" == corpus ]]; then
-    scripts/sync-cli-dependencies
+    scripts/dev/sync-cli-dependencies
 fi
 
 if [[ -n "$files_from" ]]; then

@@ -98,7 +98,7 @@ Current source anchors (paths are under `control/src/vonk_control`):
   hermeticity guards: **43 passed**.
 - Wait/remedy scans: **223 / 24 sites, zero violations**.
 - Ruff and format checks over all eight changed Python files: passed.
-- Full `scripts/check-python-types`: **one existing reviewed exception, no
+- Full `scripts/dev/check-python-types`: **one existing reviewed exception, no
   unlisted errors**. The installed recipe contract was stale; verification used
   a read-only export of the exact locked recipe-contract commit
   `bd5090708a13b7936a4c17bc97db7b1c8967e23a` outside the repository, with local

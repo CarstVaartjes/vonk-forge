@@ -18,7 +18,7 @@ def test_determinism_compares_output_bytes_and_membership(
     tmp_path, monkeypatch, capsys, change
 ):
     loader = importlib.machinery.SourceFileLoader(
-        "generated_determinism", str(ROOT / "scripts/check-generated-determinism")
+        "generated_determinism", str(ROOT / "scripts/dev/check-generated-determinism")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None

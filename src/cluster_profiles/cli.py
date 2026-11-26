@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, NoReturn, cast, overload
 
 from cluster_profiles.build_identity import current_build
-from cluster_profiles.cli_artifact_jobs import _may_have_completed
+from cluster_profiles.cli_artifact_jobs.client import _may_have_completed
 from cluster_profiles.cli_auth import AuthAction, run_auth
 from cluster_profiles.cli_auth import render as render_auth
 from cluster_profiles.cli_completion import completion_script

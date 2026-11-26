@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/supersede-release-runs"
+SCRIPT = ROOT / "scripts/ci/supersede-release-runs"
 APT = "Publish accepted ARM64 Spark agent package to apt dev"
 AUTHORITY = "Accept one complete source generation"
 

@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Export campaign schemas from the pinned canonical recipe contracts."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+if __name__ == "__main__":
+    from check_environment import run_in_control
+
+    run_in_control(ROOT)
+
+from vonk_forge_contracts.qualification_authority import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    campaign_authority_json_schema,
+    campaign_manifest_json_schema,
+)
+
+
+def rendered() -> dict[Path, str]:
+    """Every tracked campaign schema file and the content it must have."""
+
+    schemas = {
+        "qualification-authority-v5.schema.json": campaign_authority_json_schema(),
+        "qualification-campaign-manifest-v2.schema.json": campaign_manifest_json_schema(),
+    }
+    return {
+        ROOT / "src/cluster_profiles/schemas" / name: json.dumps(
+            schema, sort_keys=True, indent=2
+        )
+        + "\n"
+        for name, schema in schemas.items()
+    }
+
+
+def main() -> None:
+    argparse.ArgumentParser(description=__doc__).parse_args()
+    for output, content in rendered().items():
+        output.write_text(content, encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()
