@@ -12,7 +12,7 @@ def current_build() -> dict[str, object]:
     try:
         version = metadata.version("vonk-cluster-profiles")
     except metadata.PackageNotFoundError:
-        version = "0.1.1"
+        version = "0+unknown"
     try:
         value = json.loads(
             resources.files("cluster_profiles")

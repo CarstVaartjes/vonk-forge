@@ -31,6 +31,7 @@ def metadata_workspace(tmp_path: Path) -> Path:
         "Cargo.toml",
         "pyproject.toml",
         "control/pyproject.toml",
+        "nas_setup/pyproject.toml",
         "scripts/agent-package-metadata",
     ):
         source = ROOT / relative

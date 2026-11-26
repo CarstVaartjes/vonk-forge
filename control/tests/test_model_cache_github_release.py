@@ -19,6 +19,7 @@ from vonk_forge_contracts import ModelDefinition, document_sha256
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_retry import REQUEST_PAUSES
 from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
+from vonk_control.model_cache.constants import _GITHUB_USER_AGENT
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
@@ -36,7 +37,7 @@ ASSET_URL = f"https://api.github.com/repos/{OWNER}/{REPO}/releases/assets/{ASSET
 CDN_URL = (
     "https://release-assets.githubusercontent.com/download/asset?sig=fixture-secret"
 )
-GITHUB_USER_AGENT = "vonk-forge/0.1.1"
+GITHUB_USER_AGENT = _GITHUB_USER_AGENT
 
 
 @pytest.fixture

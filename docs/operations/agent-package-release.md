@@ -56,6 +56,12 @@ failed apt publication is therefore healed by the next release building again.
 Producer artifacts, markers, acceptance and promotion receipts are kept for 90
 days, the repository maximum, which bounds how long evidence can be reused.
 
+One version owner: the workspace version lives in `Cargo.toml`, `pyproject.toml`,
+`control/pyproject.toml` and `nas_setup/pyproject.toml`
+(`scripts/agent-package-metadata` refuses release metadata when they differ).
+Nothing else spells it: the Controller's GitHub user agent reads the installed
+`vonk-control` distribution, and an unstamped vonkctl reports `0+unknown`.
+
 Development agent packages are versioned `X.Y.Z~dev.<seconds>+g<sha>`, where
 `<seconds>` is the source commit's committer time
 (`scripts/dev-publication-sequence`): the same scheme as a pull request
