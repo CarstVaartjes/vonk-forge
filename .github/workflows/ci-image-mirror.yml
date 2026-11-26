@@ -33,9 +33,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/apt-install
-        with:
-          packages: skopeo
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
@@ -54,7 +51,17 @@ jobs:
           name=${name%%:*}
           digest=${source##*@}
           owner=${OWNER,,}
-          scripts/ci/retry-dependency-fetch skopeo copy --all --preserve-digests \
+          # The runner's apt skopeo (1.13) cannot write an OCI index whose
+          # entries carry artifactType without rewriting it, so a digest-exact
+          # copy fails; run the reviewed skopeo pin instead.
+          skopeo_image=$(jq -r .build_bases.skopeo deploy/compose/images.lock.json)
+          scripts/ci/retry-dependency-fetch docker pull --quiet "$skopeo_image"
+          skopeo="$RUNNER_TEMP/bin/skopeo"
+          mkdir -p "${skopeo%/*}"
+          printf '#!/bin/sh\nexec docker run --rm --volume "$HOME/.docker/config.json:/auth.json:ro" --env REGISTRY_AUTH_FILE=/auth.json %s "$@"\n' \
+            "$skopeo_image" >"$skopeo"
+          chmod +x "$skopeo"
+          scripts/ci/retry-dependency-fetch "$RUNNER_TEMP/bin/skopeo" copy --all --preserve-digests \
             "docker://${name}@${digest}" \
             "docker://ghcr.io/${owner}/ci-mirror/${name}:${digest#sha256:}"
 
