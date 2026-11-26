@@ -328,7 +328,7 @@ def test_update_installs_only_changed_signed_wheel(
         seen.append(command)
         # Installed as a uv tool, so the release's dependencies resolve and
         # the tool receipt follows the new wheel.
-        assert command[1:6] == ["tool", "install", "--force", "--python", "3.14"]
+        assert command[1:6] == ["tool", "install", "--force", "--python", "3.15"]
         assert command[-1].endswith(".whl")
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -738,7 +738,7 @@ def _prepare_signed_update_tool(
     assert interpreters.is_dir(), "the hosted managed interpreter directory is absent"
     uv = shutil.which("uv")
     if uv is None or sys.version_info[:2] != (3, 14):
-        message = "installed update proof requires uv and Python 3.14"
+        message = "installed update proof requires uv and Python 3.15"
         if os.environ.get("CI", "").lower() == "true":
             pytest.fail(message, pytrace=False)
         pytest.skip(message)
@@ -838,7 +838,7 @@ def _prepare_signed_update_tool(
         [wheel] = directory.glob("vonk_cluster_profiles-*-py3-none-any.whl")
         wheels.append(wheel)
     installed = subprocess.run(
-        [uv, "tool", "install", "--force", "--python", "3.14", str(wheels[0])],
+        [uv, "tool", "install", "--force", "--python", "3.15", str(wheels[0])],
         env=environment,
         cwd=workspace,
         capture_output=True,
@@ -1001,7 +1001,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
     before_tool_receipt = receipt_path.read_bytes()
     marker = (
         python.parent.parent
-        / "lib/python3.14/site-packages/cluster_profiles/update_fixture_marker.py"
+        / "lib/python3.15/site-packages/cluster_profiles/update_fixture_marker.py"
     )
     assert marker.is_file()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

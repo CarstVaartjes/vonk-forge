@@ -311,7 +311,7 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version-file: .tool-versions
-          python-version: "3.14"
+          python-version: "3.15"
           enable-cache: true
           save-cache: ${{ github.ref == 'refs/heads/main' }}
       - name: Authenticate CI image mirror reads

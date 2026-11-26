@@ -339,7 +339,7 @@ def local_installer_command(root: Path, answers: Path) -> list[str] | None:
         "--isolated",
         "--no-project",
         "--python",
-        "3.14",
+        "3.15",
         "--with",
         setup,
         "vonk-nas-setup",

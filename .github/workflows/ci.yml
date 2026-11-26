@@ -236,7 +236,7 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version-file: .tool-versions
-          python-version: "3.14"
+          python-version: "3.15"
           enable-cache: true
           cache-dependency-glob: agent_protocol/pyproject.toml
           save-cache: ${{ github.ref == 'refs/heads/main' }}
@@ -1205,7 +1205,7 @@ jobs:
       - name: Install Python for the dependency fetch helper
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.15"
       - name: Prepare the contract consumers for the web build and the corpus
         # The corpus emission imports the generated Python client, and the
         # web hooks read the generated TypeScript types; one stamped

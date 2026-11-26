@@ -47,9 +47,9 @@ def test_matching_environment_is_accepted(
     "stamp",
     [
         None,
-        "darwin-arm64 python3.14\n"
+        "darwin-arm64 python3.15\n"
         if cli_dependencies.platform_key() != "darwin-arm64"
-        else "linux-arm64 python3.14\n",
+        else "linux-arm64 python3.15\n",
         f"{cli_dependencies.platform_key()} python2.7\n",
     ],
     ids=["unstamped", "other-platform", "other-interpreter"],

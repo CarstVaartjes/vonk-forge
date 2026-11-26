@@ -265,13 +265,16 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
   `# pyright: ignore[rule]  # reason`. Never add a `# type: ignore`, a
   file-level `# ruff: noqa`, or a per-file ignore; the per-file entries that
   exist are guard-blocked sites awaiting their class follow-up.
-- Python code targets 3.14. A file another interpreter runs (a container
-  image's Python, a runner's or host's `python3`), and every repository module
-  such a file imports, sits under a py313/py312 `per-file-target-version` entry
-  in `pyproject.toml` (`deploy/`, `scripts/`, `tests/nodes/`, `agent_protocol/`,
-  `tools/generated_contracts.py`, and `tests/acceptance/`, whose sources the
-  Spark lane parses with the runner's 3.12); it imports the 3.14 packages only
-  when uv runs it.
+- Python code runs on 3.15 (`.python-version` is the single owner; a guard
+  checks every CI/script spelling against it). Ruff stays at py314 on purpose:
+  py314 rejects PEP 810 `lazy import` as invalid syntax, enforcing the
+  no-lazy-imports rule. A file another interpreter runs (a container image's
+  Python, a runner's or host's `python3`), and every repository module such a
+  file imports, sits under a py313/py312 `per-file-target-version` entry in
+  `pyproject.toml` (`deploy/` 3.13; `scripts/`, `tests/nodes/`,
+  `tests/acceptance/` and `tools/generated_contracts.py` 3.12, the ubuntu-24.04
+  runner's python3; `agent_protocol/` 3.12, the recipe adapter images' system
+  python); it imports the 3.15 packages only when uv runs it.
 - Every application route appears in the full OpenAPI schema; never use
   `include_in_schema=False` in production routes.
 - Consume wire and persisted JSON with the canonical model's JSON validation

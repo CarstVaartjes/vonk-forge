@@ -61,7 +61,7 @@ RUST_TOOLCHAIN = tomllib.loads(
     (REPO_ROOT / "rust-toolchain.toml").read_text(encoding="utf-8")
 )["toolchain"]["channel"]
 UV_VERSION = (REPO_ROOT / ".tool-versions").read_text().split()[1]
-PYTHON_VERSION = "3.14"
+PYTHON_VERSION = "3.15"
 RECIPE_REVISION_FILE = Path("tests/acceptance/recipe-library-revision.txt")
 # Whitespace-normalized form of the CI step "Exercise Controller requests and
 # Spark results together". This exact string is executed by the lane.

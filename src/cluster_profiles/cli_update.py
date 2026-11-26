@@ -448,7 +448,7 @@ def run_update(
             "install",
             "--force",
             "--python",
-            "3.14",
+            "3.15",
             str(wheel_path),
         ]
         for attempt in range(3):

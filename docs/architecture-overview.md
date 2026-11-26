@@ -443,7 +443,7 @@ NAS/project setup and admin tooling are Python. The standalone `nas_setup`
 project builds one portable wheel, bundling the canonical protocol source. The
 signed schema-2 release binds `nas-setup-wheel` and the NAS template payload to
 exact digests. The shell entry point verifies both before installed `uv` runs the
-wheel in an isolated Python 3.14 environment. It prepares the same Compose
+wheel in an isolated Python 3.15 environment. It prepares the same Compose
 project on Intel or ARM Linux and macOS; there is no native NAS executable
 matrix or desktop installer. `vonkctl` remains the separate Python admin CLI.
 

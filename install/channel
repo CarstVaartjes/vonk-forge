@@ -208,7 +208,7 @@ from cluster_profiles.runtime_identity import verified_wheel_identity
 with zipfile.ZipFile(sys.argv[1]) as archive:
     verified_wheel_identity(archive, version=sys.argv[2], source_sha=sys.argv[3])
 PY
-    uv tool install --force --python 3.14 "$wheel" || fail "uv could not install the verified CLI wheel"
+    uv tool install --force --python 3.15 "$wheel" || fail "uv could not install the verified CLI wheel"
     printf '%s\n' "vonkctl $cli_version is installed. Run 'vonkctl --version' to confirm."
     printf '%s\n' "For signed updates, run: vonkctl update --apply"
     exit 0

@@ -130,7 +130,7 @@ def _run_bootstrap(
         commands,
         "uv",
         '[ "$1" = run ] && [ "$2" = --isolated ] && [ "$3" = --no-project ]\n'
-        '[ "$4" = --python ] && [ "$5" = 3.14 ] && [ "$6" = --with ]\n'
+        '[ "$4" = --python ] && [ "$5" = 3.15 ] && [ "$6" = --with ]\n'
         'wheel=$7; [ -f "$wheel" ]; case "$wheel" in *.whl) ;; *) exit 98 ;; esac\n'
         'shift 7; [ "$1" = vonk-nas-setup ]; shift\nexec sh "$wheel" "$@"\n',
     )

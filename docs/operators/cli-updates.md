@@ -16,7 +16,7 @@ vonkctl update --apply
 The command verifies the unexpired signed channel pointer, immutable signed
 release and exact CLI wheel digest. `--apply` installs only when the accepted
 source commit differs from the currently installed CLI. It reinstalls the
-verified wheel with `uv tool install --force --python 3.14`, the same command the
+verified wheel with `uv tool install --force --python 3.15`, the same command the
 installer uses, so dependencies a release adds or raises are resolved from the
 package index; `uv` must be available. The command neither edits
 Controller credentials nor changes the chosen channel or installer signing key.
