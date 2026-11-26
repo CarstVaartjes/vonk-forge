@@ -18615,6 +18615,7 @@
         "gpu-clock.invalid",
         "gpu-clock.above-default",
         "run-switch.active-run-conflict",
+        "run-switch.alias-taken",
         "run-switch.advance-failed",
         "run-switch.agent-upgrade-required",
         "run-switch.artifact-identity-unknown",
@@ -24111,6 +24112,7 @@
         "route-publication",
         "route-recovery",
         "catalog-sync",
+        "external-model",
         "certificate",
         "certificate-revocation",
         "coordinator"

@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BeforeValidator, ConfigDict, Field, JsonValue, StringConstraints
+from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_forge_contracts import EndpointAlias
 
 from vonk_control.stored.json_values import ExternalPassthrough
@@ -35,24 +35,22 @@ PROVIDER_ORIGIN_PREFIX = "provider:"
 _DEFAULT_HTTPS_PORT = re.compile(r"^(https://(?:\[[0-9a-f:.]+\]|[a-z0-9.\-]+)):443$")
 
 
-def normalise_origin(value: object) -> object:
+def normalise_origin(value: str) -> str:
     """The one spelling of an origin: the default ``https`` port is left off.
 
-    ``https://host`` and ``https://host:443`` name one origin.  Entries and
-    bindings both read their origins through this function, so a binding that
-    approves one spelling approves the other.
+    ``https://host`` and ``https://host:443`` name one origin.  An entry's origins
+    and a binding's approved origins both read through this function, so a binding
+    that approves one spelling approves the other.
     """
 
-    if isinstance(value, str) and (match := _DEFAULT_HTTPS_PORT.fullmatch(value)):
-        return match.group(1)
-    return value
+    match = _DEFAULT_HTTPS_PORT.fullmatch(value)
+    return match.group(1) if match else value
 
 
 #: ``https://host[:port]`` for a network destination, ``provider:<name>`` for a
 #: provider-native one that names no URL.
 Origin = Annotated[
     str,
-    BeforeValidator(normalise_origin),
     StringConstraints(
         pattern=r"^(https://[a-z0-9.\-\[\]:]{1,253}|"
         + PROVIDER_ORIGIN_PREFIX
@@ -61,7 +59,7 @@ Origin = Annotated[
 ]
 
 LiteLlmValue = Annotated[
-    JsonValue,
+    Any,
     ExternalPassthrough(
         "A LiteLLM litellm_params or model_info value: LiteLLM, not the Controller, "
         "owns the type of each field. The pinned surface (surface.json) is checked "
@@ -173,8 +171,16 @@ class ApprovedDestination(StrictModel):
     """
 
     origin: Origin
-    region: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    region: str | None = None
     private: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_spelling(cls, value: object) -> object:
+        # A model-level read, so the field keeps its constraint in both schemas.
+        if isinstance(value, dict) and isinstance(value.get("origin"), str):
+            return {**value, "origin": normalise_origin(value["origin"])}
+        return value
 
 
 class CredentialBinding(StrictModel):

@@ -35,6 +35,7 @@ from vonk_control.gateway.external_contract import (
     ExternalModelInput,
     LiteLlmFields,
     Origin,
+    normalise_origin,
 )
 from vonk_control.gateway.litellm import LiteLlmModelInfo
 from vonk_control.gateway.litellm_surface import LiteLlmSurface
@@ -418,7 +419,7 @@ def _origin(text: str) -> str | ExternalEntryCode:
         f"https://{f'[{host}]' if ':' in host else host}{f':{port}' if port else ''}"
     )
     try:
-        return _ORIGIN.validate_python(origin, strict=True)
+        return _ORIGIN.validate_python(normalise_origin(origin), strict=True)
     except ValueError:  # a host the origin contract cannot carry (such as "_" or IDN)
         return ExternalEntryCode.TYPE_MISMATCH
 
