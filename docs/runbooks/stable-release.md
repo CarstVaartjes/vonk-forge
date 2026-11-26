@@ -79,9 +79,16 @@ git -c gpg.format=ssh \
   -c gpg.ssh.program=/Applications/1Password.app/Contents/MacOS/op-ssh-sign \
   -c user.signingkey="key::ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB8F2mAFzxnRmpCedoSC+acezPYg35X6sVUg8CP2IlgV" \
   tag -s vX.Y.Z <sha> -m "vX.Y.Z"
-git -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag vX.Y.Z
-git push origin vX.Y.Z
+git -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag vX.Y.Z \
+  && git push origin vX.Y.Z
 ```
+
+The `key::` value is the public key in `.github/release-allowed-signers` (check
+it still matches before signing); 1Password asks for approval when signing.
+`verify-tag` reads that file from the working tree, so run it on the up-to-date
+main checkout; it must print `Good "git" signature` for that principal, and the
+push only runs when it does. To retry, delete the local tag with
+`git tag -d vX.Y.Z` and sign again; never push a tag that failed verification.
 
 The owner then approves two deployments in the Actions run of the tag:
 
@@ -96,13 +103,6 @@ The owner then approves two deployments in the Actions run of the tag:
   `:latest` and the installer pointer. The reviewer is not on
   `installer-promotion-stable`: the daily `installer-maintenance` refresh runs in
   that environment from `main` and would otherwise wait for a click every day.
-
-The `key:: value is the public key in `.github/release-allowed-signers` (check
-it still matches before signing). `verify-tag` reads that file from the working
-tree, so run it on the up-to-date main checkout; it must print
-`Good "git" signature` for that principal before you push. To retry, delete the
-local tag with `git tag -d vX.Y.Z` and sign again; never push a tag that failed
-verification.
 
 ## What becomes public when
 
