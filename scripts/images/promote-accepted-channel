@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Advance one fully accepted image set, then its signed installer pointer.
+# Advance one fully accepted image set, then its signed installer pointer, then
+# the channel's accepted recipe-tools bundle and, last, its pointer.
 set -euo pipefail
 umask 077
 
-[[ $# == 9 && ( $1 == run || $1 == commit ) ]] || exit 64
+[[ $# == 10 && ( $1 == run || $1 == commit ) ]] || exit 64
 mode=$1
 shift
 bundle=$1 evidence=$2 fingerprint=$3 remote=$4
-channel=$5 authority_ref=$6 source_sha=$7 tag_oid=$8
+channel=$5 authority_ref=$6 source_sha=$7 tag_oid=$8 recipe_tools=$9
 [[ $channel == dev || $channel == stable ]] || exit 64
 [[ $source_sha =~ ^[0-9a-f]{40}$ && $fingerprint =~ ^[0-9a-f]{64}$ ]] || exit 64
 publication=(scripts/release/install-release-publication promote
@@ -71,6 +72,13 @@ scripts/images/promote-image-aliases \
   "${images[0]}" "${digests[0]}" "${images[1]}" "${digests[1]}" "$alias" \
   "${images[2]}" "${digests[2]}" \
   --commit "$0" commit "$@"
+
+# Only after the image set and the installer pointer stand: a failure here
+# leaves both promoted (no alias rollback) and a rerun of this job publishes
+# the same content-addressed bundle and pointer again.
+scripts/release/install-release-publication publish-recipe-tools \
+  --bundle-file "$recipe_tools" --channel "$channel" --source-sha "$source_sha" \
+  --ref "$authority_ref" --rclone-remote "$remote"
 
 # Keep a durable, human-readable record beside the pointer publication receipt.
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then

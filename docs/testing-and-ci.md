@@ -862,12 +862,15 @@ rebinds them. A moved test keeps its body, so the per-test time budget does not 
 ### Cross-repo nightly
 
 Every other lane pins `vonk-forge-recipes` to a reviewed revision.
-`.github/workflows/cross-repo-nightly.yml` runs nightly (and on demand) with
-`main` of vonk-forge and `main` of vonk-forge-recipes and runs the recipe
-validator that `validate-recipe-library.yml` runs. It only reads, and a failed
-job is the alarm; the fix is a pin move or a contract fix in the repository that
-drifted, never a gate on unrelated pull requests. The recipes repository owns
-its `platform_ref` pin (see `docs/runbooks/supply-chain.md`).
+`.github/workflows/cross-repo-nightly.yml` runs nightly (and on demand) and
+validates `main` of vonk-forge-recipes with the published dev recipe-tools
+bundle, exactly as recipes CI does: it fetches `artifacts/dev/recipe-tools.json`,
+checks the bundle's digest and its keyless attestation from
+`installer-publication.yml`, and runs the bundle's
+`scripts/recipes/validate-recipe-checkout`. It only reads, and a failed job is
+the alarm; the fix is a contract fix in the repository that drifted, never a
+gate on unrelated pull requests. The bundle is described in
+[Recipe-tools bundle](runbooks/platform-release-publication.md#recipe-tools-bundle).
 
 ### Fuzzing
 

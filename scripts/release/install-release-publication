@@ -1971,6 +1971,52 @@ def promote(arguments: argparse.Namespace) -> None:
     _copy_publication_entry(filesystem, remote, *pointers[0])
 
 
+STABLE_REF = re.compile(
+    r"refs/tags/v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z"
+)
+
+
+def publish_recipe_tools(arguments: argparse.Namespace) -> None:
+    """Publish one accepted recipe-tools bundle, then its channel pointer last.
+
+    Promotion calls this only after the installer pointer advanced, so the
+    pointer follows the same accepted, never-regressing source. The pointer
+    names the bundle by file name, relative to the pointer's own directory.
+    """
+    channel, source_sha, ref = arguments.channel, arguments.source_sha, arguments.ref
+    if SOURCE_SHA.fullmatch(source_sha) is None:
+        raise PublicationError("recipe-tools source is invalid")
+    if (channel == "dev" and ref != "refs/heads/main") or (
+        channel == "stable" and STABLE_REF.fullmatch(ref) is None
+    ):
+        raise PublicationError("recipe-tools ref does not match its channel")
+    content = _safe_bytes(arguments.bundle_file, "recipe-tools bundle")
+    name = f"recipe-tools-{source_sha}.tar.gz"
+    # Any phase but endpoint or pointer is written once and never replaced.
+    bundle = _object_entry(f"artifacts/{channel}/{name}", content, "bundle")
+    pointer = (
+        json.dumps(
+            {
+                "bundle": name,
+                "ref": ref,
+                "sha256": bundle["sha256"],
+                "source_sha": source_sha,
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode()
+    filesystem, remote = _destination(arguments)
+    _copy_publication_entry(filesystem, remote, bundle, arguments.bundle_file)
+    with tempfile.TemporaryDirectory(prefix="recipe-tools-pointer-") as directory:
+        source = Path(directory) / "recipe-tools.json"
+        source.write_bytes(pointer)
+        entry = _object_entry(
+            f"artifacts/{channel}/recipe-tools.json", pointer, "pointer"
+        )
+        _copy_publication_entry(filesystem, remote, entry, source)
+
+
 def _stable_published(filesystem: Path | None, remote: str | None) -> bool:
     key = "artifacts/stable/current.manifest"
     if filesystem is not None:
@@ -2210,6 +2256,14 @@ def parser() -> argparse.ArgumentParser:
     promotion_destinations = promotion.add_mutually_exclusive_group(required=True)
     promotion_destinations.add_argument("--filesystem", type=Path)
     promotion_destinations.add_argument("--rclone-remote")
+    tools = commands.add_parser("publish-recipe-tools")
+    tools.add_argument("--bundle-file", type=Path, required=True)
+    tools.add_argument("--channel", choices=("dev", "stable"), required=True)
+    tools.add_argument("--source-sha", required=True)
+    tools.add_argument("--ref", required=True)
+    tools_destinations = tools.add_mutually_exclusive_group(required=True)
+    tools_destinations.add_argument("--filesystem", type=Path)
+    tools_destinations.add_argument("--rclone-remote")
     renewal = commands.add_parser("refresh")
     renewal.add_argument("--channel", choices=("dev", "stable"), required=True)
     renewal.add_argument("--expires-at", required=True, type=int)
@@ -2237,6 +2291,8 @@ def main(argv: list[str] | None = None) -> int:
             publish_candidate(arguments)
         elif arguments.command == "promote":
             promote(arguments)
+        elif arguments.command == "publish-recipe-tools":
+            publish_recipe_tools(arguments)
         else:
             refresh(arguments)
     except (OSError, PublicationError, ValueError, subprocess.TimeoutExpired) as error:

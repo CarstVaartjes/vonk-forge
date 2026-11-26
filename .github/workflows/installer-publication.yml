@@ -564,7 +564,12 @@ jobs:
       queue: max
     permissions:
       actions: read
+      # Keyless attestation of the accepted recipe-tools bundle: recipes CI
+      # verifies it with `gh attestation verify --signer-workflow` naming this
+      # file, so the attesting job stays in this workflow.
+      attestations: write
       contents: read
+      id-token: write
       packages: write
     steps:
       - name: Check out exact promotion tooling
@@ -585,6 +590,30 @@ jobs:
         with:
           name: installer-acceptance-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
           path: ${{ runner.temp }}/acceptance
+
+      - name: Download the accepted recipe-tools bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: recipe-tools-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
+          path: ${{ runner.temp }}/recipe-tools
+
+      # The attestation binds the bundle to this run's source and ref, which
+      # recipes CI checks against the pointer (--source-digest, --source-ref).
+      - name: Bind the recipe-tools bundle to the release source
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          AUTHORITY_REF: ${{ needs.authority.outputs.authority_ref }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$AUTHORITY_REF" = "$GITHUB_REF"
+          test -f "$RUNNER_TEMP/recipe-tools/recipe-tools.tar.gz"
+
+      - name: Attest the accepted recipe-tools bundle
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/recipe-tools/recipe-tools.tar.gz
 
       - name: Install publication clients
         shell: bash
@@ -624,6 +653,7 @@ jobs:
             "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" \
             "r2:$R2_INSTALLER_PUBLIC_BUCKET" \
             "$CHANNEL" "$AUTHORITY_REF" "$SOURCE_SHA" "$TAG_OID" \
+            "$RUNNER_TEMP/recipe-tools/recipe-tools.tar.gz" \
             | tee "$RUNNER_TEMP/promotion-receipt.jsonl"
 
       - name: Upload promotion receipt

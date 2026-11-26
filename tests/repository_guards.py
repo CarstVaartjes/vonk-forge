@@ -442,6 +442,18 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "lifecycle canary: fixed entrypoint/fixture behavior.",
     ),
     (
+        "tests/scripts/test_build_recipe_tools_bundle.py",
+        "The recipe-tools bundle is byte-identical for one tree whatever its mtimes and write order, with normalised members, and refuses a missing path.",
+    ),
+    (
+        "tests/scripts/test_install_release_publication_recipe_tools.py",
+        "publish-recipe-tools stores the bundle by source before its channel pointer and publishes nothing for a ref outside its channel.",
+    ),
+    (
+        "control/tests/test_platform_features.py",
+        "Every value platform-features declares has an executing handler, and a value without one is caught.",
+    ),
+    (
         "tests/scripts/test_promote_accepted_channel.py",
         "promote accepted channel: fixed entrypoint/fixture behavior.",
     ),

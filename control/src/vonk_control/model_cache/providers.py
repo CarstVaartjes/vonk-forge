@@ -60,6 +60,10 @@ class Provider:
     # Detail of the typed error a transport failure becomes, if the provider
     # owns one; otherwise the transport error propagates unchanged.
     transport_failure: str | None = None
+    # The Model ``source.provider`` word a catalog source of this kind carries
+    # (``HUGGINGFACE_SOURCE`` for a source with none); None when no Model
+    # source downloads as this kind.
+    model_source: str | None = None
 
 
 def _repository_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | None]:
@@ -354,6 +358,9 @@ def _github_lfs_binding(spec: ArtifactSpec) -> tuple[str, str, str, str]:
     return owner, name, revision, spec.path
 
 
+# A Model source with no ``provider`` word is a Hugging Face repository.
+HUGGINGFACE_SOURCE = "huggingface"
+
 PROVIDERS: dict[str, Provider] = {
     ProviderKind.HUGGINGFACE_FILE: Provider(
         catalog_source=_huggingface_catalog_source,
@@ -362,6 +369,7 @@ PROVIDERS: dict[str, Provider] = {
         open=_open_http,
         production=True,
         parts=True,
+        model_source=HUGGINGFACE_SOURCE,
     ),
     ProviderKind.GITHUB_RELEASE_ASSET: Provider(
         catalog_source=_github_release_catalog_source,
@@ -370,6 +378,7 @@ PROVIDERS: dict[str, Provider] = {
         open=_open_github_release,
         production=True,
         transport_failure="GitHub release asset transfer failed",
+        model_source="github-release",
     ),
     ProviderKind.GITHUB_LFS_OBJECT: Provider(
         catalog_source=_github_lfs_catalog_source,
@@ -378,6 +387,7 @@ PROVIDERS: dict[str, Provider] = {
         open=_open_github_lfs,
         production=True,
         transport_failure="GitHub LFS object transfer failed",
+        model_source="github-lfs",
     ),
     ProviderKind.HTTP_FILE: Provider(
         catalog_source=_repository_catalog_source,
@@ -406,6 +416,22 @@ def provider_for(kind: str) -> Provider:
             ModelCacheCode.ARTIFACT_INVALID, "cache artifact kind is unsupported"
         )
     return provider
+
+
+def model_source_kind(provider: str) -> str | None:
+    """The artifact kind a Model source with this ``provider`` word downloads as."""
+
+    return next(
+        (kind for kind, entry in PROVIDERS.items() if entry.model_source == provider),
+        None,
+    )
+
+
+# The Model source provider words this cache downloads;
+# scripts/recipes/platform-features publishes them to recipes CI.
+MODEL_SOURCE_PROVIDERS = frozenset(
+    entry.model_source for entry in PROVIDERS.values() if entry.model_source is not None
+)
 
 
 def source_is_repository(kind: str) -> bool:

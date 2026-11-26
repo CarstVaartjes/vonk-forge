@@ -253,8 +253,16 @@ text of this section:
   acceptance are distinct claims; record exact revisions and remaining gaps.
 - The coordination scanner detects defined syntax patterns only. New violations
   fail only on added lines; there are no debt counts or ledgers to update.
-- `cross-repo-nightly.yml` validates the recipes `main` library with the platform
-  `main` validator every night (a red run is the drift alarm); `fuzz.yml` fuzzes
+- Recipes CI validates with the signed per-channel recipe-tools bundle
+  (`scripts/recipes/build-recipe-tools-bundle`, entry point
+  `scripts/recipes/validate-recipe-checkout`). Its `platform-features.json`
+  comes only from the tables the platform executes (`scripts/recipes/platform-features`;
+  a value without a handler fails `control/tests/test_platform_features.py`);
+  never type a feature value by hand. Release acceptance runs the extracted
+  bundle against the pinned library, and promotion writes its pointer last; see
+  [Recipe-tools bundle](docs/runbooks/platform-release-publication.md#recipe-tools-bundle).
+- `cross-repo-nightly.yml` validates the recipes `main` library with the published
+  dev recipe-tools bundle every night (a red run is the drift alarm); `fuzz.yml` fuzzes
   the parsers in `rust/fuzz` (the fix adds one case to the parser's existing test).
 
 ## Current contracts only: no legacy compatibility

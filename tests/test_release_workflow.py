@@ -249,6 +249,7 @@ def test_acceptance_failure_reports_upload_without_forgiving_the_failed_run() ->
     signing = load(ACCEPTANCE)["jobs"]["acceptance"]
     for job in (
         "nas-acceptance",
+        "recipe-tools-acceptance",
         "spark-acceptance",
         "spark-upgrade-acceptance",
         "spark-recipe-refresh",
@@ -1112,6 +1113,7 @@ def test_main_reuses_each_spark_step_independently(
     signing = re.sub(r"needs\['([^']+)'\]", r"needs.\1", signing)
     for name in (
         "nas-acceptance",
+        "recipe-tools-acceptance",
         "spark-acceptance",
         "spark-upgrade-acceptance",
         "spark-recipe-refresh",
@@ -1139,6 +1141,10 @@ def test_main_reuses_each_spark_step_independently(
     context["needs.spark-recipe-refresh.result"] = "failure"
     assert not can_sign()
     context["needs.spark-recipe-refresh.result"] = "success"
+    # A recipe-tools bundle that refused the pinned library is never signed.
+    context["needs.recipe-tools-acceptance.result"] = "failure"
+    assert not can_sign()
+    context["needs.recipe-tools-acceptance.result"] = "success"
     # Signing requires every scheduled Spark step to succeed.
     context["needs.spark-acceptance.result"] = "failure"
     assert not can_sign()
