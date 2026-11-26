@@ -432,22 +432,14 @@ def _model_counts(rows: Sequence[Any]) -> tuple[int, int]:
     return len(models), len(variants)
 
 
-#: ``vonkctl recipe`` prints this many rows unless ``--all`` or ``--wide`` asks for more.
-COMPACT_RECIPE_ROWS = 20
-
-
-def recipe_cut_note(loaded: int, printed: int) -> None:
-    """Say how many loaded recipes the bare listing did not print."""
-    if loaded > printed:
-        print(f"Showing {printed} of {loaded}; --all lists every one.")
-
-
 class _Row(Protocol):
     def get(self, key: str, /) -> object: ...
 
 
-def top_recipes(rows: Sequence[_Row]) -> list[_Row]:
-    """The bare ``vonkctl recipe`` rows: running first, then preparing, then Working."""
+def ranked_recipes(rows: Sequence[_Row]) -> list[_Row]:
+    """Every bare ``vonkctl recipe`` row: running first, then preparing, then Working.
+
+    The order only ranks; no row is dropped, whatever its qualification."""
 
     def flags(item: _Row) -> tuple[bool, bool, bool]:
         local = _object(item.get("local"), "local")
@@ -459,8 +451,7 @@ def top_recipes(rows: Sequence[_Row]) -> list[_Row]:
             == QualificationStatus.WORKING,
         )
 
-    ranked = sorted(rows, key=lambda row: tuple(not flag for flag in flags(row)))
-    return ranked[:COMPACT_RECIPE_ROWS]
+    return sorted(rows, key=lambda row: tuple(not flag for flag in flags(row)))
 
 
 def _compact_table(labels: list[str], rows: list[list[object]]) -> None:
