@@ -46,6 +46,7 @@ from vonk_control.models.fleet import (
     FleetProfileApplication,
     FleetProfileSelection,
 )
+from vonk_control.models.gateway import GatewayExternalDeployment
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.models.routes import RoutePublicationOwner
@@ -349,6 +350,7 @@ def owner_identity(
         (FleetProfileSelection, WaitOwnerKind.SELECTED_PROFILE),
         (ModelCacheOperation, WaitOwnerKind.MODEL_CACHE),
         (RecipeLibrarySyncRun, WaitOwnerKind.CATALOG_SYNC),
+        (GatewayExternalDeployment, WaitOwnerKind.EXTERNAL_MODEL),
         (RecipeRun, WaitOwnerKind.ROUTE_RECOVERY),
         (RoutePublicationOwner, WaitOwnerKind.ROUTE_PUBLICATION),
         (AgentCertificate, WaitOwnerKind.CERTIFICATE),

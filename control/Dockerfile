@@ -223,6 +223,10 @@ COPY --from=skopeo /skopeo-runtime/lib /usr/local/lib/skopeo
 COPY --from=skopeo /etc/containers /etc/containers
 
 COPY --from=skopeo /usr/share/containers /usr/share/containers
+# What the pinned LiteLLM accepts in an external model entry: the API admits an
+# entry against it, so the Controller image ships the file generated from the
+# pinned LiteLLM image (CI regenerates it and fails on any difference).
+COPY deploy/compose/litellm/surface.json /usr/local/share/vonk-forge/litellm-surface.json
 RUN mkdir -p /etc/pki/tls/certs \
     && ln -sf /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt \
     && ln -sf certs/ca-bundle.crt /etc/pki/tls/cert.pem \

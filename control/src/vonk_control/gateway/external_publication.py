@@ -114,7 +114,7 @@ def _aware(value: datetime) -> datetime:
     ).astimezone(UTC)
 
 
-def _bindings(session: Session) -> Mapping[str, CredentialBinding]:
+def read_bindings(session: Session) -> Mapping[str, CredentialBinding]:
     """The approved destinations by binding name; an unreadable record approves nothing."""
 
     found: dict[str, CredentialBinding] = {}
@@ -180,7 +180,7 @@ def plan_externals(
     no longer approves its destination) applies in every plan.
     """
 
-    bindings = _bindings(session)
+    bindings = read_bindings(session)
     served: list[ServedExternal] = []
     withdrawing: set[str] = set()
     rows = session.scalars(

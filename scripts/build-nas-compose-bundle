@@ -164,6 +164,14 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
                 "bind": {"create_host_path": True},
             }:
                 continue
+            if name == "runtime-init" and volume == {
+                "type": "bind",
+                "source": "./secrets/gateway-credentials",
+                "target": "/gateway-credentials",
+                "read_only": True,
+                "bind": {"create_host_path": True},
+            }:
+                continue
             source = _volume_source(volume)
             if source is not None and (
                 source.startswith((".", "/", "~")) or "/" in source

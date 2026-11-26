@@ -55,10 +55,16 @@ class AliasTaken(InvalidRequestError):
         self.owner = owner
 
 
-def alias_owner(session: Session, alias: str) -> AliasOwner | None:
-    """Who serves ``alias`` now: an external row, an active run or the selected profile."""
+def alias_owner(
+    session: Session, alias: str, *, own_deployment_id: str | None = None
+) -> AliasOwner | None:
+    """Who serves ``alias`` now: an external row, an active run or the selected profile.
 
-    if alias in external_aliases(session, (alias,)):
+    ``own_deployment_id`` is the external deployment asking: its own row does not
+    take its name from it.
+    """
+
+    if alias in external_aliases(session, (alias,), exclude_id=own_deployment_id):
         return AliasOwner.EXTERNAL
     if alias in _local_aliases(session, (alias,)):
         return AliasOwner.LOCAL
@@ -72,22 +78,28 @@ def require_alias_not_external(session: Session, aliases: Collection[str]) -> No
         raise AliasTaken(alias, AliasOwner.EXTERNAL)
 
 
-def claim_external_alias(session: Session, alias: str) -> None:
-    """Refuse an external model whose name another owner serves."""
+def claim_external_alias(
+    session: Session, alias: str, *, own_deployment_id: str | None = None
+) -> None:
+    """Refuse an external model whose name another owner serves.
 
-    owner = alias_owner(session, alias)
+    An edit passes ``own_deployment_id``: the deployment's own alias is not taken.
+    """
+
+    owner = alias_owner(session, alias, own_deployment_id=own_deployment_id)
     if owner is not None:
         raise AliasTaken(alias, owner)
 
 
-def external_aliases(session: Session, aliases: Collection[str]) -> set[str]:
-    return set(
-        session.scalars(
-            select(GatewayExternalDeployment.alias).where(
-                GatewayExternalDeployment.alias.in_(aliases)
-            )
-        )
+def external_aliases(
+    session: Session, aliases: Collection[str], *, exclude_id: str | None = None
+) -> set[str]:
+    statement = select(GatewayExternalDeployment.alias).where(
+        GatewayExternalDeployment.alias.in_(aliases)
     )
+    if exclude_id is not None:
+        statement = statement.where(GatewayExternalDeployment.id != exclude_id)
+    return set(session.scalars(statement))
 
 
 def _local_aliases(session: Session, aliases: Collection[str]) -> set[str]:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -40,6 +41,13 @@ GENERATIONS = ROOT / "generations"
 BOOTSTRAP = Path("/run/vonk-runtime-assets/litellm/bootstrap-config.json")
 ACK_ROOT = Path("/supervisor")
 ACK = ACK_ROOT / "ack.json"
+# One staged file per credential binding (runtime-init stages them for this user
+# alone); the Controller sees only which names the child loaded.
+CREDENTIAL_DIRECTORY = Path("/run/vonk-normalized-secrets/gateway-credentials")
+CREDENTIALS_NAME = "credentials.json"
+CREDENTIAL_ENV_PREFIX = "VONK_CREDENTIAL_"
+CREDENTIAL_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,62}\Z")
+MAX_CREDENTIAL_BYTES = 16 * 1024
 POLL_SECONDS = 2
 TERMINATE_SECONDS = ROUTE_SHUTDOWN_SECONDS
 STARTUP_SECONDS = ROUTE_STARTUP_SECONDS
@@ -127,6 +135,69 @@ def _prepare_query_engine(*, deadline: float | None = None) -> None:
         or not os.access(path, os.X_OK)
     ):
         raise RuntimeError("Prisma query engine cache is unsafe")
+
+
+def _load_credentials() -> dict[str, str]:
+    """Every valid staged credential by binding name; anything unsafe is left out."""
+    loaded: dict[str, str] = {}
+    try:
+        names = sorted(item.name for item in CREDENTIAL_DIRECTORY.iterdir())
+    except OSError:
+        return loaded
+    for name in names:
+        path = CREDENTIAL_DIRECTORY / name
+        if CREDENTIAL_NAME.fullmatch(name) is None:
+            continue
+        try:
+            metadata = path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or not 0 < metadata.st_size <= MAX_CREDENTIAL_BYTES
+            ):
+                continue
+            value = path.read_text(encoding="utf-8").rstrip("\r\n")
+        except (OSError, UnicodeError):
+            continue
+        if value:
+            loaded[name] = value
+    return loaded
+
+
+def _child_environment(credentials: dict[str, str]) -> dict[str, str]:
+    """The child's environment: each secret as ``VONK_CREDENTIAL_<BINDING>``, nowhere else."""
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(CREDENTIAL_ENV_PREFIX)
+    }
+    environment.update(
+        {f"{CREDENTIAL_ENV_PREFIX}{name}": value for name, value in credentials.items()}
+    )
+    return environment
+
+
+def _write_credentials(child: subprocess.Popen[bytes], names: list[str]) -> None:
+    """Say which names the healthy child holds; never a value.
+
+    The Controller reads this to know a secret is loaded. Failing to write it
+    leaves an external model waiting; it never takes a local route down.
+    """
+    try:
+        _atomic_write(
+            ACK_ROOT / CREDENTIALS_NAME,
+            _encoded(
+                {"child_pid": child.pid, "names": sorted(names), "schema_version": 1}
+            ),
+        )
+    except (OSError, RuntimeError) as error:
+        print(f"LiteLLM credentials were not recorded: {error}", file=sys.stderr)
+
+
+def _clear_credentials() -> None:
+    try:
+        (ACK_ROOT / CREDENTIALS_NAME).unlink(missing_ok=True)
+    except OSError as error:
+        print(f"LiteLLM credentials were not cleared: {error}", file=sys.stderr)
 
 
 def _encoded(value: dict[str, object]) -> bytes:
@@ -290,6 +361,7 @@ def _clear_ack() -> None:
 
 
 def _stop(child: subprocess.Popen[bytes], *, deadline: float | None = None) -> None:
+    _clear_credentials()
     if child.poll() is not None:
         return
     if deadline is None:
@@ -380,6 +452,7 @@ def _supervise(*, startup_deadline: float | None = None) -> int:
             return 1
         startup_attempts += 1
         active_digest = _digest(selected)
+        credentials = _load_credentials()
         child = subprocess.Popen(
             [
                 "litellm",
@@ -391,6 +464,7 @@ def _supervise(*, startup_deadline: float | None = None) -> int:
                 "4000",
             ],
             stdin=subprocess.DEVNULL,
+            env=_child_environment(credentials),
         )
         if not _await_healthy(child, deadline=startup_deadline, request=request):
             exited_before_health = child.poll() is not None
@@ -415,6 +489,7 @@ def _supervise(*, startup_deadline: float | None = None) -> int:
                 continue
             return 1
         startup_attempts = 0
+        _write_credentials(child, list(credentials))
         if request is None:
             _clear_ack()
         else:

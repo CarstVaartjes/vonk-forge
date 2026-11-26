@@ -637,6 +637,44 @@ def test_withdrawal_is_acknowledged_drained_before_the_new_child_is_healthy(
     ]
 
 
+def test_staged_credentials_reach_the_child_environment_only_and_are_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Break caught: a secret in the supervisor's own environment, in the names
+    # file, or a stale one from the container's environment reaching the child.
+    module = _module()
+    staged = tmp_path / "gateway-credentials"
+    staged.mkdir()
+    (staged / "PARTNER").write_text("sk-partner\n")
+    (staged / "lower").write_text("ignored")
+    (staged / "EMPTY").write_text("")
+    (staged / "LINKED").symlink_to(staged / "PARTNER")
+    module.CREDENTIAL_DIRECTORY = staged
+    module.ACK_ROOT = tmp_path / "supervisor"
+    monkeypatch.setenv("VONK_CREDENTIAL_STALE", "old")
+
+    loaded = module._load_credentials()
+    environment = module._child_environment(loaded)
+    assert loaded == {"PARTNER": "sk-partner"}
+    assert environment["VONK_CREDENTIAL_PARTNER"] == "sk-partner"
+    assert "VONK_CREDENTIAL_STALE" not in environment
+    assert "VONK_CREDENTIAL_PARTNER" not in os.environ
+
+    class Child:
+        pid = 77
+
+    module._write_credentials(Child(), list(loaded))
+    written = (module.ACK_ROOT / "credentials.json").read_text()
+    assert json.loads(written) == {
+        "child_pid": 77,
+        "names": ["PARTNER"],
+        "schema_version": 1,
+    }
+    assert "sk-partner" not in written
+    module._clear_credentials()
+    assert not (module.ACK_ROOT / "credentials.json").exists()
+
+
 def test_compose_mounts_one_read_only_route_volume_and_starts_bounded_supervisor() -> (
     None
 ):

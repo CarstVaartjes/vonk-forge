@@ -10,8 +10,9 @@ decides which fields exist.
 
 from __future__ import annotations
 
+from functools import cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Final
 
 from pydantic import JsonValue
 
@@ -41,3 +42,14 @@ def load_surface(path: Path) -> LiteLlmSurface:
     """Read the generated document; a malformed file raises a validation error."""
 
     return LiteLlmSurface.model_validate_json(path.read_bytes())
+
+
+#: Where the Controller image ships the generated document (its Dockerfile copies it).
+SURFACE_PATH: Final = Path("/usr/local/share/vonk-forge/litellm-surface.json")
+
+
+@cache
+def shipped_surface() -> LiteLlmSurface:
+    """The surface of the image's pinned LiteLLM; read once, never partially."""
+
+    return load_surface(SURFACE_PATH)

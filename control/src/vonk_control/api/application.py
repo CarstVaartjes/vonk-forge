@@ -36,6 +36,8 @@ from vonk_control.fleet_profiles.api import install_fleet_profile_routes
 from vonk_control.fleet_profiles.application_cancel_api import (
     install_profile_application_cancel_route,
 )
+from vonk_control.gateway.external_api import install_external_model_routes
+from vonk_control.gateway.external_service import ExternalModelService
 from vonk_control.gateway.keys import GatewayKeyService, install_gateway_key_routes
 from vonk_control.installations.reconciliation_api import (
     install_installation_reconciliation_routes,
@@ -85,6 +87,7 @@ def create_app(
     model_cache: Any | None = None,
     recipe_image_availability: Any | None = None,
     gateway_keys: GatewayKeyService | None = None,
+    external_models: ExternalModelService | None = None,
     lifespan: Any | None = None,
     platform_observer: PlatformObserver | None = None,
 ) -> FastAPI:
@@ -165,6 +168,9 @@ def create_app(
     install_gateway_key_routes(
         app, actor_dependency=authenticated_actor, service=gateway_keys
     )
+    install_external_model_routes(
+        app, actor_dependency=authenticated_actor, service=external_models
+    )
     install_failure_evidence_routes(
         app,
         actor_dependency=authenticated_actor,
@@ -240,6 +246,7 @@ def create_app(
         fleet=fleet_projection,
         fleet_services=fleet_services,
         keys=gateway_keys,
+        external_models=external_models,
         installations=run_switch_operations,
     )
     receipts.bind(app)

@@ -22,6 +22,7 @@ from vonk_control.models.fleet import (
     FleetProfileApplication,
     FleetProfileSelection,
 )
+from vonk_control.models.gateway import GatewayExternalDeployment
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.models.routes import RoutePublicationOwner
@@ -62,6 +63,7 @@ WAIT_MODELS: Mapping[WaitOwnerKind, type[Base]] = {
     WaitOwnerKind.STORAGE_RELIEF: ArtifactLifecycleGate,
     WaitOwnerKind.CLEANUP: RecipeInstallation,
     WaitOwnerKind.CATALOG_SYNC: RecipeLibrarySyncRun,
+    WaitOwnerKind.EXTERNAL_MODEL: GatewayExternalDeployment,
     WaitOwnerKind.CERTIFICATE: AgentCertificate,
     WaitOwnerKind.CERTIFICATE_REVOCATION: AgentIssuedCertificateRevocation,
 }
