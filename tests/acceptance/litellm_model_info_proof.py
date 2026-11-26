@@ -55,6 +55,8 @@ from vonk_control.gateway.external_contract import (
     ExternalDestination,
     ExternalRouteEntry,
 )
+from vonk_control.gateway.keys import GatewayKeyService
+from vonk_control.gateway.keys_contract import GatewayKeyCreated
 from vonk_control.gateway.litellm import (
     LiteLlmModelInfo,
     LiteLlmPolicy,
@@ -63,7 +65,7 @@ from vonk_control.gateway.litellm import (
     render_external_entry,
 )
 from vonk_control.gateway.route_bundle_contract import RouteAcceptedModelPolicy
-from vonk_control.gateway.route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
+from vonk_control.gateway.route_grants import GatewayInferenceRoute
 
 ROOT = Path(__file__).resolve().parents[2]
 VECTORS = ROOT / "control/tests/fixtures/route_model_info/vectors.json"
@@ -274,28 +276,40 @@ CLIENT_SCOPE = [
 ]
 
 
-def generate_key(key_alias: str, routes: list[str]) -> str:
-    """A virtual key, created as the Controller creates them (models and routes)."""
+def generate_key(work: Path, key_alias: str) -> str:
+    """A virtual key, created by the Controller's own key service."""
+    service = GatewayKeyService(
+        base_url=f"http://127.0.0.1:{PORT}",
+        master_key=lambda: MASTER_KEY,
+        intent_root=work / "keys",
+    )
     deadline = time.monotonic() + 120
     while True:  # the key store is ready once the database migration finished
-        status, created = call(
-            "/key/generate",
-            {
-                "key_alias": key_alias,
-                "models": CLIENT_SCOPE,
-                "allowed_routes": routes,
-                "metadata": {"managed_by": "vonk-forge"},
-            },
-        )
-        if status == 200:
-            return created["key"]  # type: ignore[index]
-        check(time.monotonic() < deadline, f"key generate answered {status}")
+        created = service.create(key_alias, models=CLIENT_SCOPE)
+        if isinstance(created, GatewayKeyCreated):
+            return created.key
+        check(time.monotonic() < deadline, "the key service could not create a key")
         time.sleep(2)
 
 
-def prove_client_key() -> str:
+def narrow_key() -> str:
+    """A key the Controller never issues; proves audio sits under openai_routes."""
+    status, created = call(
+        "/key/generate",
+        {
+            "key_alias": "proof-no-openai-routes",
+            "models": CLIENT_SCOPE,
+            "allowed_routes": [GatewayInferenceRoute.MODEL_INFO.value],
+            "metadata": {"managed_by": "vonk-forge"},
+        },
+    )
+    check(status == 200, f"key generate answered {status}")
+    return created["key"]  # type: ignore[index]
+
+
+def prove_client_key(work: Path) -> str:
     """An ordinary client key reads its own facts; returns it for the audio proof."""
-    key = generate_key("proof-client", list(BASE_KEY_ROUTES))
+    key = generate_key(work, "proof-client")
     status, info = call("/v1/model/info", key=key)
     check(status == 200, f"a client key was refused /v1/model/info: {status} {info}")
     names = sorted(entry["model_name"] for entry in info["data"])  # type: ignore[index]
@@ -430,9 +444,7 @@ def prove_audio(key: str) -> None:
     check(outside in (401, 403), f"an out-of-scope speech got {outside}")
 
     # A key without openai_routes reads facts but cannot call either path.
-    narrow = sdk(
-        generate_key("proof-no-openai-routes", [GatewayInferenceRoute.MODEL_INFO.value])
-    )
+    narrow = sdk(narrow_key())
     for denied in (
         lambda: narrow.audio.transcriptions.create(
             model=transcription, file=("clip.wav", UPLOAD_WAV, "audio/wav")
@@ -458,8 +470,8 @@ def prove_external_entries(entries: dict[str, dict[str, Any]]) -> None:
         check(secret not in json.dumps(listing), "a resolved secret is in discovery")
 
 
-def prove() -> None:
-    client_key = prove_client_key()
+def prove(work: Path) -> None:
+    client_key = prove_client_key(work)
     entries: dict[str, dict[str, Any]] = {}
     status, info = call("/v1/model/info")
     check(status == 200 and isinstance(info, dict), f"/v1/model/info answered {status}")
@@ -618,7 +630,7 @@ def main() -> None:
     )
     try:
         wait_healthy(container)
-        prove()
+        prove(arguments.work)
     except BaseException:
         subprocess.run(["docker", "logs", "--tail", "200", container], check=False)
         raise

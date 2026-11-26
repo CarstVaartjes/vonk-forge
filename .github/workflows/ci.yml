@@ -749,7 +749,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = aarch64
-          rustup target add aarch64-unknown-linux-gnu
+          scripts/ci/retry-dependency-fetch rustup target add aarch64-unknown-linux-gnu
       - name: Install lifecycle test dependencies
         uses: ./.github/actions/apt-install
         with:
@@ -1286,14 +1286,16 @@ jobs:
   # The standalone proof workflows run here, selected by the same areas and the
   # same tested commit (the pull request merge commit) as every other job.
   client-compatibility-report:
-    # A report, never a gate: a deliberate break is legitimate. It shows, before
-    # the deploy, every response shape the published vonkctl would refuse.
+    # Shows, before the deploy, every response shape the published vonkctl would
+    # refuse. Against a stable release of 1.0 or later a break fails the job: the
+    # stable channel supports the previous stable vonkctl for one minor. Dev and
+    # a 0.x stable are only reported; an unpublished or unreachable channel
+    # does not fail it.
     name: Response shapes the published vonkctl would refuse
     needs: changes
     if: needs.changes.outputs.full == 'true' && needs.changes.outputs.control == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    continue-on-error: true
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1310,7 +1312,8 @@ jobs:
           set -euo pipefail
           uv run --project control --frozen python tools/client_compatibility_report.py \
             --candidate src/cluster_profiles/schemas/control-openapi.json \
-            --channel dev --channel stable | tee -a "$GITHUB_STEP_SUMMARY"
+            --channel dev --channel stable --gate-channel stable \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
   installed-cli-proof:
     name: Actual signed wheel update and old CLI to NDJSON Controller bootstrap

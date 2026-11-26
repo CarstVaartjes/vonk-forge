@@ -31,7 +31,19 @@ Every change lands through an integration PR: a same-repository
 | Member PR | The quick tier only, a few minutes on standard runners: `Ruff` (lint, format, Python types, the added-line guards), the web typecheck and Biome (`member-web`), and `cargo fmt` plus clippy (`rust-quality`) only when the change touches Rust or an input of the Rust build (`rust_changed` in `scripts/ci/select-ci-areas`, which reads the input list from the wire crate's `build.rs`). A member push costs about 5-6 standard runner-minutes (Ruff, web, and Rust when it changed), which compete with batch CI for the concurrency limit. No full suite, proof or acceptance. The gate reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. The quick tier is a fast signal, not proof: check member work locally (`scripts/test changed`); its integration PR proves it. |
 | Dependabot PR | Nothing, not even the selector or the gate: every job that could start on its own skips a PR authored by `dependabot[bot]`, so it uses no runner. Its skipped gate keeps the raw name expression, never the required `CI gate`. Fold it into an integration PR, which runs CI once (`tests/test_dependabot_updates.py`). |
 | Integration PR | The complete sharded Controller and repository suites, web tests, Rust tests/lint/platform, wire contracts, every selected integration, candidate acceptance with the upgrade carry, and every selected proof (agent repair recovery, client compatibility report, installed CLI, model-cache cancellation, OCI link fallback, privileged helper, profile-effect consumer). |
-| Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. On a signed `v*` tag `ci.yml` also calls `stable-release.yml` after `ci-gate`; that file holds the stable-channel publication jobs, and the stable package signature identity names it. |
+| Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. On a signed `v*` tag `ci.yml` also calls `stable-release.yml` after `ci-gate`; that file holds the stable-channel publication jobs, and the stable package signature identity names it. `scripts/release/stable-preflight` is the read-only check of that path's settings before tagging. |
+
+`client-compatibility-report` compares this Controller's OpenAPI with the signed
+CLI wheel of each published channel. Against the stable channel it is a gate
+from 1.0 on: a response shape the published stable vonkctl would refuse fails
+the job (`--gate-channel stable`), which is how the N-1 support window is
+enforced. The dev channel and a 0.x stable are only reported. Only a signature
+or digest that does not verify fails the job (as in `run_update`); any other
+update error, such as a stable channel not published yet (its signed pointer
+answers 404), an outage, or an expired manifest, is a `::warning::` and the
+job passes. vonkctl's shipped OpenAPI copy opens response objects
+(`additionalProperties: false` is dropped, `open_shown_words`), so an added
+optional response field is not reported as a break.
 
 A member PR is done when its review has passed.
 Adding the `release-acceptance` label re-runs `ci.yml` in full at once.
@@ -149,9 +161,12 @@ what is missing; a failure is a warning, and the tests that read those files fai
 ### Fresh checkout build and contract smoke checks
 
 The exact uv release is owned by `.tool-versions`; Actions and container builds
-read that file. Each project declares an equal `tool.uv.required-version` floor,
-so newer local installations remain usable. The single-source guard rejects
-independent pins and floors that differ from the CI release. A uv bump also refreshes the
+read that file. Each project declares the same `tool.uv.required-version` floor, at or below
+the CI release, so newer local installations remain usable. The floor stays at
+the oldest uv that reads the lock (0.13.7, Dependabot's bundled uv): raising it
+past that stops Dependabot's Python updates (`tool_version_not_supported`). Raise
+it only when the lock format needs it. The single-source guard rejects
+independent pins, unequal floors and floors above the CI release. A uv bump also refreshes the
 `deploy/compose/uv-bootstrap.lock` wheel hashes. Container bootstrap
 installs use hash-locked PyPI wheels, including uv with its owner-derived version.
 
@@ -941,7 +956,14 @@ request's tested merge commit as its `source_sha`; that commit has main's exact
 tree and resolves on GitHub. A pull
 request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
-weekly CI base image mirror run prunes the caches of closed pull requests.
+weekly CI base image mirror run prunes the caches of closed pull requests. The
+pruner reads the package versions one page at a time, each request with its own
+timeout; a timeout, 5xx, rate limit or connection error skips only that work
+with a notice and the next weekly run continues, while any other failure fails.
+It reads every page on every run (newest first with no cursor, a page cap would
+strand the oldest caches), and a delete of an already-gone version counts as done. The mirror job copies with
+the lock's pinned skopeo image (`build_bases.skopeo`), not the runner's apt skopeo,
+which cannot keep some OCI indexes digest-exact.
 
 The lane's `Candidate ARM64 agent packages` job is a two-leg matrix (candidate and
 lower lifecycle baseline) that builds both packages in parallel, as `agent-release.yml`

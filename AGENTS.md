@@ -259,11 +259,19 @@ text of this section:
 
 ## Current contracts only: no legacy compatibility
 
-This is a first internal release, not a migration. Keep one current definition
-and one current execution path for each document and operation, and remove
-retired parsers, DTOs, tables, endpoints, CLI aliases, fixtures and callers
-together; keep no deprecated constructors, old field names, dual readers/writers
-or fallback shapes. Active installer, release-publication, catalog, recovery
+The dev channel keeps one current contract with no compatibility; transitions
+happen by deploy order. From 1.0.0 the stable channel answers the previous
+stable vonkctl and agent (N-1 minor) for one minor release: a breaking response
+shape ships only in a minor release, consumer first (the vonkctl that tolerates
+it is in a published stable release before the Controller change lands, and the
+`client-compatibility-report` CI job enforces it), and a deprecated API field or
+CLI flag keeps working for one minor and is announced in the release notes. An
+added optional response field is not a break: the shipped OpenAPI copy opens
+response objects (`open_shown_words`, run by `scripts/dev/generate-control-clients`).
+The stable carry proves the N-1 agent. Still keep one current definition and one
+current execution path for each document and operation, and remove retired
+parsers, DTOs, tables, endpoints, CLI aliases, fixtures and callers together;
+keep no dual readers/writers or fallback shapes. Active installer, release-publication, catalog, recovery
 and authority paths use schema 2. The current parser and
 [operator runbook](docs/runbooks/vonkctl.md) own command vocabulary. The full
 rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only-no-legacy-compatibility).
@@ -274,6 +282,13 @@ rules are in [Current contracts only](docs/agent-rules.md#current-contracts-only
   use their authoritative nested Pydantic models, validated on every persisted
   read and write; generate OpenAPI and the Python/TypeScript clients, and
   generate Rust wire structures with typify from the Pydantic JSON Schemas.
+- vonkctl ships the admin OpenAPI with the closed response word sets it only
+  shows opened, so an older vonkctl reads a newer Controller's new reason or
+  wait-owner word. Sets it decides by stay closed: a new `cli_states_generated`
+  import outside `cli_render/` of a set a response field holds goes into
+  `DECIDED_BY` in `control_client/shown_words.py` (the guard in
+  `tests/test_generated_contracts.py` says so). This is forward tolerance, not
+  a legacy shim; see [error reporting](docs/error-reporting.md).
 - The Rust toolchain version lives only in `rust-toolchain.toml` (plus `rust-version` in the
   root `Cargo.toml`). Workflows run bare `rustup toolchain install`; scripts read the file.
   Agent builds stay on `ubuntu-24.04` (Spark glibc baseline).
@@ -420,7 +435,7 @@ actual schema effect of changes to `control/src/vonk_control/models.py` and
 `control/migrations/`. Keep schema-changing PRs out of auto-merge and obtain an
 explicit operator decision; describe the deployment impact in the PR. Startup
 reconciles the live schema to the models transactionally (missing objects added,
-unknown columns preserved, undeclared tables dropped). Merging source does not
+unknown columns preserved, undeclared tables kept for one minor release on stable, then dropped; dropped at once on dev). Merging source does not
 wipe a database, and a deliberate reset needs its own explicit authorization.
 See [Schema implementation, merge, and deployment](docs/agent-rules.md#schema-implementation-merge-and-deployment).
 

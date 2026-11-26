@@ -155,8 +155,8 @@ runs:
         set -euo pipefail
         test "$(uname -m)" = aarch64
         rustup set profile minimal
-        rustup toolchain install
-        rustup target add aarch64-unknown-linux-gnu
+        scripts/ci/retry-dependency-fetch rustup toolchain install
+        scripts/ci/retry-dependency-fetch rustup target add aarch64-unknown-linux-gnu
 
     - name: Restore Rust dependency cache
       if: inputs.binary_source_mode == 'compile'

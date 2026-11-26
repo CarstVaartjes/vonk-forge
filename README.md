@@ -99,6 +99,8 @@ Until the first stable release is published, the unqualified `/nas`, `/spark`
 and `/vonkctl` URLs serve the newest accepted development release; once a
 stable release exists they serve stable. To choose a channel explicitly, use
 `https://install.vonkforge.ai/dev/nas` (or `/dev/spark`, `/dev/vonkctl`).
+To move an existing deployment between channels, see the
+[stable release runbook](docs/runbooks/stable-release.md#switching-a-deployment-between-channels).
 
 To upgrade an existing install, rerun the installer from the directory that
 contains `vonk-forge/`, using the account that owns its private files. If they

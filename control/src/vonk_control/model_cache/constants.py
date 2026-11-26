@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from enum import StrEnum
+from importlib import metadata
 
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.reason_codes.model_cache import (
@@ -88,7 +89,7 @@ class ProviderKind(StrEnum):
     FILE = "file"
 
 
-_GITHUB_USER_AGENT = "vonk-forge/0.1.1"
+_GITHUB_USER_AGENT = f"vonk-forge/{metadata.version('vonk-control')}"
 
 
 _GITHUB_RELEASE_ASSET_HOST = "release-assets.githubusercontent.com"

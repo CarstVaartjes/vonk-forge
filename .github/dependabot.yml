@@ -36,9 +36,7 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: "npm"
-    directories:
-      - "/control/web"
-      - "/tools/openapi-client"
+    directory: "/control/web"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -46,6 +44,20 @@ updates:
       timezone: "Europe/Amsterdam"
     labels: ["dependencies"]
     open-pull-requests-limit: 5
+
+  - package-ecosystem: "npm"
+    directory: "/tools/openapi-client"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Europe/Amsterdam"
+    labels: ["dependencies"]
+    open-pull-requests-limit: 5
+    ignore:
+      # The generator toolchain tracks the TypeScript major its peers support.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "uv"
     directory: "/"

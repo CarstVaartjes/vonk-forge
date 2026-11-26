@@ -17,7 +17,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
-from typing import Self, cast
+from typing import Any, Self, cast
 
 import httpx2
 import pytest
@@ -555,17 +555,8 @@ def test_request_rejects_response_outside_canonical_route_model(tmp_path: Path) 
     _fresh_request(client)
 
 
-@pytest.mark.parametrize(
-    "mutation",
-    [
-        lambda payload: payload["storage"].update(max_stored_bytes="1024"),
-        lambda payload: payload.update(unexpected=True),
-    ],
-)
-def test_request_rejects_scalar_and_unknown_response_fields(
-    tmp_path: Path, mutation
-) -> None:
-    payload = {
+def _capabilities() -> dict[str, Any]:
+    return {
         "storage": {
             "in_flight_uploads": 0,
             "max_stored_bytes": 1024,
@@ -584,7 +575,11 @@ def test_request_rejects_scalar_and_unknown_response_fields(
             "reserved_input_names": ["manifest.json"],
         },
     }
-    mutation(payload)
+
+
+def test_request_rejects_a_response_field_of_the_wrong_type(tmp_path: Path) -> None:
+    payload = _capabilities()
+    payload["storage"]["max_stored_bytes"] = "1024"
     client = ControlClient(
         "https://forge.example.test",
         _token(tmp_path),
@@ -597,6 +592,21 @@ def test_request_rejects_scalar_and_unknown_response_fields(
             "/api/artifact-jobs/capabilities",
         )
     _fresh_request(client)
+
+
+def test_request_reads_a_response_field_a_newer_controller_adds(
+    tmp_path: Path,
+) -> None:
+    # Forward tolerance: the shipped contract opens response objects, while
+    # required fields and types stay strict (the case above).
+    payload = {**_capabilities(), "unexpected": True}
+    client = ControlClient(
+        "https://forge.example.test",
+        _token(tmp_path),
+        opener=lambda *_args, **_kwargs: _Response(200, payload),
+    )
+
+    assert client.request("GET", "/api/artifact-jobs/capabilities") == payload
 
 
 @pytest.mark.parametrize(
@@ -753,6 +763,10 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
     result = client.fleet()
 
     assert result.to_dict() == valid
+    # A field a newer Controller adds is read, not refused.
+    newer = {**valid, "unexpected": "newer"}
+    client._opener = lambda *_args, **_kwargs: _fleet_transfer_peer(newer)
+    assert client.fleet().to_dict() == newer
 
 
 @pytest.mark.parametrize(
@@ -765,11 +779,10 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
             "nodes": [],
         },
         {
-            "authority_revision": "a" * 64,
+            "authority_revision": "schema-private-fixture-value",
             "event_cursor": 0,
             "generated_at": "2026-09-07T00:00:00Z",
             "nodes": [],
-            "unexpected": "schema-private-fixture-value",
         },
     ],
 )

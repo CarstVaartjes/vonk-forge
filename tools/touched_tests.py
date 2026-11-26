@@ -38,6 +38,8 @@ IMPORT_BASES = (
     "control/src",
     "agent_protocol/src",
     "nas_setup/src",
+    "scripts",
+    "tests/scripts",
 )
 
 

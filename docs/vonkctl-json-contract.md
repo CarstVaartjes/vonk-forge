@@ -85,7 +85,7 @@ the page is the last.
   it does not guess at the fields. `--check-connection --json` `.client.version`
   identifies the CLI build.
 - Regeneration refuses to rewrite a published file with an incompatible schema
-  (checked with the shared definitions inlined; a removed property, a `required` list that grew, a changed type). A test
+  (checked with the shared definitions inlined; a removed property, a `required` list that grew or shrank, a changed type). A test
   fails when a committed file (shared definitions included) is not exactly the model's current export, so a
   stale or hand-edited file is caught. Telling an incompatible change from a
   compatible one needs the previously published file, which only that

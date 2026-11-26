@@ -166,33 +166,6 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
   -m lane
 ```
 
-`scripts/check-image-pins` is read-only. It resolves every lock entry
-(`name:tag` and `name:tag@digest`), compares the tag's current digest with the
-record and verifies the recorded digest still resolves, then scans
-`control/Dockerfile`, the Compose files,
-`deploy/compose/litellm/Dockerfile`,
-and `scripts/images/verify-controller-skopeo` for digest-pinned references that are
-absent from the lock. It reads registries and nothing else and needs
-`docker buildx`.
-
-It runs in two places, and neither one refreshes anything:
-
-- the Compose integration job, when a pull request changes the deployment
-  inputs, so a pin change is verified in the change that makes it;
-- the weekly **Image pins** workflow (`.github/workflows/image-pins.yml`, also
-  dispatchable by hand), because a tag can move or a digest can be garbage
-  collected upstream without any commit here.
-
-Findings decide the exit status by kind. `missing` means the recorded digest is
-gone and every image build will fail until the pin is refreshed. `unlisted`
-means a pinned image is used but absent from the inventory; add it to the lock
-in the matching section and add its file to the checker's `SCAN_PATHS`. Both
-exit non-zero. `moved` means the recorded digest is still valid but the tag now
-points elsewhere — expected for a rolling tag, so decide whether to refresh it
-rather than treating it as a failure. `unverified` means the registry could not
-be read at all, which is a network condition and never a reason to block a
-merge.
-
 ## Regenerate the LiteLLM surface with every LiteLLM bump
 
 `deploy/compose/litellm/surface.json` records the providers and the

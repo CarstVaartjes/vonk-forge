@@ -66,10 +66,16 @@ In the web the text is the one `NOT_REPORTED_TEXT` in `control/web/src/lib/fleet
 types the words. Fleet totals (power, tokens, energy, decode speed) are the Controller's fleet line or total of
 the metric series, never a sum made in the browser.
 
-Startup schema reconciliation drops every table in the Controller's schema `public`
-that `Base.metadata` does not declare (except `alembic_version`), foreign keys
-first, no CASCADE. Never keep another tool's table there (LiteLLM has its own
-database). A rollback to an older Controller drops the tables a newer one added.
+On the stable channel, startup schema reconciliation keeps every table in the Controller's schema `public`
+that `Base.metadata` does not declare (except `alembic_version`) for one minor
+release, then drops it. The table carries `COMMENT ... 'vonk-undeclared-since
+<major>.<minor>'` (the Controller's own minor from `vonk-control`'s version); the first
+Controller of a later minor drops it, foreign keys first, no CASCADE. An unparseable
+stamp is stamped again, a declared table loses a stale stamp, and an unknown
+Controller version drops nothing. Never keep another tool's table there (LiteLLM has
+its own database). A rollback to the previous minor finds the tables a newer one
+added; older rollbacks are unsupported. The dev channel (`VONK_INSTALL_CHANNEL`, read once by
+`settings.install_channel_from_env`) keeps nothing: it drops an undeclared table at once.
 
 ## State ownership and resilient recovery
 
@@ -308,14 +314,33 @@ fixture tests for the detectors; retain the contract and type registries.
 
 ## Current contracts only: no legacy compatibility
 
-This is a first internal release, not a migration. Keep one current definition
+The dev channel keeps one current contract with no compatibility; transitions
+happen by deploy order. From 1.0.0 the stable channel answers the previous
+stable vonkctl and agent (N-1 minor) for one minor release. A breaking response
+shape ships only in a minor release, consumer first: the vonkctl that tolerates
+it is in a published stable release before the Controller change lands, and the
+`client-compatibility-report` CI job fails against a stable release of 1.0 or
+later. A deprecated API field or CLI flag keeps working for one minor and is
+announced in the release notes. The stable carry proves the N-1 agent. An
+added optional response field is not a break: vonkctl's shipped OpenAPI copy
+drops `additionalProperties: false` on every response object, including
+one a request also carries (`open_shown_words`, run by `scripts/dev/generate-control-clients`), so the gate
+fires only on real breaks. Even during that window, keep one current definition
 and one current execution path for each document and operation. Remove retired
 parsers, DTOs, database models/tables, endpoints, CLI compatibility aliases,
 fixtures, packaged assets, and callers together. Do not retain deprecated
 constructors, old field names, dual readers/writers, or fallback shapes merely
-to keep old tests or old worktrees working. The current parser and
+to keep old tests or old worktrees working; the one-minor window above is
+carried by the release process, not by a second reader. The current parser and
 [operator runbook](runbooks/vonkctl.md) own command vocabulary; do not
 restore the obsolete `fleet profile` alias from a historical guide.
+
+Forward tolerance in a reader is not legacy compatibility. vonkctl reads the
+closed response word sets it only shows as open, so an installed vonkctl keeps
+reading a newer Controller that adds a word there; it keeps one contract and one
+reading path, and nothing is kept for an older Controller. The sets it decides
+by stay closed (`cluster_profiles.control_client.shown_words.DECIDED_BY`,
+guarded by `tests/test_generated_contracts.py`).
 
 Published Model and Recipe structures are defined by the canonical Pydantic
 package in vonk-forge-recipes. The Controller reads the signed catalog index
@@ -516,7 +541,7 @@ for their merge, honoring authorization already given for that action. Describe
 the deployment impact in the PR. Controller startup reconciles the live schema
 to current model metadata transactionally under the startup advisory lock.
 Missing tables, safe columns, indexes and constraints are applied. Unknown
-columns are preserved (the NOT NULL barrier is lifted); undeclared tables are dropped
+columns are preserved (the NOT NULL barrier is lifted); undeclared tables are kept one minor on stable (dropped at once on dev), then dropped
 (see the schema reconciliation rule above), while obsolete constraints and indexes are
 replaced only after a safe replacement is installed. Data conflicts and unsafe
 casts are logged and deferred when the application can continue safely.

@@ -55,6 +55,21 @@ re-readable. A received refusal (4xx/5xx) keeps its own disposition whatever
 its body says, so a 503 with a reason this CLI does not know still waits. An
 unstamped or damaged stamp is unknown and keeps `controller.protocol_invalid`.
 
+A new word in a closed set that vonkctl only shows (a reason, attention,
+wait-owner or recovery-action code) is not a rejection: the OpenAPI vonkctl
+ships, and the Python client generated from it, read those sets as any
+non-empty word, so an older vonkctl shows a newer Controller's word as sent.
+The sets it decides by (`DECIDED_BY` in
+`src/cluster_profiles/control_client/shown_words.py`: lifecycle, run, endpoint
+and enrollment states, dispositions, the job contract state and the profile
+load action) stay closed, and a new word there is `client.contract_mismatch`.
+The CLI decides by a set when a module outside `cli_render/` imports one of its
+words from `cli_states_generated`; `tests/test_generated_contracts.py` fails
+when that set and `DECIDED_BY` differ (a decided set left open, or a shown set
+kept closed). A set reached only through a union of reason sets (such as
+`OperationReason`) reads with that union: vonkctl's own refusal decisions take
+the reason from the error context `code`, a pattern-bound string.
+
 HTTP 401 means authentication is absent or invalid. HTTP 403 means the
 request was rejected after authentication; the middleware uses the generic
 `controller.request_rejected` code because it cannot safely infer whether the

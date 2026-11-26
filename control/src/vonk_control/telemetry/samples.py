@@ -455,7 +455,10 @@ class TelemetryRepository:
         node_ids: Sequence[str],
         since: datetime,
     ) -> dict[str, int]:
-        """Kernel OOM kills per node among samples observed at or after ``since``.
+        """Kernel OOM kills per node among samples received at or after ``since``.
+
+        The window is by receive time, the Controller's clock, like the other
+        host-attention windows, so an agent clock that runs off does not move it.
 
         Each boot's counter only rises, so the kills are the sum of every boot's
         rise; a reboot starts a new boot and adds nothing. Nodes with none are omitted.
@@ -472,7 +475,7 @@ class TelemetryRepository:
             )
             .where(
                 NodeTelemetrySample.node_id.in_(identities),
-                NodeTelemetrySample.observed_at >= since,
+                NodeTelemetrySample.received_at >= since,
                 NodeTelemetrySample.oom_kills.is_not(None),
             )
             .group_by(NodeTelemetrySample.node_id, NodeTelemetrySample.boot_id)

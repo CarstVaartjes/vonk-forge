@@ -134,6 +134,10 @@ def test_transient_fetch_retries_without_publishing_partial_stdout(
         ),
         (["docker", "pull", "example@sha256:" + "a" * 64], "digest mismatch"),
         (
+            ["skopeo", "copy", "docker://example", "dir:out"],
+            "cannot modify it: Instructed to preserve digests",
+        ),
+        (
             ["docker", "pull", "example@sha256:" + "a" * 64],
             "503 Service Unavailable: unauthorized",
         ),

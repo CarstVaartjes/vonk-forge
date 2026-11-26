@@ -5,6 +5,7 @@ import importlib
 import importlib.machinery
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -390,6 +391,7 @@ def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
         return [".tool-versions must own exactly one exact uv release"]
     version = rows[0][1]
     errors = []
+    floors = set()
     for file in files:
         if file == ".tool-versions":
             continue
@@ -400,8 +402,15 @@ def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
             continue
         if Path(file).name == "pyproject.toml":
             uv = tomllib.loads(text).get("tool", {}).get("uv", {})
-            if "required-version" in uv and uv["required-version"] != f">={version}":
-                errors.append(f"{file}: uv required-version must be >= the CI owner")
+            if "required-version" in uv:
+                floor = re.fullmatch(r">=(\d+\.\d+\.\d+)", uv["required-version"])
+                floors.add(uv["required-version"])
+                if floor is None or tuple(map(int, floor[1].split("."))) > tuple(
+                    map(int, version.split("."))
+                ):
+                    errors.append(
+                        f"{file}: uv required-version must be a >= floor at or below the CI owner"
+                    )
         for number, line in enumerate(text.splitlines(), 1):
             if re.search(
                 r"(?i)\buv(?:[_-]?version)?[\s`\"'=:@/~<>!-]*(?:==)?\d+\.\d+\.\d+", line
@@ -429,6 +438,8 @@ def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
                         or not (root / owner.removeprefix(".vonk-forge/")).is_file()
                     ):
                         errors.append(f"{file}: setup-uv must read the version owner")
+    if len(floors) > 1:
+        errors.append("uv required-version floors must be equal across projects")
     return errors
 
 
@@ -445,13 +456,33 @@ def test_rust_toolchain_has_one_owner() -> None:
     manifest = tomllib.loads((ROOT / "Cargo.toml").read_text())
     assert manifest["workspace"]["package"]["rust-version"] == channel
     versioned_install = re.compile(r"rustup toolchain install[ \t]+(?![-\"$])\S")
+    # A digit-bounded match: 1.100.0 must not hide inside 11.100.0 or 1.100.04.
+    named = re.compile(rf"(?<![\d.]){re.escape(channel)}(?!\d)")
+    skipped = {"node_modules", "target", ".venv", ".git"}
+
+    def walk(top: str) -> list[Path]:
+        found: list[Path] = []
+        for here, dirs, names in os.walk(ROOT / top):
+            dirs[:] = [name for name in dirs if name not in skipped]
+            found += [Path(here) / name for name in names]
+        return found
+
+    candidates = [
+        *walk(".github"),
+        *walk("scripts"),
+        *(path for path in walk("rust") if path.suffix == ".sh"),
+        *(
+            path
+            for top in ("control", "deploy", "nas_setup", "packaging", "install")
+            for path in walk(top)
+            if path.name.startswith("Dockerfile")
+        ),
+    ]
     copies = []
-    for file in tracked_files(ROOT):
-        if not file.startswith((".github/", "scripts/")):
-            continue
-        text = (ROOT / file).read_text(errors="ignore")
-        if channel in text or versioned_install.search(text):
-            copies.append(file)
+    for path in sorted(set(candidates)):
+        text = path.read_text(errors="ignore")
+        if named.search(text) or versioned_install.search(text):
+            copies.append(str(path.relative_to(ROOT)))
     assert copies == [], "name the toolchain only in rust-toolchain.toml"
 
 
@@ -494,7 +525,7 @@ def test_uv_guard_rejects_unowned_workflow_versions(
     assert uv_pin_violations(tmp_path, [consumer])
 
 
-@pytest.mark.parametrize("floor", ["==1.2.3", ">=1.2.2", ">=1.2.4", "~=1.2.3"])
+@pytest.mark.parametrize("floor", ["==1.2.3", ">=1.2.4", "~=1.2.3"])
 def test_uv_guard_rejects_inconsistent_or_exact_project_requirements(
     tmp_path: Path, floor: str
 ) -> None:
@@ -503,9 +534,13 @@ def test_uv_guard_rejects_inconsistent_or_exact_project_requirements(
     project = tmp_path / "pyproject.toml"
     project.write_text(f'[tool.uv]\nrequired-version = "{floor}"\n')
     assert uv_pin_violations(tmp_path, [project.name])
-    project.write_text('[tool.uv]\nrequired-version = ">=1.2.3"\n')
-    assert uv_pin_violations(tmp_path, [project.name]) == []
+    # A lower floor stays valid: Dependabot's bundled uv must satisfy it.
+    for ok in (">=1.2.3", ">=1.2.2"):
+        project.write_text(f'[tool.uv]\nrequired-version = "{ok}"\n')
+        assert uv_pin_violations(tmp_path, [project.name]) == []
     (tmp_path / ".tool-versions").write_text("uv " + "1.2.4\n")
+    assert uv_pin_violations(tmp_path, [project.name]) == []
+    project.write_text('[tool.uv]\nrequired-version = ">=1.2.5"\n')
     assert uv_pin_violations(tmp_path, [project.name])
 
 

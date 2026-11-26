@@ -6,6 +6,7 @@ import io
 import ipaddress
 import json
 import os
+import runpy
 import shutil
 import socket
 import ssl
@@ -48,7 +49,6 @@ from vonk_control.model_primitives import Base
 from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObservation, PlatformObserver
 from vonk_control.observation.transfer import OBSERVATION_MEDIA_TYPE
-from vonk_control.operation_api.openapi import admin_openapi_schema
 from vonk_control.worker import loop as worker_module
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
@@ -1148,8 +1148,15 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
         tokens=codec,
         platform_observer=PlatformObserver(sessions, clock=clock),
     )
+    # The candidate wheel stamps the contract it ships: the served one, read
+    # through the generator's one opener.
+    generator = runpy.run_path(
+        str(
+            Path(__file__).resolve().parents[2] / "scripts/dev/generate-control-clients"
+        )
+    )
     assert (
-        contract_fingerprint(admin_openapi_schema(app))
+        contract_fingerprint(generator["cli_schema"](app))
         == candidate_identity.control_contract_sha256
     )
     token = codec.issue(

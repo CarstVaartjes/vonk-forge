@@ -20,14 +20,15 @@ from vonk_control.db.constants import _ALEMBIC_CONFIG, _STARTUP_ADVISORY_LOCK
 from vonk_control.db.schema import reconcile_schema
 
 
-def verify_schema_is_current(connection: Connection) -> None:
+def verify_schema_is_current(connection: Connection, channel: str = "stable") -> None:
     """Reconcile the live catalog to current metadata within this transaction."""
-    reconcile_schema(connection)
+    reconcile_schema(connection, channel)
 
 
 def initialize_database(
     database_url: str,
     *,
+    channel: str = "stable",
     config_path: Path = _ALEMBIC_CONFIG,
 ) -> None:
     """Serialize schema migration and reconciliation for API startup."""
@@ -61,7 +62,7 @@ def initialize_database(
                         )
                     try:
                         with lock_connection.begin():
-                            verify_schema_is_current(lock_connection)
+                            verify_schema_is_current(lock_connection, channel)
                     except SQLAlchemyError as error:
                         if _database_sqlstate(error) in _CONTENTION_SQLSTATES:
                             raise _DatabaseStartupContention(

@@ -62,7 +62,8 @@ never breaks the catalog; only integrity edges refuse it:
   api.api.endpoints word '<word>' is unknown to this Controller; read without
   it for N entries (...)`):
   - a word in a list (an endpoint, format, tool choice, capability, modality,
-    qualification change or quality note) is left out; the rest of the block
+    qualification change or quality note), and one in an entry's own list
+    (`served_capabilities`), is left out; the rest of the block
     applies, so `model_info` still lists the known endpoints;
   - a scalar word becomes a cautious neutral value: a published status reads
     `Not yet verified` (never Working), an unverified reason and a recorded

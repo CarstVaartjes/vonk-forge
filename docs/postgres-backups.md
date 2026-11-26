@@ -12,6 +12,8 @@ CA issuance and revocation journals are included in the PostgreSQL dump.
 Failures appear in the PostgreSQL logs and retry after five minutes; a backup
 problem never stops PostgreSQL itself. A failed or skipped restore check does not advance the restore-verification marker.
 
+Dumps are plain gzip-compressed SQL; Vonk Forge does not encrypt them, and a host-loss restore has not been drilled.
+
 Set `VONK_BACKUP_OFFHOST_PATH` to an already mounted, private host directory to
 copy PostgreSQL dumps off the NAS. The copy is pruned to
 the same retention count; a failed off-host copy prevents the backup from being
@@ -29,7 +31,9 @@ secrets separately and preserve the same intermediate when restoring.
 ## Backup scope
 
 PostgreSQL restores control intent, identities, permissions, and references.
-It does not restore model/image bytes. The planned
+It does not restore model/image bytes: model and image bytes are never in a dump and
+are re-downloadable, and unused non-model state is cleaned after 24 hours with no
+SLA. The planned
 [managed-storage ownership boundary](architecture-overview.md#state-ownership)
 also keeps artifact manifests and local checkpoints outside database dumps.
 Optional artifact backups must preserve those records together with their data

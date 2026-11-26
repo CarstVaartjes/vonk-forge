@@ -70,6 +70,18 @@ def known_block[B: BaseModel](block: B) -> B:
         raise BlockWithheld from error
 
 
+def known_field[V: BaseModel | tuple[str, ...]](value: V) -> V:
+    """A block, or a top-level list field (``served_capabilities``), without unknown words."""
+
+    if isinstance(value, BaseModel):
+        return known_block(value)
+    if not isinstance(value, tuple | list):  # pyright: ignore[reportUnnecessaryIsInstance]  # a field the types do not promise: withhold it, never split it
+        raise BlockWithheld
+    return tuple(  # pyright: ignore[reportReturnType]  # the same tuple type, fewer items
+        item for item in value if not isinstance(item, UnrecognisedWord)
+    )
+
+
 def _model(model: BaseModel, dumped: dict[str, _Json]) -> dict[str, _Json]:
     rebuilt = dict(dumped)
     for name, field in type(model).model_fields.items():
