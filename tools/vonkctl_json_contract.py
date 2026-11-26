@@ -487,13 +487,6 @@ def incompatibilities(
             if key not in new:
                 if path.endswith("/properties"):
                     problems.append(f"{where}: property removed")
-                elif key == "type" and any(
-                    isinstance(alternative, dict) and alternative.get("type") == value
-                    for alternative in new.get("anyOf", [])
-                ):
-                    # The type moved into an alternative beside another (an
-                    # optional field): an added alternative, as documented.
-                    continue
                 elif key in ("type", "const", "$ref"):
                     problems.append(f"{where}: removed")
                 continue

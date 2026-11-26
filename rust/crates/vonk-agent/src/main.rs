@@ -839,7 +839,10 @@ async fn run_inventory_lane(
                         traffic.observe(Path::new("/sys/class/infiniband"))
                     })
                     .await
-                    .unwrap_or_default();
+                    .unwrap_or_else(|error| {
+                        eprintln!("fabric traffic observation failed: {error}");
+                        Vec::new()
+                    });
                 }
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();

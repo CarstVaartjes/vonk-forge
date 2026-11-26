@@ -362,18 +362,6 @@ def test_incompatible_schema_edits_are_detected() -> None:
     )
 
 
-def test_a_field_that_becomes_optional_keeps_the_version() -> None:
-    required = {"properties": {"n": {"type": "integer", "minimum": 0}}}
-    optional = {
-        "properties": {
-            "n": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]}
-        }
-    }
-    other = {"properties": {"n": {"anyOf": [{"type": "string"}, {"type": "null"}]}}}
-    assert incompatibilities(required, optional) == []
-    assert incompatibilities(required, other)
-
-
 def test_a_ref_to_the_old_definition_plus_optional_fields_keeps_the_version() -> None:
     def doc(target: str, extra: dict[str, Any]) -> dict[str, Any]:
         return {

@@ -295,11 +295,8 @@ received plus transmitted bytes since its previous report (`HostSettings.fabric_
 `FabricDevice`, from the port counters the telemetry already reads, which are in
 4-byte words) with the window in seconds and the `bus:slot.function` shared by
 the two devices of one cabled port. The previous reading is in memory only: the
-first report after an agent restart has no window, and neither has a device whose
-byte counter went backwards. Such a device still reports its port, state and
-negotiated rate (`rate_mbps` needs no window, so `network.fabric-rate-low` does
-not wait a window after a restart), with `bytes`, `window_seconds` and `errors`
-unset.
+first report after an agent restart carries nothing, and a counter that went
+backwards is skipped.
 
 The Controller (`fleet_projection/fabric_rails.py`) raises `network.rails-underused`
 ("Network using 1 of 2 rails") when, for an ACTIVE port pair, one device stays
@@ -314,7 +311,7 @@ flat while its sibling is busy over the same window:
   not judged on a handful of packets;
 - a device that is not ACTIVE (down, or without an address) is not one the helper launches and does not count.
 
-No traffic, a device without a window, or only one active device give no advice.
+No traffic, no previous reading, or only one active device give no advice.
 Nothing is restarted. Shared vector: `fabric-devices-v1.json` (agent counter
 sample and Controller cases).
 

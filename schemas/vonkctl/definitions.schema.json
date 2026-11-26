@@ -3164,25 +3164,17 @@
       "type": "object"
     },
     "FabricDevice": {
-      "description": "One RDMA device's traffic over the window since the agent's last report.\n\nA DGX Spark reaches one cabled port through two RDMA devices; ``port`` is\ntheir shared PCI bus:slot.function (the PCI domain differs), which pairs\nthe siblings. ``bytes`` is received plus transmitted bytes in the window.\n``rate_mbps`` is the port's negotiated rate and ``errors`` the link and\ntransport errors counted in the window; each is ``None`` when unreadable\n(for ``errors``, also when the device's error total went backwards, a\ncounter reset). ``rate_mbps`` needs no window, so it is reported even when\nthere is none (the first report after an agent restart, a byte counter\nreset): then ``bytes``, ``window_seconds`` and ``errors`` are all ``None``.\nThey are facts, and nothing here is a\nverdict: the Controller compares siblings and the declared bandwidth.",
+      "description": "One RDMA device's traffic over the window since the agent's last report.\n\nA DGX Spark reaches one cabled port through two RDMA devices; ``port`` is\ntheir shared PCI bus:slot.function (the PCI domain differs), which pairs\nthe siblings. ``bytes`` is received plus transmitted bytes in the window.\n``rate_mbps`` is the port's negotiated rate and ``errors`` the link and\ntransport errors counted in the window; each is ``None`` when unreadable\n(for ``errors``, also when the device's error total went backwards, a\ncounter reset). They are facts, and nothing here is a\nverdict: the Controller compares siblings and the declared bandwidth.",
       "properties": {
         "active": {
           "title": "Active",
           "type": "boolean"
         },
         "bytes": {
-          "anyOf": [
-            {
-              "maximum": 17592186044416,
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Bytes"
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
         },
         "errors": {
           "anyOf": [
@@ -3218,23 +3210,17 @@
           "title": "Rate Mbps"
         },
         "window_seconds": {
-          "anyOf": [
-            {
-              "maximum": 86400,
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Window Seconds"
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Window Seconds",
+          "type": "integer"
         }
       },
       "required": [
         "port",
-        "active"
+        "active",
+        "bytes",
+        "window_seconds"
       ],
       "title": "FabricDevice",
       "type": "object"

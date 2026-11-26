@@ -128,16 +128,13 @@ class FabricDevice(WireModel):
     ``rate_mbps`` is the port's negotiated rate and ``errors`` the link and
     transport errors counted in the window; each is ``None`` when unreadable
     (for ``errors``, also when the device's error total went backwards, a
-    counter reset). ``rate_mbps`` needs no window, so it is reported even when
-    there is none (the first report after an agent restart, a byte counter
-    reset): then ``bytes``, ``window_seconds`` and ``errors`` are all ``None``.
-    They are facts, and nothing here is a
+    counter reset). They are facts, and nothing here is a
     verdict: the Controller compares siblings and the declared bandwidth.
     """
 
     port: Annotated[str, Field(pattern=r"^[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$")]
     active: bool
-    bytes: MemoryBytes | None = None
-    window_seconds: Annotated[int, Field(strict=True, ge=1, le=86_400)] | None = None
+    bytes: MemoryBytes
+    window_seconds: Annotated[int, Field(strict=True, ge=1, le=86_400)]
     rate_mbps: Mbps | None = None
     errors: Annotated[int, Field(strict=True, ge=0, le=COUNTER_MAX)] | None = None
