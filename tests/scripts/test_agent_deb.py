@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import runpy
 import shlex
 import stat
@@ -552,8 +553,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         == f"{hashlib.sha256(first_deb.read_bytes()).hexdigest()}  {package_name}"
     )
     package_signature = (first / f"{package_name}.host.sig").read_text().strip()
-    assert len(package_signature) == 128
-    assert all(character in "0123456789abcdef" for character in package_signature)
+    assert re.fullmatch(r"[0-9a-f]{128}", package_signature)
     public_key = tmp_path / "release.pub"
     signature = tmp_path / "package.sig"
     claims = tmp_path / "package.claims"
