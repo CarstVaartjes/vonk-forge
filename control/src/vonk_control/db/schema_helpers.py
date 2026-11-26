@@ -1,7 +1,9 @@
 """Db: schema helpers."""
 
+import re
 import uuid
 from enum import StrEnum
+from importlib import metadata
 from typing import Any
 
 from alembic.migration import MigrationContext
@@ -318,23 +320,112 @@ def _repair_check_constraints(connection: Connection) -> None:
                     )
 
 
-def _drop_undeclared_tables(connection: Connection, ops: Any) -> None:
-    """Drop every table in the schema that the model no longer declares.
+#: The comment a kept undeclared table carries: the Controller minor that first
+#: saw it undeclared. The table is the only place this fact lives.
+_UNDECLARED_STAMP = "vonk-undeclared-since "
+
+_STAMP_PATTERN = re.compile(rf"{_UNDECLARED_STAMP}(\d+)\.(\d+)")
+
+Minor = tuple[int, int]
+
+
+def _controller_minor() -> Minor | None:
+    """The ``(major, minor)`` of this Controller's release; ``None`` when unknown."""
+
+    try:
+        found = re.match(r"(\d+)\.(\d+)", metadata.version("vonk-control"))
+    except metadata.PackageNotFoundError:
+        return None
+    return (int(found[1]), int(found[2])) if found else None
+
+
+_CONTROLLER_MINOR = _controller_minor()
+
+
+class UndeclaredTableAction(StrEnum):
+    """What one reconciliation does with a table the model does not declare."""
+
+    STAMP = "stamp"
+    KEEP = "keep"
+    DROP = "drop"
+
+
+def _undeclared_table_action(
+    stamp: str | None, current: Minor | None, channel: str
+) -> UndeclaredTableAction:
+    """The one transition for an undeclared table.
+
+    unstamped -> STAMP; stamped with this minor or newer -> KEEP; stamped with
+    an older minor -> DROP; an unparseable stamp is stamped again. The dev
+    channel keeps nothing: every undeclared table is DROP at once.
+    """
+
+    if channel == "dev":
+        return UndeclaredTableAction.DROP
+    if current is None:
+        return UndeclaredTableAction.KEEP
+    found = _STAMP_PATTERN.fullmatch(stamp) if stamp else None
+    if found is None:
+        return UndeclaredTableAction.STAMP
+    if current > (int(found[1]), int(found[2])):
+        return UndeclaredTableAction.DROP
+    return UndeclaredTableAction.KEEP
+
+
+def _undeclared_stamps(connection: Connection) -> dict[str, str]:
+    """The tables of the current schema that carry an undeclared stamp."""
+
+    return {
+        name: comment
+        for name, comment in connection.exec_driver_sql(
+            "SELECT c.relname, obj_description(c.oid, 'pg_class') FROM pg_class c "
+            "WHERE c.relkind = 'r' AND c.relnamespace = current_schema()::regnamespace"
+        )
+        if comment and comment.startswith(_UNDECLARED_STAMP)
+    }
+
+
+def _clear_declared_stamps(connection: Connection) -> None:
+    """Clear the stamp of a table the model declares again.
+
+    Runs before the differences are read, so the stale comment is not reported
+    as drift.
+    """
+
+    if connection.dialect.name != "postgresql":
+        return
+    quote = connection.dialect.identifier_preparer.quote
+    for table_name in sorted(
+        _undeclared_stamps(connection).keys() & set(Base.metadata.tables)
+    ):
+        connection.exec_driver_sql(f"COMMENT ON TABLE {quote(table_name)} IS NULL")
+        _LOGGER.info(
+            "Table %s is declared again; cleared its undeclared stamp", table_name
+        )
+
+
+def _reconcile_undeclared_tables(
+    connection: Connection, ops: Any, channel: str
+) -> None:
+    """Keep every table the model does not declare for one minor release.
 
     The rule, not a list: a table the code does not declare is nothing the
-    Controller reads or writes. Rolling back to an older Controller therefore
-    drops the tables a newer one added. Foreign keys go first so a RESTRICT key
-    cannot block a delete; the drop has no CASCADE, so a table a declared table
-    still references is refused, logged and retried on the next start.
+    Controller reads or writes, but a rollback to the previous minor must find
+    the tables the newer one added. Each is stamped with the minor that first
+    saw it undeclared and dropped by the first Controller of a later minor.
+    Foreign keys go first so a RESTRICT key cannot block a delete; the drop has
+    no CASCADE, so a table a declared table still references is refused, logged
+    and retried on the next start.
     """
 
     if connection.dialect.name != "postgresql":
         return
 
     inspector = inspect(connection)
-    undeclared = sorted(
-        set(inspector.get_table_names()) - set(Base.metadata.tables) - _FOREIGN_TABLES
-    )
+    declared = set(Base.metadata.tables)
+    undeclared = sorted(set(inspector.get_table_names()) - declared - _FOREIGN_TABLES)
+    stamps = _undeclared_stamps(connection)
+    quote = connection.dialect.identifier_preparer.quote
     for table_name in undeclared:
         for key in inspector.get_foreign_keys(table_name):
             name = key["name"]
@@ -348,14 +439,29 @@ def _drop_undeclared_tables(connection: Connection, ops: Any) -> None:
                 _LOGGER.warning(
                     "Could not drop foreign key %s.%s: %s", table_name, name, error
                 )
+    current = _CONTROLLER_MINOR
+    if current is None and channel != "dev":
+        return  # unknown version: keep every table, drop none
     for table_name in undeclared:
+        action = _undeclared_table_action(stamps.get(table_name), current, channel)
         try:
             with connection.begin_nested():
-                ops.drop_table(table_name)
-            _LOGGER.info("Dropped undeclared table %s", table_name)
+                if action is UndeclaredTableAction.DROP:
+                    ops.drop_table(table_name)
+                    _LOGGER.info("Dropped undeclared table %s", table_name)
+                elif action is UndeclaredTableAction.STAMP and current is not None:
+                    connection.exec_driver_sql(
+                        f"COMMENT ON TABLE {quote(table_name)} "
+                        f"IS '{_UNDECLARED_STAMP}{current[0]}.{current[1]}'"
+                    )
+                    _LOGGER.warning(
+                        "Kept undeclared table %s until the next minor", table_name
+                    )
         except SQLAlchemyError as error:
             _reraise_contention(error)
-            _LOGGER.warning("Could not drop undeclared table %s: %s", table_name, error)
+            _LOGGER.warning(
+                "Could not reconcile undeclared table %s: %s", table_name, error
+            )
 
 
 class SchemaDriftKind(StrEnum):
@@ -373,7 +479,7 @@ SchemaDrift = dict[SchemaDriftKind, list[str]]
 
 
 # Every Alembic difference kind reconciliation has a rule for. Tables the model
-# no longer declares are dropped, columns it no longer declares are kept with
+# no longer declares are kept one minor and then dropped, columns it no longer declares are kept with
 # their data, and an obsolete index stays until its replacement exists; those are decisions, not
 # drift. Any other kind is reported as unhandled.
 _RECONCILED_DIFFERENCES = frozenset(

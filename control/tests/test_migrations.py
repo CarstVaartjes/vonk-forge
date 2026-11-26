@@ -27,6 +27,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_control.db import schema_helpers
 from vonk_control.db.schema_helpers import SchemaDriftKind
 from vonk_control.db.startup import initialize_database, verify_schema_is_current
 from vonk_control.distribution.service import DistributionService
@@ -357,19 +358,18 @@ def test_postgres_reconciliation_preserves_unknown_column_data(
         assert nullable is True
 
 
-def test_postgres_reconciliation_drops_every_undeclared_table(
-    postgres_engine,
+def test_postgres_reconciliation_keeps_undeclared_table_for_one_minor(
+    postgres_engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A table the model does not declare is dropped, whatever it references.
+    """An undeclared table keeps its rows and is stamped, but loses its keys.
 
-    An upgraded or rolled-back database may hold tables no code reads. Their
-    RESTRICT keys would block deletes, so startup drops them; declared tables and
-    ``alembic_version`` stay.
+    Its RESTRICT key must not block deleting a declared row; a rollback to the
+    previous minor finds the table intact.
     """
 
+    monkeypatch.setattr(schema_helpers, "_CONTROLLER_MINOR", (1, 0))
     _upgrade(postgres_engine.url.render_as_string(hide_password=False))
     with postgres_engine.begin() as connection:
-        declared = set(inspect(connection).get_table_names())
         connection.execute(
             text(
                 "CREATE TABLE some_retired_table ("
@@ -380,12 +380,75 @@ def test_postgres_reconciliation_drops_every_undeclared_table(
                 "ON DELETE RESTRICT)"
             )
         )
-        assert inspect(connection).get_foreign_keys("some_retired_table")
+    with Session(postgres_engine) as session, session.begin():
+        session.add(AgentNode(node_id="n1", state="active"))
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO some_retired_table (id, node_id) VALUES ('r1', 'n1')")
+        )
+    # The second pass has the same minor and takes the KEEP branch.
+    for _ in range(2):
+        with postgres_engine.begin() as connection:
+            verify_schema_is_current(connection)
+        with postgres_engine.connect() as connection:
+            inspector = inspect(connection)
+            assert not inspector.get_foreign_keys("some_retired_table")
+            assert (
+                inspector.get_table_comment("some_retired_table")["text"]
+                == "vonk-undeclared-since 1.0"
+            )
+            assert (
+                connection.execute(
+                    text("SELECT id FROM some_retired_table")
+                ).scalar_one()
+                == "r1"
+            )
+    with postgres_engine.begin() as connection:
+        connection.execute(text("DELETE FROM agent_nodes WHERE node_id = 'n1'"))
+    # An unknown Controller version keeps the table and leaves it as it is.
+    monkeypatch.setattr(schema_helpers, "_CONTROLLER_MINOR", None)
     with postgres_engine.begin() as connection:
         verify_schema_is_current(connection)
     with postgres_engine.connect() as connection:
-        assert set(inspect(connection).get_table_names()) == declared
-        assert "alembic_version" in declared
+        assert "some_retired_table" in inspect(connection).get_table_names()
+
+
+def test_postgres_reconciliation_on_dev_drops_undeclared_table_at_once(
+    postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dev channel keeps nothing: an undeclared table goes at once."""
+
+    monkeypatch.setattr(schema_helpers, "_CONTROLLER_MINOR", (1, 0))
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.execute(text("CREATE TABLE some_retired_table (id INTEGER)"))
+    with postgres_engine.begin() as connection:
+        verify_schema_is_current(connection, "dev")
+    with postgres_engine.connect() as connection:
+        assert "some_retired_table" not in inspect(connection).get_table_names()
+
+
+def test_postgres_reconciliation_drops_older_stamp_and_clears_declared(
+    postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first later minor drops a stamped table; a declared table loses its stamp."""
+
+    monkeypatch.setattr(schema_helpers, "_CONTROLLER_MINOR", (1, 1))
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.execute(text("CREATE TABLE some_retired_table (id INTEGER)"))
+        connection.execute(
+            text("COMMENT ON TABLE some_retired_table IS 'vonk-undeclared-since 1.0'")
+        )
+        connection.execute(
+            text("COMMENT ON TABLE agent_nodes IS 'vonk-undeclared-since 1.0'")
+        )
+    with postgres_engine.begin() as connection:
+        verify_schema_is_current(connection)
+    with postgres_engine.connect() as connection:
+        inspector = inspect(connection)
+        assert "some_retired_table" not in inspector.get_table_names()
+        assert inspector.get_table_comment("agent_nodes")["text"] is None
 
 
 def test_schema_reconciliation_preserves_unexpected_column(

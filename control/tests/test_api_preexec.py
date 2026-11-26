@@ -61,7 +61,7 @@ def test_owned_state_initializes_database_then_the_single_administrator(
     monkeypatch.setattr(
         api_preexec,
         "initialize_database",
-        lambda database_url: events.append(("database", database_url)),
+        lambda database_url, channel: events.append(("database", database_url)),
     )
     monkeypatch.setattr(
         api_preexec,
