@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
 import time
 from dataclasses import dataclass
+from importlib import metadata
 from importlib.resources import files
 from zipfile import ZipFile
 
@@ -111,6 +113,15 @@ def packaged_runtime_identity() -> RuntimeBuildIdentity:
     return stamped
 
 
+def _dependency_pins(metadata_text: str) -> list[str]:
+    """The METADATA lines that decide what a release needs to run."""
+    return sorted(
+        line.strip()
+        for line in metadata_text.splitlines()
+        if line.startswith(("Requires-Dist:", "Requires-Python:"))
+    )
+
+
 def installed_content_identity() -> str | None:
     """Observe installed package bytes within a byte and time budget."""
     deadline = time.monotonic() + 5
@@ -137,6 +148,14 @@ def installed_content_identity() -> str | None:
                 members.append((name, hashlib.sha256(content).hexdigest()))
     except OSError, ValueError:
         return None
+    installed_metadata = ""
+    with contextlib.suppress(metadata.PackageNotFoundError):
+        installed_metadata = (
+            metadata.distribution("vonk-cluster-profiles").read_text("METADATA") or ""
+        )
+    members.append(
+        ("METADATA", contract_fingerprint(_dependency_pins(installed_metadata)))
+    )
     return contract_fingerprint(sorted(members))
 
 
@@ -161,4 +180,19 @@ def wheel_content_identity(archive: ZipFile) -> str | None:
         if remaining < 0:
             return None
         members.append((member.filename, hashlib.sha256(content).hexdigest()))
+    wheel_metadata = [
+        name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+    ]
+    if len(wheel_metadata) != 1:
+        return None
+    members.append(
+        (
+            "METADATA",
+            contract_fingerprint(
+                _dependency_pins(
+                    archive.read(wheel_metadata[0]).decode("utf-8", "replace")
+                )
+            ),
+        )
+    )
     return contract_fingerprint(sorted(members))
