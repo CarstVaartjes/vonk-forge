@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -104,10 +105,15 @@ def installed_vonkctl(tmp_path_factory):
         )
         admin_schema = json.loads(bundled)
         controller_schema = json.loads((root / "control/openapi.json").read_bytes())
-        # The browser schema has additional auth routes. Every bundled CLI
-        # model still comes from this exact Controller source, unchanged.
-        for name, definition in admin_schema["components"]["schemas"].items():
-            assert controller_schema["components"]["schemas"][name] == definition
+        # Every bundled CLI model is the one the generator ships from this
+        # Controller source: its admin contract with the response sets and
+        # objects vonkctl only reads opened (cli_schema, the one opener).
+        shipped = runpy.run_path(str(root / "scripts/dev/generate-control-clients"))[
+            "cli_schema"
+        ]()
+        assert admin_schema["components"] == shipped["components"]
+        # The browser schema has additional auth routes; the profile routes are
+        # this exact Controller's.
         for path, operation in admin_schema["paths"].items():
             if path.startswith("/api/profile/"):
                 assert controller_schema["paths"][path] == operation
