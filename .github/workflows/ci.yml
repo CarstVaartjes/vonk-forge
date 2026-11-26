@@ -741,7 +741,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = aarch64
-          rustup target add aarch64-unknown-linux-gnu
+          scripts/retry-dependency-fetch rustup target add aarch64-unknown-linux-gnu
       - name: Install lifecycle test dependencies
         uses: ./.github/actions/apt-install
         with:
