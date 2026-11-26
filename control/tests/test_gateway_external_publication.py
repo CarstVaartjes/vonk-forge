@@ -46,6 +46,7 @@ from vonk_control.models.gateway import (
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 from vonk_control.waits.persisted import read_wait
 
 from .recipe_operations_support import setup_services
@@ -244,6 +245,28 @@ def test_a_malformed_external_entry_blocks_while_the_local_route_stays_published
         wait = read_wait(owned)
     assert wait is not None
     assert wait.next_check > clock.now
+
+
+def test_a_refusal_before_the_generation_is_written_blames_no_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Break caught: any failure of the publication effect (here, preparing the
+    # keys) marked the introduced entries start-failed though nothing was written.
+    clock = MutableClock(NOW)
+    service = _service(tmp_path, monkeypatch, clock)
+    _seed(service.sessions, _spec())
+
+    def refuse(_runs: frozenset[str]) -> None:
+        raise RecipeRouteNotReady("gateway keys are unavailable")
+
+    service._prepare_key_routes = refuse
+    service.maintain()
+
+    row = _row(service, "partner-large")
+    assert row is not None
+    assert row.state == ExternalPublicationState.PENDING.value
+    assert row.reason is None
+    assert not (tmp_path / "live" / "activation.json").exists()
 
 
 def test_a_crash_after_the_acknowledged_generation_repeats_no_effect_and_loses_nothing(

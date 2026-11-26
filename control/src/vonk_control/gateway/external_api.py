@@ -6,6 +6,8 @@ from typing import Annotated, Any, NoReturn
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi import Path as PathParameter
+from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
@@ -59,7 +61,9 @@ EXTERNAL_OPERATION_IDS = {
     ("get", _CREDENTIAL_RECEIPT): "getGatewayCredentialReceipt",
 }
 
-_ALIAS = PathParameter(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", max_length=128)
+_ALIAS = PathParameter(
+    pattern=ENDPOINT_ALIAS_PATTERN, max_length=ENDPOINT_ALIAS_MAX_LENGTH
+)
 _NAME = PathParameter(pattern=f"^{BINDING_NAME_PATTERN}$", max_length=63)
 
 

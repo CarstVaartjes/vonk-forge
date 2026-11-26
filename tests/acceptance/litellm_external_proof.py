@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import openai
+from fastapi import HTTPException
 from litellm_model_info_proof import (
     DB_PASSWORD,
     DB_PORT,
@@ -55,7 +56,7 @@ from vonk_control.gateway.external_contract import (
     ExternalDeploymentSpec,
     ExternalDestination,
 )
-from vonk_control.gateway.keys import GatewayKeyService
+from vonk_control.gateway.keys import GatewayKeyError, GatewayKeyService
 from vonk_control.gateway.keys_contract import GatewayKeyCreated
 from vonk_control.gateway.litellm import (
     LiteLlmPolicy,
@@ -296,11 +297,14 @@ def client_key(work: Path) -> str:
     )
     deadline = time.monotonic() + 120
     while True:  # the key store is ready once the database migration finished
-        created = service.create(
-            "proof-client", request_id="proof-request", actor="proof"
-        )
-        if isinstance(created, GatewayKeyCreated):
-            return created.key
+        try:
+            created = service.create(
+                "proof-client", request_id="proof-request", actor="proof"
+            )
+            if isinstance(created, GatewayKeyCreated):
+                return created.key
+        except (HTTPException, GatewayKeyError):
+            pass  # LiteLLM answers the key routes only after its migration
         check(time.monotonic() < deadline, "the client key was not created")
         time.sleep(2)
 
@@ -341,9 +345,14 @@ def prove(key: str, elsewhere_port: int, remove: Callable[[], None]) -> None:
 
     # A redirect to another host carries no credential.
     Partner.redirect_to = f"https://{ELSEWHERE_HOST}:{elsewhere_port}"
-    # The gateway may refuse the redirect; what matters is what leaked.
+    # The gateway may refuse the redirect; what matters is what leaked, and that
+    # the partner was asked (otherwise nothing here was tested).
     with contextlib.suppress(openai.APIStatusError):
         streamed(key, REDIRECTED)
+    check(
+        any(item["path"].startswith("/redirect/") for item in Partner.received),
+        "the redirecting partner was never asked",
+    )
     check(
         not any(SECRET in item["authorization"] for item in Elsewhere.received),
         "a redirect carried the credential to another host",

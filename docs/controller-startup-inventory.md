@@ -47,7 +47,7 @@ worker; the API keeps only what needs the gateway master key or its own memory.
 | Library observation (`LibraryObservations`) | API | Its in-memory library view; PostgreSQL | Every 5 s it compares the newest finished sync run and re-reads the library at once when one finished; library and storage bytes every minute. A failed read waits for the next sync or the next minute |
 | Default key (`observe_default_key`) | API | The gateway master key, `/gateway-secrets`, the LiteLLM key relay `caddy:8087` on `agent-proxy` | Every minute, independent of the library |
 | Route and grant reconcile (`_keep_recipe_routes`) | API | `/routes`, the gateway master key, `caddy:8087`; the external models it publishes read `/supervisor/credentials.json` | Every 5 s |
-| External model wait (`WaitOwnerKind.EXTERNAL_MODEL`) | worker | PostgreSQL; runs the same `maintain` pass | A blocked deployment's persisted wait (a minute for a missing record or secret, five minutes after a generation did not start) |
+| External model wait (`WaitOwnerKind.EXTERNAL_MODEL`) | worker | PostgreSQL; runs the same `maintain` pass | A blocked deployment's persisted wait (about ten seconds for a missing record or secret, about five minutes after a generation did not start) |
 | Default key startup observation (`keep_default_key`) | API | The gateway master key, `/gateway-secrets`, `caddy:8087` | Six attempts after start, then the periodic default-key observation keeps it |
 | Capability recovery timers | API, for its own capabilities (the worker retries one when a pass uses it) | The capability's own dependency | 1 s backoff, capped at 60 s |
 

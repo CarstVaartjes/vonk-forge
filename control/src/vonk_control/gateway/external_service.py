@@ -25,7 +25,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.route_activation import ROUTE_SHUTDOWN_SECONDS
 from vonk_agent_protocol.state_machines import (
-    ExternalBlockReason,
     ExternalPublicationState,
 )
 from vonk_control.admission_locking import ConstraintReplan, admitting
@@ -64,7 +63,12 @@ from vonk_control.gateway.external_contract import (
     ExternalModelInput,
 )
 from vonk_control.gateway.external_publication import CredentialNames, read_bindings
-from vonk_control.gateway.external_states import ExternalEvent, apply_event
+from vonk_control.gateway.external_states import (
+    ExternalEvent,
+    apply_event,
+    block_reason,
+    state_of,
+)
 from vonk_control.gateway.external_validation import (
     destination_block,
     validate_external_entry,
@@ -526,7 +530,7 @@ def _dependents(
         dependents.append(
             ExternalBindingDependent(
                 alias=row.alias,
-                state=ExternalPublicationState(row.state),
+                state=state_of(row),
                 withdrawn=destination_block(spec, after) is not None,
             )
         )
@@ -536,7 +540,7 @@ def _dependents(
 def _view(row: GatewayExternalDeployment) -> ExternalModelView:
     desired = row.desired_spec
     spec = desired if isinstance(desired, ExternalDeploymentSpec) else None
-    state = ExternalPublicationState(row.state)
+    state = state_of(row)
     return ExternalModelView(
         alias=row.alias,
         destination=spec.destination if spec is not None else None,
@@ -545,7 +549,7 @@ def _view(row: GatewayExternalDeployment) -> ExternalModelView:
         applied_revision=row.applied_revision,
         enabled=row.enabled,
         state=state,
-        reason=ExternalBlockReason(row.reason) if row.reason else None,
+        reason=block_reason(row),
         next_check_at=row.next_action_at,
         published=(
             state == ExternalPublicationState.PUBLISHED
@@ -573,5 +577,5 @@ def _accepted(
         request_id=row.request_id,
         action=action,
         revision=row.desired_revision,
-        state=ExternalPublicationState(row.state),
+        state=state_of(row),
     )

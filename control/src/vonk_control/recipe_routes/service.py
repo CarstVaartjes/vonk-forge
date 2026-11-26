@@ -253,12 +253,16 @@ class RecipeRouteService:
                     return self._execute_once(publication)
                 except SecurityRefusalError, _RecipeRunContended:
                     raise
+                except _ActivatedRecipeRouteError as error:
+                    last = error
+                    if publication.settles_failure:
+                        # The hook blocked what the unacknowledged generation
+                        # introduced; repeating it would wait out the same timeout.
+                        break
                 except RecipeRouteNotReady as error:
                     last = error
                 except Exception as error:  # noqa: BLE001
                     last = error
-                if publication.settles_failure:
-                    break
             assert last is not None
             raise last
         finally:

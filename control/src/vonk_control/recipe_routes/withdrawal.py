@@ -38,6 +38,7 @@ from vonk_control.recipe_routes.shared import (
     RecipeRankStopped,
     RecipeRouteError,
     RecipeRouteSuperseded,
+    _ActivatedRecipeRouteError,
     _aware,
     _Publication,
     _RecipeCandidate,
@@ -347,9 +348,7 @@ def maintain(self) -> bool:
         return step
     try:
         self._execute(step)
-    except RecipeRouteSuperseded:
-        raise
-    except Exception as error:
+    except _ActivatedRecipeRouteError as error:
         if not step.settles_failure:
             raise
         # The generation did not start with the external entries it introduced.
@@ -583,8 +582,11 @@ def _publish_if_changed(
                     run.route_error = None
                     run.updated_at = self._clock()
 
-        def fail(session: Session, _error: Exception) -> None:
-            block_introduced(session, candidate.externals, now=self._clock())
+        def fail(session: Session, error: Exception) -> None:
+            # Only a generation that was written and not acknowledged blames the
+            # entries it introduced; a refusal before it was written blames none.
+            if isinstance(error, _ActivatedRecipeRouteError):
+                block_introduced(session, candidate.externals, now=self._clock())
 
         return _Publication(
             claim=claim,

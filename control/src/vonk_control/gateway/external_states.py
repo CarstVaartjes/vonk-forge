@@ -77,10 +77,6 @@ EDGES: Final[
     },
 }
 
-#: A state the gateway still serves from: the applied entry stays until a new
-#: generation without it is acknowledged.
-SERVING: Final = frozenset({_PENDING, _PUBLISHED, _BLOCKED})
-
 #: Events that clear the reason a deployment was not serving.
 _CLEARS_REASON: Final = frozenset(
     {
@@ -144,6 +140,12 @@ def settle(
     if row.state == _WITHDRAWN.value:
         return apply_event(row, ExternalEvent.ENABLE, now=now)
     return ExternalPublicationState(row.state)
+
+
+def state_of(row: GatewayExternalDeployment) -> ExternalPublicationState:
+    """The state a row's word means; a word the machine never had reads as ``pending``."""
+
+    return adopt_machine_state(ExternalPublicationState, row.state) or _PENDING
 
 
 def block_reason(row: GatewayExternalDeployment) -> ExternalBlockReason | None:

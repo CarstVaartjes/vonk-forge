@@ -244,8 +244,8 @@ class _Publication:
     # A recovering run's failure is committed on the run; it must not stop the
     # maintenance pass that found it from being reported as progress.
     contained: bool = False
-    # The failure hook settles what blamed the generation (it blocked the entries it
-    # introduced): repeating the same effect would only wait out the same timeout.
+    # The failure hook settles an unacknowledged generation (it blocks the entries
+    # that generation introduced).
     settles_failure: bool = False
 
 

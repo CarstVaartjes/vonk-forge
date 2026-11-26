@@ -179,7 +179,7 @@ class ExternalBindingAccepted(StrictModel):
 class ModelReviewed(StrictModel):
     """What a model review read: its digest names exactly this."""
 
-    alias: str
+    alias: EndpointAlias
     action: ExternalModelAction
     spec: ExternalDeploymentSpec | None
     expected_revision: int | None
