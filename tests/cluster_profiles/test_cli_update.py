@@ -6,6 +6,7 @@ import io
 import ipaddress
 import json
 import os
+import runpy
 import shutil
 import socket
 import ssl
@@ -48,7 +49,6 @@ from vonk_control.model_primitives import Base
 from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObservation, PlatformObserver
 from vonk_control.observation.transfer import OBSERVATION_MEDIA_TYPE
-from vonk_control.operation_api.openapi import admin_openapi_schema
 from vonk_control.worker import loop as worker_module
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
@@ -130,6 +130,9 @@ def test_update_download_identifies_product_without_following_redirects() -> Non
             worker.join(timeout=30)
 
 
+PYTHON = (Path(__file__).resolve().parents[2] / ".python-version").read_text().strip()
+
+
 def _signed_publication(
     tmp_path: Path,
     *,
@@ -151,6 +154,10 @@ def _signed_publication(
     )
     wheel_buffer = io.BytesIO()
     with zipfile.ZipFile(wheel_buffer, "w") as archive:
+        archive.writestr(
+            "vonk_cluster_profiles-0.1.1.dist-info/METADATA",
+            f"Metadata-Version: 2.4\nRequires-Python: >={PYTHON}\n",
+        )
         archive.writestr(
             "cluster_profiles/build-identity.json",
             json.dumps(
@@ -328,7 +335,7 @@ def test_update_installs_only_changed_signed_wheel(
         seen.append(command)
         # Installed as a uv tool, so the release's dependencies resolve and
         # the tool receipt follows the new wheel.
-        assert command[1:6] == ["tool", "install", "--force", "--python", "3.14"]
+        assert command[1:6] == ["tool", "install", "--force", "--python", PYTHON]
         assert command[-1].endswith(".whl")
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -607,7 +614,7 @@ def test_offline_version_and_json_command_do_not_schedule_notices(
 def _install_cli_wheel(uv: str, venv: Path, wheel: Path) -> Path:
     """Install a built CLI wheel with --no-deps and link its locked dependencies.
 
-    scripts/sync-cli-dependencies prepares the CLI's own dependency
+    scripts/dev/sync-cli-dependencies prepares the CLI's own dependency
     environment; the test never resolves or downloads a dependency.
     """
 
@@ -737,8 +744,8 @@ def _prepare_signed_update_tool(
     interpreters = Path(os.environ["UV_PYTHON_INSTALL_DIR"])
     assert interpreters.is_dir(), "the hosted managed interpreter directory is absent"
     uv = shutil.which("uv")
-    if uv is None or sys.version_info[:2] != (3, 14):
-        message = "installed update proof requires uv and Python 3.14"
+    if uv is None or sys.version_info[:2] != tuple(map(int, PYTHON.split("."))):
+        message = f"installed update proof requires uv and Python {PYTHON}"
         if os.environ.get("CI", "").lower() == "true":
             pytest.fail(message, pytrace=False)
         pytest.skip(message)
@@ -838,7 +845,7 @@ def _prepare_signed_update_tool(
         [wheel] = directory.glob("vonk_cluster_profiles-*-py3-none-any.whl")
         wheels.append(wheel)
     installed = subprocess.run(
-        [uv, "tool", "install", "--force", "--python", "3.14", str(wheels[0])],
+        [uv, "tool", "install", "--force", "--python", PYTHON, str(wheels[0])],
         env=environment,
         cwd=workspace,
         capture_output=True,
@@ -1001,7 +1008,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
     before_tool_receipt = receipt_path.read_bytes()
     marker = (
         python.parent.parent
-        / "lib/python3.14/site-packages/cluster_profiles/update_fixture_marker.py"
+        / f"lib/python{PYTHON}/site-packages/cluster_profiles/update_fixture_marker.py"
     )
     assert marker.is_file()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -1141,8 +1148,15 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
         tokens=codec,
         platform_observer=PlatformObserver(sessions, clock=clock),
     )
+    # The candidate wheel stamps the contract it ships: the served one, read
+    # through the generator's one opener.
+    generator = runpy.run_path(
+        str(
+            Path(__file__).resolve().parents[2] / "scripts/dev/generate-control-clients"
+        )
+    )
     assert (
-        contract_fingerprint(admin_openapi_schema(app))
+        contract_fingerprint(generator["cli_schema"](app))
         == candidate_identity.control_contract_sha256
     )
     token = codec.issue(
@@ -1308,8 +1322,8 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
                         (
                             "import runpy,sys; from pathlib import Path; "
                             "root=Path(sys.argv[1]); "
-                            "sys.path.insert(0,str(root/'scripts')); "
-                            "publisher=runpy.run_path(str(root/'scripts/install-release-publication')); "
+                            "sys.path.insert(0,str(root/'scripts/release')); "
+                            "publisher=runpy.run_path(str(root/'scripts/release/install-release-publication')); "
                             "rendered=publisher['_render_channel_endpoint']"
                             "('cli','stable',sys.argv[2],Path(sys.argv[3]).read_bytes()); "
                             "Path(sys.argv[4]).write_bytes(rendered)"
@@ -1738,3 +1752,17 @@ def test_an_install_that_goes_silent_ends_as_unknown(tmp_path, monkeypatch):
     started = time.monotonic()
     assert cli_update._install([uv, "tool", "install", "wheel.whl"]) is None
     assert time.monotonic() - started < 10
+
+
+def test_updater_installs_on_the_wheels_own_python_floor() -> None:
+    def wheel(metadata: str | None) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            if metadata is not None:
+                archive.writestr("x-1.dist-info/METADATA", metadata)
+        return buffer.getvalue()
+
+    assert cli_update._wheel_python_floor(wheel("Requires-Python: >=3.99\n")) == "3.99"
+    running = f"{sys.version_info.major}.{sys.version_info.minor}"
+    assert cli_update._wheel_python_floor(wheel(None)) == running
+    assert cli_update._wheel_python_floor(wheel("Name: x\n")) == running

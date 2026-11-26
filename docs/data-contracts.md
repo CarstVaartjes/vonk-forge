@@ -19,29 +19,29 @@ that no longer occurs fails as stale.
 
 | Data class | Source model | Rust | TypeScript | Python consumers |
 | --- | --- | --- | --- | --- |
-| Controller to Spark messages (claims, directives, results, progress, inventory, telemetry, enrollment, recipe jobs and builds, host-helper grants) | `agent_protocol/src/vonk_agent_protocol/*.py` | `vonk-agent-protocol` `generated.rs`, from `schema/wire.json` (`scripts/generate-agent-wire`) | none | Controller (the models themselves) |
+| Controller to Spark messages (claims, directives, results, progress, inventory, telemetry, enrollment, recipe jobs and builds, host-helper grants) | `agent_protocol/src/vonk_agent_protocol/*.py` | `vonk-agent-protocol` `generated.rs`, from `schema/wire.json` (`scripts/dev/generate-agent-wire`) | none | Controller (the models themselves) |
 | Agent client decisions, transport classifications and OCI diagnostic vocabulary | `agent_words.py`, published by `LifecycleVocabulary` | `generated.rs` | vocabulary generator | diagnostic consumers |
 | Compiled launch plan | `compiled_execution_plan.py` in `agent_protocol` | `generated.rs` | none | Controller, tests |
 | Files the Spark agent and helper persist (identity pointers, readiness receipt, reconciliation checkpoints and receipts, installation metadata, run lifecycle, runtime image receipts, generation and installation intent fences, package rollback transaction) | `agent_protocol/.../agent_state.py` | `generated.rs` (`AgentGenerationPointer`, `AgentReadinessReceipt`, `RunLifecycleRecord`, `HostRuntimeImageReceipt`, ...) | none | none yet; the models document the files |
-| Installer documents (NAS install template, Spark site ports, Spark setup apply frame) | `agent_protocol/.../installer_setup.py` | `generated.rs` (`NasInstallTemplate`, `SitePorts`, `SparkApplyEnvelope`, ...) | none | `scripts/build-nas-compose-bundle` validates its payload with the model; the Controller reads `site-ports.json` through `SitePorts` |
+| Installer documents (NAS install template, Spark site ports, Spark setup apply frame) | `agent_protocol/.../installer_setup.py` | `generated.rs` (`NasInstallTemplate`, `SitePorts`, `SparkApplyEnvelope`, ...) | none | `scripts/release/build-nas-compose-bundle` validates its payload with the model; the Controller reads `site-ports.json` through `SitePorts` |
 | CLI release projection | `installer_release.py` | `src/cluster_profiles/schemas/cli-release-projection.schema.json` | none | CLI self-updater |
 | Installer release manifest | `installer_release.py` | `generated.rs`; `schemas/install-release-manifest.schema.json` | none | publisher scripts |
 | Controller API requests and responses | `control/src/vonk_control/*_contract.py` and the registered API modules below | none (the agent does not call these) | `control/web/src/api/generated.d.ts` from `control/openapi.json` | `src/cluster_profiles/generated_control` (CLI client) |
 | Prometheus metric catalogue, series with summaries, and alert attention | `control/src/vonk_control/metrics/contract.py`; external Prometheus replies in `metrics/prometheus_api.py` | none | generated Controller API types | generated Controller client |
 | Lifecycle and reason-code vocabulary | `lifecycle_vocabulary.py`, `reason_codes/`, `state_machines.py` | `generated.rs` | `control/web/src/api/vocabulary.generated.ts` | the CLI words in `src/cluster_profiles/cli_states_generated.py` |
 | Progress phase and wait words (plain words for a person) | `vonk_agent_protocol/phase_words.py` | none | `control/web/src/api/vocabulary.generated.ts` (`PHASE_WORDS`, `WAIT_WORDS`) | `src/cluster_profiles/cli_states_generated.py` |
-| CLI state words | the vocabulary above | none | none | `src/cluster_profiles/cli_states_generated.py` (`scripts/generate-python-vocabulary`) |
+| CLI state words | the vocabulary above | none | none | `src/cluster_profiles/cli_states_generated.py` (`scripts/dev/generate-python-vocabulary`) |
 | Route activation marker | `route_activation.py`; its state words from `GatewayRouteState` | none | none | `route_activation_words.py` (generated), loaded beside `route_activation.py` by the LiteLLM supervisor |
 | CLI token download | `CliTokenDownload` in `auth_api.py` | none | `components["schemas"]["CliTokenDownload"]` | none |
 | Published Model and Recipe | `vonk_forge_contracts` in the recipes checkout | none | `ModelDefinition`, `RecipeDefinition` in `generated.d.ts` | catalog, compiler |
 | Database rows | SQLAlchemy models, `control/src/vonk_control/models/` | none | none | Controller |
 
-Regenerate everything with `scripts/generate-agent-wire` (wire, installer
-release schema, `generated.rs`), `scripts/generate-control-clients` (OpenAPI,
+Regenerate everything with `scripts/dev/generate-agent-wire` (wire, installer
+release schema, `generated.rs`), `scripts/dev/generate-control-clients` (OpenAPI,
 Python and TypeScript clients, TypeScript vocabulary) and
-`scripts/generate-python-vocabulary` (CLI words, route activation words).
+`scripts/dev/generate-python-vocabulary` (CLI words, route activation words).
 Client and wire outputs are ignored and generated by their build/test entry
-points. `scripts/check-generated-determinism` compares two client generation
+points. `scripts/dev/check-generated-determinism` compares two client generation
 runs; `--wire` checks wire generation. `tests/test_generated_contracts.py`
 compares generated consumers and the remaining checked-in schemas with their
 canonical producers. See [the fresh checkout command](testing-and-ci.md#fresh-checkout-build-and-contract-smoke-checks).
@@ -239,6 +239,8 @@ module defines its own.
 | `control/src/vonk_control/resource_planning/contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
 | `control/src/vonk_control/gateway/route_bundle_contract.py` | controller-contract | 7 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/gateway/keys_contract.py` | controller-contract | 3 | Wire documents of gateway client keys. |
+| `control/src/vonk_control/gateway/external_contract.py` | controller-contract | 9 | An external model: the operator's input, the accepted non-secret spec, its destination, credential bindings and rendered gateway entry. |
+| `control/src/vonk_control/gateway/litellm_surface.py` | controller-contract | 1 | What the pinned LiteLLM accepts (`deploy/compose/litellm/surface.json`), generated from the pinned image. |
 | `control/src/vonk_control/run_switch_contract/requests.py` | controller-contract | 15 | Run switch contract: requests. |
 | `control/src/vonk_control/run_switch_contract/evidence.py` | controller-contract | 16 | Run switch contract: evidence. |
 | `control/src/vonk_control/run_switch_contract/plans.py` | controller-contract | 2 | Run switch contract: plans. |
@@ -275,7 +277,7 @@ module defines its own.
 | `control/src/vonk_control/operator_acceptance/receipt_contract.py` | controller-contract | 4 | Canonical public operator acceptance references and existing-Job decisions. |
 | `control/src/vonk_control/model_cache/fleet_removal_contract.py` | controller-contract | 6 | Reviewed, content-addressed effects of a request to remove a fleet model. |
 | `control/src/vonk_control/failures/coordinator_contract.py` | controller-contract | 2 | Failures of worker coordinators that have not claimed an operation. |
-| `tools/client_compatibility_report.py` | declared | 8 | Report what a published vonkctl would refuse from this Controller. |
+| `tools/client_compatibility_report.py` | declared | 8 | Report what a published vonkctl would refuse from this Controller, and gate against stable 1.0 or later. |
 | `tools/contract_scans.py` | declared | 3 | Static scans that keep every data class defined once, in its Pydantic contract. |
 | `tools/single_source_values.py` | declared | 3 | Owner-adjacent registrations for handwritten literal families, without debt allowances. |
 | `control/src/vonk_control/inventory/items_contract.py` | controller-contract | 2 | Typed current agent facts retained as inventory items, never command history. |

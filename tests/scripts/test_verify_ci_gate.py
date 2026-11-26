@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _module():
     loader = importlib.machinery.SourceFileLoader(
-        "verify_ci_gate", str(ROOT / "scripts/verify-ci-gate")
+        "verify_ci_gate", str(ROOT / "scripts/ci/verify-ci-gate")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
@@ -329,7 +329,7 @@ def test_the_gate_step_hands_it_the_needs_json() -> None:
     [step] = [
         step
         for step in ci["jobs"]["ci-gate"]["steps"]
-        if "scripts/verify-ci-gate" in step.get("run", "")
+        if "scripts/ci/verify-ci-gate" in step.get("run", "")
     ]
     assert step["env"]["NEEDS"] == "${{ toJSON(needs) }}"
-    assert step["run"].split() == ["scripts/verify-ci-gate", "--needs-env", "NEEDS"]
+    assert step["run"].split() == ["scripts/ci/verify-ci-gate", "--needs-env", "NEEDS"]

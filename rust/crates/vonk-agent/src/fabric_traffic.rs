@@ -5,7 +5,11 @@
 //! reports. The previous reading lives in memory only: after an agent restart
 //! the first report has no window and carries nothing, and a counter that went
 //! backwards (a device reset) is skipped for that report.
-use std::{path::Path, sync::Mutex, time::Instant};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::Instant,
+};
 
 use vonk_agent_protocol::generated::FabricDevice;
 
@@ -79,6 +83,41 @@ impl Meter {
             })
             .take(16)
             .collect()
+    }
+}
+
+/// One sysfs observation at a time per process, bounded in time. A hung read
+/// keeps its permit until it ends, so later passes report no devices without
+/// spawning another blocked worker; the lane never waits on sysfs.
+pub async fn observe_bounded(meter: std::sync::Arc<Meter>, root: PathBuf) -> Vec<FabricDevice> {
+    static SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    observe_with_slot(meter, root, std::time::Duration::from_secs(5), &SLOT).await
+}
+
+async fn observe_with_slot(
+    meter: std::sync::Arc<Meter>,
+    root: PathBuf,
+    budget: std::time::Duration,
+    slot: &'static tokio::sync::Semaphore,
+) -> Vec<FabricDevice> {
+    let Ok(permit) = slot.try_acquire() else {
+        eprintln!("vonk-agent: previous fabric observation still running; reporting no devices");
+        return Vec::new();
+    };
+    let work = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        meter.observe(&root)
+    });
+    match tokio::time::timeout(budget, work).await {
+        Ok(Ok(devices)) => devices,
+        Ok(Err(error)) => {
+            eprintln!("vonk-agent: fabric observation failed: {error}");
+            Vec::new()
+        }
+        Err(elapsed) => {
+            eprintln!("vonk-agent: fabric observation timed out ({elapsed}); reporting no devices");
+            Vec::new()
+        }
     }
 }
 

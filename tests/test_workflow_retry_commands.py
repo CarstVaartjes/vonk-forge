@@ -15,7 +15,7 @@ from retry_dependency_fetch import acquisition_prefix, locked_pip_shape
 
 ROOT = Path(__file__).resolve().parents[1]
 
-WRAPPER = "scripts/retry-dependency-fetch"
+WRAPPER = "scripts/ci/retry-dependency-fetch"
 
 
 def wrapped_commands(script: str) -> list[tuple[str, ...]]:
@@ -68,3 +68,15 @@ def test_every_wrapper_call_on_a_line_is_checked() -> None:
     assert refused(unhashed) == [
         ("uv", "pip", "install", "--python", "$p", "-r", "req.txt")
     ]
+
+
+def test_every_rustup_download_goes_through_the_wrapper() -> None:
+    bare = re.compile(r"(?<!fetch )rustup (toolchain install|target add|component add)")
+    paths = [*(ROOT / ".github").rglob("*.yml")]
+    problems = [
+        f"{path.relative_to(ROOT)}: {line.strip()}"
+        for path in sorted(paths)
+        for line in path.read_text().splitlines()
+        if bare.search(line) and not line.lstrip().startswith("#")
+    ]
+    assert problems == []

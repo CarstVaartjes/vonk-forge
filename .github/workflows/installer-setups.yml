@@ -37,7 +37,7 @@ jobs:
           shopt -s nullglob
           wheels=("$output/"vonk_nas_setup-*-py3-none-any.whl)
           test "${#wheels[@]}" -eq 1
-          uv run --project control --frozen python scripts/verify-nas-setup-wheel "${wheels[0]}"
+          uv run --project control --frozen python scripts/release/verify-nas-setup-wheel "${wheels[0]}"
           (cd "$output" && sha256sum -- *.whl > SHA256SUMS)
       - name: Upload accepted portable NAS setup
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -78,8 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           rustup set profile minimal
-          rustup toolchain install
-
+          scripts/ci/retry-dependency-fetch rustup toolchain install
       - name: Restore Rust dependency cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:

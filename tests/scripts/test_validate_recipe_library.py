@@ -18,7 +18,7 @@ import pytest
 from vonk_forge_contracts import read_recipe
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "validate-recipe-library"
+SCRIPT = ROOT / "scripts" / "recipes" / "validate-recipe-library"
 _configured_library = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
 _sibling_library = ROOT.parent / "vonk-forge-recipes"
 CANDIDATE = (

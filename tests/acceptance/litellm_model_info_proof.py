@@ -18,12 +18,17 @@ gateway does:
   OpenAI SDK: ``audio.transcriptions.create`` reaches the upstream as one
   multipart ``POST /v1/audio/transcriptions`` and ``audio.speech.create`` as one
   ``POST /v1/audio/speech`` with exactly the fields sent, the stub's WAV comes
-  back unchanged, ``task_type`` is dropped (the LiteLLM v1.103.0 behaviour the
+  back unchanged, ``task_type`` is dropped (the LiteLLM v1.106.7 behaviour the
   design relies on, pinned so a bump that changes it fails visibly), the same
   key reads the audio facts from ``/v1/model/info``, a model outside its scope
   is refused, and a key without ``openai_routes`` is refused on both paths;
 * a request with tools, a response format and sampling reaches the upstream
-  identically through a route with facts and a route without them.
+  identically through a route with facts and a route without them;
+* the two external entries ``render_external_entry`` renders (an ``openai/``
+  entry with a custom ``api_base`` and a ``vertex_ai/`` entry) load beside the
+  local routes and ``/v1/model/info`` lists them, marked external, with no
+  resolved secret in the answer (a loader check with the master key; a client
+  key's reach is the publisher change's proof).
 """
 
 from __future__ import annotations
@@ -45,14 +50,22 @@ from typing import Any, ClassVar, cast
 
 import openai
 
+from vonk_control.gateway.external_contract import (
+    ExternalDeploymentSpec,
+    ExternalDestination,
+    ExternalRouteEntry,
+)
+from vonk_control.gateway.keys import GatewayKeyService
+from vonk_control.gateway.keys_contract import GatewayKeyCreated
 from vonk_control.gateway.litellm import (
     LiteLlmModelInfo,
     LiteLlmPolicy,
     RouteState,
     render_config,
+    render_external_entry,
 )
 from vonk_control.gateway.route_bundle_contract import RouteAcceptedModelPolicy
-from vonk_control.gateway.route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
+from vonk_control.gateway.route_grants import GatewayInferenceRoute
 
 ROOT = Path(__file__).resolve().parents[2]
 VECTORS = ROOT / "control/tests/fixtures/route_model_info/vectors.json"
@@ -153,6 +166,48 @@ def alias_of(name: str) -> str:
     return f"proof-{name}"
 
 
+# The secrets the supervisor would export as VONK_CREDENTIAL_<BINDING>.
+EXTERNAL_SECRETS = {
+    "VONK_CREDENTIAL_PARTNER": "partner-secret-value",
+    "VONK_CREDENTIAL_VERTEX_SA": '{"type": "service_account"}',
+}
+EXTERNAL_ALIASES = (alias_of("external-openai"), alias_of("external-vertex"))
+EXTERNAL_DEPLOYMENT = "0d4f5b0e-0000-4000-8000-0000000000{index:02d}"
+
+
+def externals() -> list[ExternalRouteEntry]:
+    """The two external entries, rendered as the publisher renders them."""
+    specs = (
+        ExternalDeploymentSpec(
+            alias=EXTERNAL_ALIASES[0],
+            litellm_params={
+                "model": "openai/partner-large",
+                "api_base": "https://partner.invalid/v1",
+                "api_key": "os.environ/VONK_CREDENTIAL_PARTNER",
+            },
+            destination=ExternalDestination(origins=["https://partner.invalid"]),
+            credential_bindings=["PARTNER"],
+        ),
+        ExternalDeploymentSpec(
+            alias=EXTERNAL_ALIASES[1],
+            litellm_params={
+                "model": "vertex_ai/gemini-2.5-pro",
+                "vertex_project": "proof",
+                "vertex_location": "europe-west4",
+                "vertex_credentials": "os.environ/VONK_CREDENTIAL_VERTEX_SA",
+            },
+            destination=ExternalDestination(
+                origins=["provider:vertex_ai"], region="europe-west4"
+            ),
+            credential_bindings=["VERTEX_SA"],
+        ),
+    )
+    return [
+        render_external_entry(spec, EXTERNAL_DEPLOYMENT.format(index=index), 1)
+        for index, spec in enumerate(specs)
+    ]
+
+
 def render(upstream_host: str, upstream_port: int) -> bytes:
     models: dict[str, RouteAcceptedModelPolicy] = {}
     for vector in vectors():
@@ -166,7 +221,9 @@ def render(upstream_host: str, upstream_port: int) -> bytes:
     models[alias_of("plain")] = RouteAcceptedModelPolicy(upstream_model="plain")
     base = f"http://{upstream_host}:{upstream_port}/v1"
     return render_config(
-        RouteState(dict.fromkeys(models, base), "0" * 64), LiteLlmPolicy(models)
+        RouteState(dict.fromkeys(models, base), "0" * 64),
+        LiteLlmPolicy(models),
+        externals(),
     )
 
 
@@ -219,28 +276,40 @@ CLIENT_SCOPE = [
 ]
 
 
-def generate_key(key_alias: str, routes: list[str]) -> str:
-    """A virtual key, created as the Controller creates them (models and routes)."""
+def generate_key(work: Path, key_alias: str) -> str:
+    """A virtual key, created by the Controller's own key service."""
+    service = GatewayKeyService(
+        base_url=f"http://127.0.0.1:{PORT}",
+        master_key=lambda: MASTER_KEY,
+        intent_root=work / "keys",
+    )
     deadline = time.monotonic() + 120
     while True:  # the key store is ready once the database migration finished
-        status, created = call(
-            "/key/generate",
-            {
-                "key_alias": key_alias,
-                "models": CLIENT_SCOPE,
-                "allowed_routes": routes,
-                "metadata": {"managed_by": "vonk-forge"},
-            },
-        )
-        if status == 200:
-            return created["key"]  # type: ignore[index]
-        check(time.monotonic() < deadline, f"key generate answered {status}")
+        created = service.create(key_alias, models=CLIENT_SCOPE)
+        if isinstance(created, GatewayKeyCreated):
+            return created.key
+        check(time.monotonic() < deadline, "the key service could not create a key")
         time.sleep(2)
 
 
-def prove_client_key() -> str:
+def narrow_key() -> str:
+    """A key the Controller never issues; proves audio sits under openai_routes."""
+    status, created = call(
+        "/key/generate",
+        {
+            "key_alias": "proof-no-openai-routes",
+            "models": CLIENT_SCOPE,
+            "allowed_routes": [GatewayInferenceRoute.MODEL_INFO.value],
+            "metadata": {"managed_by": "vonk-forge"},
+        },
+    )
+    check(status == 200, f"key generate answered {status}")
+    return created["key"]  # type: ignore[index]
+
+
+def prove_client_key(work: Path) -> str:
     """An ordinary client key reads its own facts; returns it for the audio proof."""
-    key = generate_key("proof-client", list(BASE_KEY_ROUTES))
+    key = generate_key(work, "proof-client")
     status, info = call("/v1/model/info", key=key)
     check(status == 200, f"a client key was refused /v1/model/info: {status} {info}")
     names = sorted(entry["model_name"] for entry in info["data"])  # type: ignore[index]
@@ -375,9 +444,7 @@ def prove_audio(key: str) -> None:
     check(outside in (401, 403), f"an out-of-scope speech got {outside}")
 
     # A key without openai_routes reads facts but cannot call either path.
-    narrow = sdk(
-        generate_key("proof-no-openai-routes", [GatewayInferenceRoute.MODEL_INFO.value])
-    )
+    narrow = sdk(narrow_key())
     for denied in (
         lambda: narrow.audio.transcriptions.create(
             model=transcription, file=("clip.wav", UPLOAD_WAV, "audio/wav")
@@ -388,8 +455,23 @@ def prove_audio(key: str) -> None:
     check(not Upstream.audio, "a refused audio call reached the upstream")
 
 
-def prove() -> None:
-    client_key = prove_client_key()
+def prove_external_entries(entries: dict[str, dict[str, Any]]) -> None:
+    """Both external entries load, are listed as external and reveal no secret."""
+    for index, alias in enumerate(EXTERNAL_ALIASES):
+        info = listed(entries, alias)["model_info"]
+        check(
+            info.get("vonk_origin") == "external"
+            and info.get("id") == EXTERNAL_DEPLOYMENT.format(index=index) + ":1",
+            f"{alias}: the external entry is listed as {info}",
+        )
+    status, listing = call("/v1/model/info")
+    check(status == 200, f"/v1/model/info answered {status}")
+    for secret in EXTERNAL_SECRETS.values():
+        check(secret not in json.dumps(listing), "a resolved secret is in discovery")
+
+
+def prove(work: Path) -> None:
+    client_key = prove_client_key(work)
     entries: dict[str, dict[str, Any]] = {}
     status, info = call("/v1/model/info")
     check(status == 200 and isinstance(info, dict), f"/v1/model/info answered {status}")
@@ -400,6 +482,7 @@ def prove() -> None:
         served = listed(entries, alias_of(name))["model_info"]
         for key, value in vector["model_info"].items():  # type: ignore[union-attr]
             check(served.get(key) == value, f"{name}: {key} is {served.get(key)!r}")
+    prove_external_entries(entries)
     plain = listed(entries, alias_of("plain"))
     check(
         not any(key.startswith("vonk_") for key in plain["model_info"]),
@@ -524,6 +607,11 @@ def main() -> None:
             f"LITELLM_MASTER_KEY={MASTER_KEY}",
             "--env",
             "LITELLM_UPSTREAM_KEY=stub-upstream-key",
+            *(
+                argument
+                for name, value in EXTERNAL_SECRETS.items()
+                for argument in ("--env", f"{name}={value}")
+            ),
             "--env",
             f"LITELLM_DATABASE_URL={database_url}",
             "--volume",
@@ -542,7 +630,7 @@ def main() -> None:
     )
     try:
         wait_healthy(container)
-        prove()
+        prove(arguments.work)
     except BaseException:
         subprocess.run(["docker", "logs", "--tail", "200", container], check=False)
         raise

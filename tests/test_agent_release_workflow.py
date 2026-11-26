@@ -3,12 +3,16 @@ import os
 import re
 import struct
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"][
+    "version"
+]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
 RELEASE_WORKFLOW = ROOT / ".github/workflows/installer-publication.yml"
 UNIFIED_WORKFLOW = ROOT / ".github/workflows/stable-release.yml"
@@ -16,8 +20,8 @@ PACKAGE_WORKFLOW = ROOT / ".github/actions/agent-package-build/action.yml"
 COMPILE_WORKFLOW = ROOT / ".github/actions/agent-package-compile/action.yml"
 SECURITY_WORKFLOW = ROOT / ".github/actions/agent-package-security/action.yml"
 APT_WORKFLOW = ROOT / ".github/actions/agent-apt-publish/action.yml"
-APT_STATE = ROOT / "scripts/agent-apt-state"
-NATIVE_LIFECYCLE = ROOT / "scripts/test-agent-package-native-lifecycle"
+APT_STATE = ROOT / "scripts/agent/agent-apt-state"
+NATIVE_LIFECYCLE = ROOT / "scripts/agent/test-agent-package-native-lifecycle"
 
 EXPECTED_ACTION_OUTPUTS = {
     "version": "${{ steps.accepted.outputs.version }}",
@@ -239,7 +243,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         struct.pack_into("<H", raw, 18, 183)
         marker = f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode()
         raw[128 : 128 + len(marker)] = marker
-        semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.1"
+        semantic_marker = f"VONK_AGENT_SEMANTIC_VERSION={VERSION}".encode()
         raw[256 : 256 + len(semantic_marker)] = semantic_marker
         if name in {"vonk-build-egress", "vonk-runtime-probe"}:
             struct.pack_into("<Q", raw, 32, 320)
@@ -255,9 +259,9 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
 
     built = subprocess.run(
         [
-            ROOT / "scripts/build-agent-deb",
+            ROOT / "scripts/agent/build-agent-deb",
             "--version",
-            "0.1.1",
+            VERSION,
             "--architecture",
             "linux-arm64",
             "--build-digest",
@@ -282,7 +286,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         [
             "/usr/bin/dpkg-deb",
             "--extract",
-            output / "vonk-forge-agent_0.1.1_arm64.deb",
+            output / f"vonk-forge-agent_{VERSION}_arm64.deb",
             payload,
         ],
         check=False,
@@ -294,7 +298,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
     assert not (payload / "etc/vonk-forge-agent/agent.toml").exists()
     assert (
         b"vonkforge.invalid"
-        not in (output / "vonk-forge-agent_0.1.1_arm64.deb").read_bytes()
+        not in (output / f"vonk-forge-agent_{VERSION}_arm64.deb").read_bytes()
     )
 
 
@@ -352,14 +356,14 @@ def test_reusable_agent_package_build_validates_authority_before_key_use() -> No
     build = text.index("Build package twice reproducibly")
     assert validation < authority < key < build
     authority_step = package_step("Revalidate protected package source authority")
-    assert "scripts/verify-release-tag-authority" in authority_step
+    assert "scripts/release/verify-release-tag-authority" in authority_step
     assert "+refs/heads/main:refs/remotes/origin/main" in authority_step
     assert "SOURCE_SHA: ${{ inputs.source_sha }}" in authority_step
     assert "TAG_NAME: ${{ inputs.tag_name }}" in authority_step
     assert "TAG_OID: ${{ inputs.tag_oid }}" in authority_step
     assert "dev:agent-development" in text
     assert "stable:agent-release" in text
-    assert "scripts/agent-package-metadata" in text
+    assert "scripts/agent/agent-package-metadata" in text
     assert "RELEASE_PRIVATE_KEY: ${{ inputs.release_private_key }}" in text
     assert "EXPECTED_FINGERPRINT: ${{ inputs.expected_fingerprint }}" in text
     assert "openssl pkey" in text
@@ -367,9 +371,7 @@ def test_reusable_agent_package_build_validates_authority_before_key_use() -> No
     assert "sha256sum" in text
 
 
-DEV_SEQUENCE = (
-    'test "$PUBLICATION_SEQUENCE" = "$(scripts/dev-publication-sequence "$GITHUB_SHA")"'
-)
+DEV_SEQUENCE = 'test "$PUBLICATION_SEQUENCE" = "$(scripts/images/dev-publication-sequence "$GITHUB_SHA")"'
 
 
 def test_reusable_agent_package_build_validates_publication_authority() -> None:
@@ -413,25 +415,25 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     security = SECURITY_WORKFLOW.read_text()
 
     assert "cargo build" not in text
-    assert "scripts/build-agent-deb" in text
+    assert "scripts/agent/build-agent-deb" in text
     assert "NEXT_VERSION: ${{ inputs.next_version }}" in package_step(
         "Validate package metadata and environment"
     )
     assert 'IFS=. read -r major minor patch <<< "$VERSION"' not in text
     assert "cmp --silent" in text
-    assert "scripts/verify-agent-deb" in text
+    assert "scripts/agent/verify-agent-deb" in text
     assert "uses: ./.github/actions/agent-package-security" in text
     assert "cargo fmt --all --check" in security
     assert "cargo clippy --workspace --all-targets --frozen -- -D warnings" in security
     assert "cargo test --workspace --locked" in security
     assert "tests/scripts/test_agent_deb.py" in security
-    assert "scripts/verify-agent-systemd" in text
-    assert "scripts/materialize-agent-tools --output-root target" in text
-    materializer = (ROOT / "scripts/materialize-agent-tools").read_text()
+    assert "scripts/agent/verify-agent-systemd" in text
+    assert "scripts/agent/materialize-agent-tools --output-root target" in text
+    materializer = (ROOT / "scripts/agent/materialize-agent-tools").read_text()
     assert 'ORAS_VERSION = "1.3.4"' in materializer
     assert '"archive_sha256":' in materializer
     assert '"binary_sha256":' in materializer
-    assert "scripts/test-agent-package-native-lifecycle" in text
+    assert "scripts/agent/test-agent-package-native-lifecycle" in text
     assert "STALE_PENDING_FORMAT" not in text
     assert "CANDIDATE_CUSTODY" not in text
     for architecture in ("linux-arm64",):
@@ -446,7 +448,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "wget " not in text
     assert "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in text
     assert re.search(r"sigstore/cosign-installer@[0-9a-f]{40} ", text)
-    assert "scripts/sign-package-keyless" in text
+    assert "scripts/release/sign-package-keyless" in text
     assert "agent-release\\.yml@refs/heads/main" in text
 
 
@@ -528,10 +530,10 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
     immediate_cleanup = 'rm -f "$RUNNER_TEMP/vonk-agent-release.pem"'
     fallback = workflow_step(text, fallback_name)
 
-    assert "scripts/build-agent-deb" in lifecycle
+    assert "scripts/agent/build-agent-deb" in lifecycle
     assert "--acceptance-baseline" in lifecycle
     assert "build_baseline linux-arm64" in lifecycle
-    final_build = lifecycle.rindex("scripts/build-agent-deb")
+    final_build = lifecycle.rindex("scripts/agent/build-agent-deb")
     wait = lifecycle.index('wait_for_packages "${package_pids[@]}"')
     cleanup = lifecycle.index(immediate_cleanup)
     assert final_build < wait < cleanup
@@ -549,7 +551,7 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
     assert step_names[lifecycle_index + 4] == cosign_name
     inline = workflow_step_run(text, "Run inline ARM64 package lifecycle acceptance")
     assert 'test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"' in inline
-    assert "sudo scripts/test-agent-package-native-lifecycle" in inline
+    assert "sudo scripts/agent/test-agent-package-native-lifecycle" in inline
     assert immediate_cleanup in text
 
 
@@ -841,7 +843,7 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert DEV_SEQUENCE in validation
     assert 'test "$SOURCE_SHA" = "$GITHUB_SHA"' in validation
     assert 'test "$GITHUB_REF" = refs/heads/main' in validation
-    assert "scripts/agent-package-metadata" in validation
+    assert "scripts/agent/agent-package-metadata" in validation
     assert "candidate|baseline" in validation
     assert "${debian_architecture}_baseline_package" in validation
     assert "-compiled-${debian_architecture}-${BINARY_SET}" in validation
@@ -863,10 +865,10 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert "vonk-agent-acceptance-baseline-v1" in compile_step
     assert "VONK_AGENT_BUILD_DIGEST" in compile_step
     assert "VONK_AGENT_SEMANTIC_VERSION" in compile_step
-    assert "scripts/verify-agent-binaries" in compile_step
+    assert "scripts/agent/verify-agent-binaries" in compile_step
     assert (
-        "scripts/verify-agent-binaries"
-        not in compile_step.partition("scripts/verify-agent-binaries")[2]
+        "scripts/agent/verify-agent-binaries"
+        not in compile_step.partition("scripts/agent/verify-agent-binaries")[2]
     )
     assert '"compiled/$BINARY_SET.json"' in compile_step
     assert "name: ${{ steps.target.outputs.compiled_artifact_name }}" in upload
@@ -910,7 +912,7 @@ def test_protected_signer_validates_precompiled_bytes_before_key_materialization
     )
     assert "find prebuilt -type f" in validation
     assert "find prebuilt -type l" in validation
-    assert "scripts/verify-agent-binaries" in validation
+    assert "scripts/agent/verify-agent-binaries" in validation
     assert "cmp --silent" in validation
     assert "RELEASE_PRIVATE_KEY" not in validation
     build = package_step("Build package twice reproducibly")
@@ -947,7 +949,9 @@ def test_development_versions_use_the_source_commit_time_everywhere() -> None:
     text = WORKFLOW.read_text()
     metadata = workflow_step(text, "Derive immutable development package metadata")
 
-    assert 'sequence=$(scripts/dev-publication-sequence "$GITHUB_SHA")' in metadata
+    assert (
+        'sequence=$(scripts/images/dev-publication-sequence "$GITHUB_SHA")' in metadata
+    )
     assert '"$GITHUB_SHA" "$sequence"' in metadata
     for path in sorted((ROOT / ".github").rglob("*.yml")):
         workflow = path.read_text()
@@ -991,7 +995,7 @@ def test_development_workflows_bind_both_literal_environment_boundaries() -> Non
     assert "r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}" in publisher
     assert "secrets:" not in text
     for forbidden in (
-        "scripts/build-agent-deb",
+        "scripts/agent/build-agent-deb",
         "cosign sign-blob",
     ):
         assert forbidden not in jobs
@@ -1009,8 +1013,10 @@ def test_development_publication_requires_native_arm64_lifecycle() -> None:
     assert "actions/download-artifact@" in lifecycle
     assert 'test "$(uname -m)" = aarch64' in lifecycle
     assert "podman shellcheck slirp4netns uidmap" in lifecycle
-    assert 'scripts/verify-agent-deb --json "accepted/$ARM64_PACKAGE"' in lifecycle
-    assert "scripts/test-agent-package-native-lifecycle" in lifecycle
+    assert (
+        'scripts/agent/verify-agent-deb --json "accepted/$ARM64_PACKAGE"' in lifecycle
+    )
+    assert "scripts/agent/test-agent-package-native-lifecycle" in lifecycle
     # The lifecycle job belongs to the called agent workflow, so apt dev
     # publishes only after it, and every other agent gate, succeeded.
     assert "if: needs.agent.result == 'success'" in publisher
@@ -1059,7 +1065,7 @@ def test_development_arm64_lifecycle_gate_is_external_parallel_and_unchanged() -
     assert "outputs.artifact_name" in lifecycle
     assert "outputs.baseline_artifact_name" in lifecycle
     assert 'test "$(uname -m)" = aarch64' in lifecycle
-    assert "scripts/test-agent-package-native-lifecycle" in lifecycle
+    assert "scripts/agent/test-agent-package-native-lifecycle" in lifecycle
     assert "STALE_PENDING_FORMAT" not in lifecycle
     assert "CANDIDATE_CUSTODY" not in lifecycle
     for forbidden in (
@@ -1189,7 +1195,7 @@ def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
 
     assert verify < authority < restore < key
     verify_step = apt_step("Verify exact downloaded package")
-    assert "scripts/verify-agent-deb" in verify_step
+    assert "scripts/agent/verify-agent-deb" in verify_step
     assert "dpkg-deb --field" in verify_step
     assert "resolvedDependencies" in verify_step
     for credential in (
@@ -1250,7 +1256,7 @@ def test_reusable_publishers_revalidate_stable_authority_at_mutation_boundaries(
     ):
         mutation_index = package_text.index(f"- name: {mutation}")
         prior = package_text[:mutation_index]
-        assert prior.rfind("scripts/verify-release-tag-authority") >= 0
+        assert prior.rfind("scripts/release/verify-release-tag-authority") >= 0
 
     for mutation in (
         "Prepare committed or recoverable private state",
@@ -1260,7 +1266,7 @@ def test_reusable_publishers_revalidate_stable_authority_at_mutation_boundaries(
     ):
         mutation_index = apt_text.index(f"- name: {mutation}")
         prior = apt_text[:mutation_index]
-        assert prior.rfind("scripts/verify-release-tag-authority") >= 0
+        assert prior.rfind("scripts/release/verify-release-tag-authority") >= 0
 
     for text in (package_text, apt_text):
         assert "SOURCE_SHA: ${{ inputs.source_sha }}" in text
@@ -1274,7 +1280,7 @@ def test_reusable_apt_publisher_restores_only_authenticated_private_state() -> N
 
     assert "R2_APT_STATE_BUCKET" in restore
     assert "R2_APT_PUBLIC_BUCKET" not in restore
-    assert "scripts/agent-apt-state prepare" in restore
+    assert "scripts/agent/agent-apt-state prepare" in restore
     assert "tarfile.open" in state
     assert "unsafe archive member" in state
     assert "publication-receipt.json" in state
@@ -1300,8 +1306,8 @@ def test_reusable_apt_publisher_preserves_immutable_receipts_and_ordering() -> N
     assert "install -m 0600" in signing
     assert "sec_count" in signing
     assert "${#fingerprints[@]}" not in signing
-    assert "scripts/agent-apt-state commit" in commit
-    assert "scripts/agent-apt-state publish" in publish
+    assert "scripts/agent/agent-apt-state commit" in commit
+    assert "scripts/agent/agent-apt-state publish" in publish
     assert text.index("Commit immutable publication manifest") < text.index(
         "Publish exact committed public tree and latest pointer"
     )
@@ -1338,7 +1344,7 @@ def test_development_apt_state_is_compacted_before_snapshot_and_after_switch() -
 
     assert "CHANNEL: ${{ inputs.channel }}" in APT_WORKFLOW.read_text()
     assert prepare < snapshot < switch < indexes < finalize
-    assert "scripts/agent-apt-state compact" in local
+    assert "scripts/agent/agent-apt-state compact" in local
     assert 'if [[ "$CHANNEL" == dev ]]' not in local
 
 
@@ -1366,14 +1372,14 @@ def test_reusable_apt_publisher_uses_manifest_last_exact_replay_protocol() -> No
     commit = apt_step("Commit immutable publication manifest")
     publish = apt_step("Publish exact committed public tree and latest pointer")
 
-    assert "scripts/agent-apt-state prepare" in prepare
+    assert "scripts/agent/agent-apt-state prepare" in prepare
     assert "tar -t" not in prepare
     assert "steps.state.outputs.needs_generation == 'true'" in signing
     assert "steps.state.outputs.needs_generation == 'true'" in local
-    assert "scripts/agent-apt-state bundle" in bundles
-    assert "scripts/agent-apt-state commit" in commit
+    assert "scripts/agent/agent-apt-state bundle" in bundles
+    assert "scripts/agent/agent-apt-state commit" in commit
     assert "R2_APT_PUBLIC_BUCKET" not in commit
-    assert "scripts/agent-apt-state publish" in publish
+    assert "scripts/agent/agent-apt-state publish" in publish
     assert text.index("Commit immutable publication manifest") < text.index(
         "Publish exact committed public tree and latest pointer"
     )
@@ -1501,22 +1507,24 @@ def test_main_seals_the_agent_packages_its_pull_request_accepted() -> None:
     assert "uses: ./.github/actions/agent-package-seal" in seal
     action = (ROOT / ".github/actions/agent-package-seal/action.yml").read_text()
     for evidence in (
-        "scripts/reuse-agent-packages",
-        "scripts/seal-agent-deb",
-        "scripts/verify-agent-deb --json",
-        "scripts/verify-agent-systemd --json",
-        "scripts/sign-package-keyless",
+        "scripts/agent/reuse-agent-packages",
+        "scripts/agent/seal-agent-deb",
+        "scripts/agent/verify-agent-deb --json",
+        "scripts/agent/verify-agent-systemd --json",
+        "scripts/release/sign-package-keyless",
         "subject-path: dist/",
         "sbom-path: dist/",
-        "scripts/agent-package-versions write",
+        "scripts/agent/agent-package-versions write",
     ):
         assert evidence in action, evidence
     # Both paths record the set's versions; the release reads them, so a set
     # sealed from a pull request keeps its own version everywhere.
-    assert "scripts/agent-package-versions write" in workflow_job(
+    assert "scripts/agent/agent-package-versions write" in workflow_job(
         text, "build-test-sign"
     )
-    assert "scripts/agent-package-versions read" in workflow_job(release, "authority")
+    assert "scripts/agent/agent-package-versions read" in workflow_job(
+        release, "authority"
+    )
     # apt dev accepts a package built from another commit only with this tree.
     apt = (ROOT / ".github/actions/agent-apt-publish/action.yml").read_text()
     assert "git/commits/$built_from" in apt

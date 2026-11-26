@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/agent-package-versions"
+SCRIPT = ROOT / "scripts/agent/agent-package-versions"
 VERSIONS = runpy.run_path(str(SCRIPT))
-METADATA = runpy.run_path(str(ROOT / "scripts/agent-package-metadata"))
+METADATA = runpy.run_path(str(ROOT / "scripts/agent/agent-package-metadata"))
 SHA = "c" * 40
 
 

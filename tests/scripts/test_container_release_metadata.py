@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/container-release-metadata"
+SCRIPT = ROOT / "scripts/images/container-release-metadata"
+VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
@@ -21,11 +23,11 @@ def run(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_stable_tag_emits_exact_public_package_metadata() -> None:
-    result = run("tag", "v0.1.1", SHA)
+    result = run("tag", f"v{VERSION}", SHA)
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "version=0.1.1",
-        "image_version_tag=v0.1.1",
+        f"version={VERSION}",
+        f"image_version_tag=v{VERSION}",
         f"commit_tag=sha-{SHA}",
         f"dev_tag=dev-sha-{SHA}",
         "latest_alias=latest",
@@ -58,6 +60,6 @@ def test_non_release_input_fails_closed(
     result = run(ref_type, ref_name, commit)
     assert result.returncode == 64
     assert result.stdout == ""
-    repaired = run("tag", "v0.1.1", SHA)
+    repaired = run("tag", f"v{VERSION}", SHA)
     assert repaired.returncode == 0, repaired.stderr
     assert repaired.stdout

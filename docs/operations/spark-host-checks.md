@@ -118,7 +118,7 @@ deploys before the agents (strict readers).
 
 The Spark warns `host.oom-kill` when the kernel OOM killer ended a process in
 the last hour. The source is the `oom_kills` telemetry counter (`/proc/vmstat`
-`oom_kill`). The Controller sums each boot's rise over the last hour, so a
+`oom_kill`). The Controller sums each boot's rise over the last hour (by the Controller's receive time, so agent clock skew does not move the window), so a
 reboot adds nothing, and the warning clears by itself an hour after the last
 rise. It is advice only and gates nothing. A kill means the helper's memory
 guard did not act first: look at the stopped run's failure evidence, and treat

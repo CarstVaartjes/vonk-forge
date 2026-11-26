@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _module():
     spec = importlib.util.spec_from_file_location(
-        "retry_dependency_fetch", ROOT / "scripts/retry_dependency_fetch.py"
+        "retry_dependency_fetch", ROOT / "scripts/ci/retry_dependency_fetch.py"
     )
     assert spec
     assert spec.loader
@@ -133,6 +133,10 @@ def test_transient_fetch_retries_without_publishing_partial_stdout(
             "x509: certificate signed by unknown authority",
         ),
         (["docker", "pull", "example@sha256:" + "a" * 64], "digest mismatch"),
+        (
+            ["skopeo", "copy", "docker://example", "dir:out"],
+            "cannot modify it: Instructed to preserve digests",
+        ),
         (
             ["docker", "pull", "example@sha256:" + "a" * 64],
             "503 Service Unavailable: unauthorized",

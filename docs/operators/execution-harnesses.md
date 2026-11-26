@@ -78,7 +78,7 @@ reset it.
 
 ## Acceptance evidence
 
-`scripts/qualify-recipe --level structural` resolves the exact canonical Model,
+`scripts/dev/qualify-recipe --level structural` resolves the exact canonical Model,
 Recipe, package closure, source bundle, compiler projection, and declared
 serving checks before credentials or workload network access. The qualifier's
 container level currently returns `environment-limited` because the production
@@ -97,7 +97,7 @@ cache gate succeeds, the Controller distributes the exact assets to all
 selected Sparks in parallel, skips verified local copies, safely stops and
 replaces conflicting workloads, and reports durable per-Spark progress and
 readiness. After the route is active, execute the Recipe's declared HTTP
-serving checks with `scripts/qualify-recipe --serving-url URL`; it prints the
+serving checks with `scripts/dev/qualify-recipe --serving-url URL`; it prints the
 bounded result as JSON.
 
 Target ongoing behavior stores one selected-profile record in PostgreSQL,

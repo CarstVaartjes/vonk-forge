@@ -23,6 +23,10 @@ from vonk_agent_protocol.wire_model import (
     canonical_message,
 )
 from vonk_control.fleet_projection.common import telemetry_point
+from vonk_control.fleet_projection.engine_progress import (
+    ENGINE_STALL_WINDOW,
+    not_progressing,
+)
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNode
@@ -671,3 +675,62 @@ def test_engine_metrics_vector_readings_are_valid_wire_readings(sample) -> None:
 
     reading = EngineReading.model_validate_json(canonical_message(sample["expected"]))
     assert json.loads(canonical_message(reading)) == sample["expected"]
+
+
+def _engine_window(telemetry, *, ratio_at, minutes=16, pending_from=0, now_after=0):
+    """Readings one minute apart for one run; returns (window, since, stalled)."""
+    repository, sessions, _engine, clock = telemetry
+    run = "55555555-5555-4555-8555-555555555555"
+    for minute in range(minutes):
+        clock.now = NOW + timedelta(minutes=minute)
+        busy = minute >= pending_from
+        reading = {
+            "run_id": run,
+            "format": "tensorfold",
+            "generation_tokens": 0,
+            "requests_running": 1 if busy else 0,
+            "requests_waiting": 0,
+            "kv_cache_usage_ratio": 0.001 if minute != ratio_at else 0.002,
+        }
+        repository.record_batch(
+            NODE_A,
+            (
+                TelemetrySample.model_validate_json(
+                    canonical_message(
+                        {
+                            **sample(
+                                sequence=1, observed_at=clock.now - timedelta(seconds=1)
+                            ).model_dump(mode="json"),
+                            "engines": [reading],
+                        }
+                    )
+                ),
+            ),
+        )
+    since = clock.now + timedelta(minutes=now_after) - ENGINE_STALL_WINDOW
+    with sessions() as session:
+        windows = repository.engine_windows_in_session(session, [NODE_A], since)
+    return not_progressing(windows[(NODE_A, run)], since)
+
+
+def test_a_run_with_work_pending_and_every_reading_flat_is_not_progressing(
+    telemetry,
+) -> None:
+    assert _engine_window(telemetry, ratio_at=None) is True
+
+
+def test_a_moving_kv_ratio_is_progress(telemetry) -> None:
+    assert _engine_window(telemetry, ratio_at=8) is False
+
+
+def test_work_pending_only_late_in_the_window_is_not_judged(telemetry) -> None:
+    assert _engine_window(telemetry, ratio_at=None, pending_from=6) is False
+
+
+def test_readings_covering_a_short_stretch_are_not_judged(telemetry) -> None:
+    assert _engine_window(telemetry, ratio_at=None, minutes=5) is False
+
+
+def test_readings_that_stopped_early_in_the_window_are_not_judged(telemetry) -> None:
+    # Flat and pending, but nothing was received for the last 10 minutes.
+    assert _engine_window(telemetry, ratio_at=None, minutes=6, now_after=10) is False

@@ -128,7 +128,7 @@ or failed check still blocks the merge, report that specific condition.
 
 Every merge starts a release run, but it builds images only when their inputs
 changed since an ancestor release built them. The producer input paths live in
-`scripts/resolve-publication-producer`; some scripts, workflows, and tests are
+`scripts/ci/resolve-publication-producer`; some scripts, workflows, and tests are
 build inputs. Do not assume a commit has
 `dev-sha-<full-commit-sha>` merely because it reached `main`. Verify image tags
 in the registry; `git ls-remote` verifies Git refs, not registry images.
@@ -174,8 +174,13 @@ Prepare the locked environment explicitly and install the repository hook:
 ```bash
 scripts/build-control-wheel
 uv sync --project control --frozen
-scripts/install-git-hooks
+scripts/dev/install-git-hooks
 ```
+
+After the scripts/ regrouping merges, rerun `scripts/dev/install-git-hooks` in
+every clone. A clone whose `core.hooksPath` is an absolute path (for example
+`/opt/vonk-forge`) must switch to the relative `.githooks`, or worktrees on
+older or newer branches run the wrong hook.
 
 The hook runs pinned Ruff lint, formatting checks, and Python types on changed
 Python files selected from the index. Changes to Python dependency/type configuration

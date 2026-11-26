@@ -77,7 +77,7 @@ grants and auto-approvals, and create the scoped gateway OAuth client. Never
 add test-only Service names or policy to an operator tailnet.
 
 Prepare on Intel or ARM macOS or Linux with `curl`, `openssl` and
-installed `uv`. The verified NAS setup wheel runs in an isolated Python 3.14
+installed `uv`. The verified NAS setup wheel runs in an isolated Python 3.15
 environment managed by `uv`; no native NAS setup compilation is required.
 Then run:
 
@@ -99,6 +99,8 @@ Until the first stable release is published, the unqualified `/nas`, `/spark`
 and `/vonkctl` URLs serve the newest accepted development release; once a
 stable release exists they serve stable. To choose a channel explicitly, use
 `https://install.vonkforge.ai/dev/nas` (or `/dev/spark`, `/dev/vonkctl`).
+To move an existing deployment between channels, see the
+[stable release runbook](docs/runbooks/stable-release.md#switching-a-deployment-between-channels).
 
 To upgrade an existing install, rerun the installer from the directory that
 contains `vonk-forge/`, using the account that owns its private files. If they
@@ -166,7 +168,7 @@ How Vonk reads the reserved display memory, and what it reports, is in the
 
 Install the latest accepted stable CLI without cloning the repository. This
 requires `curl`, `openssl`, Python 3, and `uv` on your workstation. The CLI
-requires Python 3.14 or newer, which `uv` can manage for its tool environment:
+requires Python 3.15 or newer, which `uv` can manage for its tool environment:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/vonkctl | sh
@@ -223,7 +225,7 @@ For the trust and network model, see the
 | `nas_setup/` | Portable Python NAS/project setup wheel and recovery |
 | `rust/` | Native Spark agent, privileged helpers, installer and local enforcement |
 | `deploy/` | Signed controller/Spark installation and Compose contract |
-| `scripts/` | Validation, import, publication, and operator tooling |
+| `scripts/` | Validation, publication, and operator tooling, grouped by purpose (`dev/`, `ci/`, `images/`, `agent/`, `release/`, `fleet/`, `recipes/`) |
 | `docs/` | Architecture, security, runbooks, and contributor policy |
 
 The public recipe standard library lives in
@@ -233,7 +235,7 @@ The public website and catalog implementation live in
 
 ## Develop
 
-Required tools are Python 3.14+, [`uv`](https://docs.astral.sh/uv/), Rust,
+Required tools are Python 3.15+, [`uv`](https://docs.astral.sh/uv/), Rust,
 Node.js, and Docker for integration tests.
 
 Catalog tests consume the real recipe repository. Set
@@ -250,7 +252,7 @@ uv run --project control --frozen \
 uv run --project control --frozen pytest -q tests -m "not lane" -n auto
 
 # Lane tier in the container or CI lane.
-scripts/pull-test-images postgres caddy tailscale python
+scripts/ci/pull-test-images postgres caddy tailscale python
 uv run --project control --frozen pytest -q control/tests
 uv run --project control --frozen pytest -q tests
 
@@ -258,7 +260,7 @@ uv run --project control --frozen pytest -q tests
 npm ci --prefix control/web
 npm test --prefix control/web -- --run
 uv run --frozen pytest -q deploy/compose/tests
-scripts/verify-supply-chain --json
+scripts/release/verify-supply-chain --json
 ```
 
 Start with the [documentation index](docs/README.md),

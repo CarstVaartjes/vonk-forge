@@ -9,8 +9,8 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/render-production-compose"
-DEV_SCRIPT = ROOT / "scripts/render-dev-compose"
+SCRIPT = ROOT / "scripts/release/render-production-compose"
+DEV_SCRIPT = ROOT / "scripts/release/render-dev-compose"
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 DIGEST = "a" * 64
 API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3"

@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib
 import pkgutil
 import types
-from typing import Annotated, Any, Union, cast, get_args, get_origin
+from typing import Any, Union, get_args, get_origin
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
@@ -26,8 +26,9 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileAssignmentView,
 )
+from vonk_control.gateway.external_contract import ExternalRouteEntry
 from vonk_control.gateway.keys import GatewayKeyCreateRequest
-from vonk_control.gateway.litellm import LiteLlmModelEntry
+from vonk_control.gateway.litellm import LocalRouteEntry
 from vonk_control.gateway.route_bundle_contract import (
     RouteBundleDocument,
     RouteIdentityDocument,
@@ -44,7 +45,8 @@ REFUSED = (
 )
 # Alias slots whose field name does not say alias: (model, field, part).
 CARRIERS: tuple[tuple[type[BaseModel], str, str], ...] = (
-    (LiteLlmModelEntry, "model_name", "value"),
+    (LocalRouteEntry, "model_name", "value"),
+    (ExternalRouteEntry, "model_name", "value"),
     (RouteBundleDocument, "routes", "key"),
     (RouteIdentityDocument, "aliases", "key"),
     (GatewayKeyCreateRequest, "models", "item"),
@@ -63,7 +65,10 @@ def _models() -> list[type[BaseModel]]:
     while pending:
         model = pending.pop()
         pending.extend(model.__subclasses__())
-        if model.__module__.startswith(("vonk_control.", "cluster_profiles.")):
+        parametrized = model.__pydantic_generic_metadata__["origin"] is not None
+        if not parametrized and model.__module__.startswith(
+            ("vonk_control.", "cluster_profiles.")
+        ):
             found.append(model)
     return found
 
@@ -79,10 +84,7 @@ def _without_none(annotation: Any) -> Any:
 def _slot(model: type[BaseModel], name: str, part: str) -> TypeAdapter[Any]:
     field = model.model_fields[name]
     if part == "value":
-        annotation = field.annotation
-        if field.metadata:
-            annotation = Annotated[(annotation, *field.metadata)]
-        return TypeAdapter(cast(Any, annotation))
+        return TypeAdapter(field.rebuild_annotation())
     container = _without_none(field.annotation)
     return TypeAdapter(get_args(container)[0])
 

@@ -60,6 +60,7 @@ pub use operation_progress::{
 pub mod buddyinfo;
 pub mod failure_evidence;
 pub mod gpu_clock;
+pub mod gpu_xid;
 pub mod host_memory_guard_policy;
 pub mod swap;
 

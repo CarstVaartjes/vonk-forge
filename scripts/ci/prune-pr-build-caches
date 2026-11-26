@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""Delete the Controller build-cache tags of closed pull requests.
+
+Each pull request's candidate build writes its own BuildKit cache to the
+registry as ``vonk-forge-api:buildcache-pr-<number>`` so a later push reuses
+the previous one's layers. Once the pull request is closed the cache has no
+reader. This lists the package versions page by page, keeps every tag that is
+not a pull-request cache or whose pull request is still open, and deletes the
+rest.
+
+This is weekly housekeeping, so it never waits unbounded and never turns red
+for a slow or busy API: each request has its own timeout, and a timeout, 5xx,
+rate limit or connection error prints a notice, skips that work and exits 0, so
+the next weekly run continues. Everything else fails (a 4xx, a missing token, a
+usage error, an unexplained ``gh`` exit); a refused delete is reported and the
+others still run, and a delete of a version that is already gone counts as done.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import re
+import subprocess
+import sys
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
+from typing import NotRequired, TypedDict
+
+CACHE_TAG = re.compile(r"\Abuildcache-pr-(\d+)\Z")
+PACKAGE = "vonk-forge-api"
+PAGE_SIZE = 100
+PAGE_READERS = 4
+REQUEST_TIMEOUT_SECONDS = 60
+# Only these may pass on the next run; any other failure is real and raises.
+_TRANSIENT = re.compile(
+    r"\(HTTP (?:5\d\d|429)\)|rate limit|error connecting|dial tcp|"
+    r"connection (?:reset|refused)|i/o timeout|TLS handshake timeout|unexpected EOF",
+    re.IGNORECASE,
+)
+_GONE = "(HTTP 404)"
+
+Api = Callable[..., str]
+"""Runs ``gh api`` with the given arguments and returns its stdout."""
+
+
+def gh(*args: str) -> str:
+    return subprocess.run(
+        ["gh", "api", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    ).stdout
+
+
+def call(api: Api, *args: str) -> str | None:
+    """The request's stdout, or ``None`` when it may pass on the next run.
+
+    Any failure that is not a timeout, 5xx, rate limit or connection error
+    raises."""
+    try:
+        return api(*args)
+    except subprocess.TimeoutExpired:
+        reason = f"timed out after {REQUEST_TIMEOUT_SECONDS}s"
+    except subprocess.CalledProcessError as error:
+        reason = (error.stderr or "").strip()
+        if not _TRANSIENT.search(reason):
+            raise
+    print(f"::notice::skipped {args[-1]} ({reason}); the next weekly run retries it")
+    return None
+
+
+class _Container(TypedDict, total=False):
+    tags: list[str]
+
+
+class _Metadata(TypedDict, total=False):
+    container: _Container
+
+
+class PackageVersion(TypedDict):
+    """The fields of a GHCR package version this script reads."""
+
+    id: int
+    metadata: NotRequired[_Metadata]
+
+
+def stale(
+    versions: Iterable[PackageVersion], open_numbers: set[int]
+) -> list[tuple[int, int]]:
+    """``(version id, pull request number)`` for every closed pull request cache."""
+    found: dict[int, int] = {}
+    for version in versions:
+        tags = version.get("metadata", {}).get("container", {}).get("tags", [])
+        numbers = [
+            int(match.group(1))
+            for tag in tags
+            if (match := CACHE_TAG.match(tag)) is not None
+        ]
+        # A version carrying any other tag is not only a pull request cache.
+        if not numbers or len(numbers) != len(tags):
+            continue
+        if open_numbers.intersection(numbers):
+            continue
+        found[int(version["id"])] = numbers[0]
+    return sorted(found.items())
+
+
+def prune(api: Api, owner: str, repository: str, *, dry_run: bool = False) -> int:
+    package = f"/users/{owner}/packages/container/{PACKAGE}"
+    listed_open = call(
+        api,
+        "--paginate",
+        "--jq",
+        ".[].number",
+        f"/repos/{repository}/pulls?state=open&per_page=100",
+    )
+    listed_package = call(api, package)
+    # Without the open pull requests nothing is known to be stale.
+    if listed_open is None or listed_package is None:
+        return 0
+    open_numbers = {int(number) for number in listed_open.split()}
+    # Every page is read on every run. A page cap would strand caches: the
+    # listing is newest first with no cursor, so each run restarts at page 1
+    # and a capped run would never reach the oldest closed pull requests.
+    pages = range(
+        1, math.ceil(json.loads(listed_package)["version_count"] / PAGE_SIZE) + 1
+    )
+    with ThreadPoolExecutor(PAGE_READERS) as pool:
+        listed = list(
+            pool.map(
+                lambda page: call(
+                    api, f"{package}/versions?per_page={PAGE_SIZE}&page={page}"
+                ),
+                pages,
+            )
+        )
+    versions: list[PackageVersion] = [
+        version for text in listed if text is not None for version in json.loads(text)
+    ]
+    # Deletes run one at a time: GitHub limits mutating requests per minute, and
+    # the first one it defers ends this run's deletes for the next run.
+    failures = 0
+    for version_id, number in stale(versions, open_numbers):
+        if dry_run:
+            print(f"would delete buildcache-pr-{number} (version {version_id})")
+            continue
+        try:
+            deleted = call(
+                api, "--method", "DELETE", f"{package}/versions/{version_id}"
+            )
+        except subprocess.CalledProcessError as error:
+            if _GONE in (error.stderr or ""):
+                print(f"buildcache-pr-{number} was already gone (version {version_id})")
+                continue
+            failures += 1
+            print(
+                f"could not delete buildcache-pr-{number}: {error.stderr.strip()}",
+                file=sys.stderr,
+            )
+            continue
+        if deleted is None:
+            break
+        print(f"deleted buildcache-pr-{number} (version {version_id})")
+    return 0 if not failures else 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--owner", required=True)
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--dry-run", action="store_true")
+    arguments = parser.parse_args()
+    try:
+        return prune(
+            gh, arguments.owner, arguments.repository, dry_run=arguments.dry_run
+        )
+    except subprocess.CalledProcessError as error:
+        print(f"{' '.join(error.cmd)}: {error.stderr.strip()}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

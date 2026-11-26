@@ -16,22 +16,34 @@ live repository ruleset, not the dated protection report under `inventory/`):
 | `Compose integration` | Exercise the Compose and ingress boundaries. |
 | `CI gate` | Aggregate the suites selected for the change. |
 
-`ci-gate` passes `toJSON(needs)` to `scripts/verify-ci-gate`, which applies one
+`ci-gate` passes `toJSON(needs)` to `scripts/ci/verify-ci-gate`, which applies one
 rule per job and refuses a gated job it has no rule for, so a job added to
 `ci-gate.needs` without a rule fails the run. Adding a proof job means the job,
-its `ci-gate.needs` entry and its rule in `scripts/verify-ci-gate`.
+its `ci-gate.needs` entry and its rule in `scripts/ci/verify-ci-gate`.
 
 Every change lands through an integration PR: a same-repository
 `integration/*` head, or any PR with the `release-acceptance` label. `full` in
-`scripts/select-ci-areas` owns that rule; `ci.yml` reads it, and every proof is a `ci.yml` job behind
+`scripts/ci/select-ci-areas` owns that rule; `ci.yml` reads it, and every proof is a `ci.yml` job behind
 `ci-gate`.
 
 | Run | What runs |
 | --- | --- |
-| Member PR | The quick tier only, a few minutes on standard runners: `Ruff` (lint, format, Python types, the added-line guards), the web typecheck and Biome (`member-web`), and `cargo fmt` plus clippy (`rust-quality`) only when the change touches Rust or an input of the Rust build (`rust_changed` in `scripts/select-ci-areas`, which reads the input list from the wire crate's `build.rs`). A member push costs about 5-6 standard runner-minutes (Ruff, web, and Rust when it changed), which compete with batch CI for the concurrency limit. No full suite, proof or acceptance. The gate reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. The quick tier is a fast signal, not proof: check member work locally (`scripts/test changed`); its integration PR proves it. |
+| Member PR | The quick tier only, a few minutes on standard runners: `Ruff` (lint, format, Python types, the added-line guards), the web typecheck and Biome (`member-web`), and `cargo fmt` plus clippy (`rust-quality`) only when the change touches Rust or an input of the Rust build (`rust_changed` in `scripts/ci/select-ci-areas`, which reads the input list from the wire crate's `build.rs`). A member push costs about 5-6 standard runner-minutes (Ruff, web, and Rust when it changed), which compete with batch CI for the concurrency limit. No full suite, proof or acceptance. The gate reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. The quick tier is a fast signal, not proof: check member work locally (`scripts/test changed`); its integration PR proves it. |
 | Dependabot PR | Nothing, not even the selector or the gate: every job that could start on its own skips a PR authored by `dependabot[bot]`, so it uses no runner. Its skipped gate keeps the raw name expression, never the required `CI gate`. Fold it into an integration PR, which runs CI once (`tests/test_dependabot_updates.py`). |
 | Integration PR | The complete sharded Controller and repository suites, web tests, Rust tests/lint/platform, wire contracts, every selected integration, candidate acceptance with the upgrade carry, and every selected proof (agent repair recovery, client compatibility report, installed CLI, model-cache cancellation, OCI link fallback, privileged helper, profile-effect consumer). |
-| Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. On a signed `v*` tag `ci.yml` also calls `stable-release.yml` after `ci-gate`; that file holds the stable-channel publication jobs, and the stable package signature identity names it. |
+| Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. On a signed `v*` tag `ci.yml` also calls `stable-release.yml` after `ci-gate`; that file holds the stable-channel publication jobs, and the stable package signature identity names it. `scripts/release/stable-preflight` is the read-only check of that path's settings before tagging. |
+
+`client-compatibility-report` compares this Controller's OpenAPI with the signed
+CLI wheel of each published channel. Against the stable channel it is a gate
+from 1.0 on: a response shape the published stable vonkctl would refuse fails
+the job (`--gate-channel stable`), which is how the N-1 support window is
+enforced. The dev channel and a 0.x stable are only reported. Only a signature
+or digest that does not verify fails the job (as in `run_update`); any other
+update error, such as a stable channel not published yet (its signed pointer
+answers 404), an outage, or an expired manifest, is a `::warning::` and the
+job passes. vonkctl's shipped OpenAPI copy opens response objects
+(`additionalProperties: false` is dropped, `open_shown_words`), so an added
+optional response field is not reported as a break.
 
 A member PR is done when its review has passed.
 Adding the `release-acceptance` label re-runs `ci.yml` in full at once.
@@ -40,7 +52,7 @@ Jobs that build Rust set it up with `.github/actions/setup-rust` (toolchain
 from `rust-toolchain.toml`, read-only shared cache).
 
 Integration jobs follow a conservative transitive dependency closure in
-`scripts/select-ci-areas`; unknown inputs run every integration. PostgreSQL,
+`scripts/ci/select-ci-areas`; unknown inputs run every integration. PostgreSQL,
 wire and Rust platform checks run on every full run because their dependencies
 span these boundaries. Image/package builds may be selective.
 
@@ -78,7 +90,7 @@ for every merge, and on every integration PR. Release refreshes recipes only
 for a change to what the upgrade is made of: the agent, its packaging and
 installers, the deployment, the Controller-to-agent protocol, and the scripts,
 actions and workflows that assemble and accept a candidate (`CARRY_INPUTS` in
-`scripts/select-ci-areas`). The `release-acceptance` label makes any PR a full
+`scripts/ci/select-ci-areas`). The `release-acceptance` label makes any PR a full
 run with both. The baseline starts every service its installed Compose file
 declares except the Tailscale pair (the lane has no tailnet, and the installed
 file carries no `profiles:` key to tell them apart); after the upgrade the
@@ -129,16 +141,16 @@ It prints the selected files first, runs each suite in its own pytest process wi
 `-n 2` (`agent_protocol/tests` in the installed-wheel consumer environment with
 `-c /dev/null`, as CI does), and prints which selected files hold
 `built_image`, `corpus_acceptance` or Postgres tests: those run in CI (or
-`scripts/test-vm-lane`). An empty selection runs the guards only. Full suites run
+`scripts/dev/test-vm-lane`). An empty selection runs the guards only. Full suites run
 in batch CI; do not run them locally.
 
 For the complete local repository and Controller pytest suites (rarely needed), run:
 
 ```bash
-scripts/test-local
+scripts/dev/test-local
 ```
 
-`scripts/test-local` and `scripts/test-vm-lane` first place the recipe library's declared
+`scripts/dev/test-local` and `scripts/dev/test-vm-lane` first place the recipe library's declared
 adapter sources (`tools/fetch-adapter-sources` in `VONK_RECIPE_LIBRARY_ROOT`, default
 `/opt/vonk-forge-recipes`): a recipes pull deletes files that moved to its mirror, the
 synthetic canary package among them. Placing reads the recipes cache and fetches only
@@ -149,9 +161,12 @@ what is missing; a failure is a warning, and the tests that read those files fai
 ### Fresh checkout build and contract smoke checks
 
 The exact uv release is owned by `.tool-versions`; Actions and container builds
-read that file. Each project declares an equal `tool.uv.required-version` floor,
-so newer local installations remain usable. The single-source guard rejects
-independent pins and floors that differ from the CI release. A uv bump also refreshes the
+read that file. Each project declares the same `tool.uv.required-version` floor, at or below
+the CI release, so newer local installations remain usable. The floor stays at
+the oldest uv that reads the lock (0.13.7, Dependabot's bundled uv): raising it
+past that stops Dependabot's Python updates (`tool_version_not_supported`). Raise
+it only when the lock format needs it. The single-source guard rejects
+independent pins, unequal floors and floors above the CI release. A uv bump also refreshes the
 `deploy/compose/uv-bootstrap.lock` wheel hashes. Container bootstrap
 installs use hash-locked PyPI wheels, including uv with its owner-derived version.
 
@@ -163,7 +178,7 @@ Install uv, Node/npm and the pinned Rust toolchain (on macOS, also prepare the
 `vonk-ci` OrbStack VM for the Linux workspace check), then run:
 
 ```bash
-scripts/check-fresh-contract-build
+scripts/dev/check-fresh-contract-build
 ```
 
 This prepares the locked Python environment, generates clients and wire types,
@@ -181,7 +196,7 @@ protocol member (`.github/actions/protocol-env`, an inexact sync), not `python-e
 consumers: `tools/generated_contracts.py` stamps the fingerprint of the
 generator inputs and outputs under `.state/`, so a tree is generated once per
 change and every later pytest start, web hook (`prebuild`, `pretest`) and CI
-job finds it current. `scripts/prepare-generated-contracts` runs the same
+job finds it current. `scripts/dev/prepare-generated-contracts` runs the same
 preparation by hand. The Controller Dockerfile generates in its contracts
 stage before packaging.
 
@@ -233,7 +248,7 @@ merge. The complete sweep stays the evidence on main. A test owns its own
 tiering; the tier never skips a test outright.
 
 The per-test budget is a gate for the tests a change adds or touches.
-`scripts/changed-tests` reads the pull request's diff and the tree and lists
+`scripts/dev/changed-tests` reads the pull request's diff and the tree and lists
 every test function with an added line (`path::function`). Each pull-request
 and merge-queue suite shard diffs against the base commit, passes that list as
 `--test-budget-enforce`, and such a test over its budget without a slow mark
@@ -282,7 +297,7 @@ budget. The "Controller image build tests" CI job builds both targets of
 them with `-m "not built_image"`, and the CI gate requires that job when
 Controller and NAS integration are selected. Ordinary core test edits do not
 rebuild images. Without the variable such a test skips locally
-and fails in CI. `scripts/test-local --with-image-build` builds the two images
+and fails in CI. `scripts/dev/test-local --with-image-build` builds the two images
 first and includes the checks; by default they are skipped. Prefer a static
 check of the Dockerfile or build inputs where that proves the property.
 
@@ -302,7 +317,7 @@ The protocol is an editable workspace member, so no test or
 `inventory/wheels` that the Controller image and the release carry; every CI job
 that builds `control/Dockerfile` runs it first, and the adapter-Python job
 installs that wheel into a Python 3.12 venv, which is what proves the protocol's
-3.12 support (the workspace lock itself resolves for 3.14). Nothing compares the
+3.12 support (the workspace lock itself resolves for 3.15). Nothing compares the
 wheel with a lock: it is our own build output, not ingress.
 
 On Linux, this runs both suites in full. On macOS, it runs portable tests on
@@ -345,7 +360,7 @@ readiness regressions. Real NVIDIA hardware, NCCL/fabric behavior, model
 quality, and physical Spark acceptance still require the designated Linux/ARM64
 or Spark lane.
 
-Run the lane in the VM from a worktree with `scripts/test-vm-lane <ref>
+Run the lane in the VM from a worktree with `scripts/dev/test-vm-lane <ref>
 [-- PYTEST_ARGS...]` (default: the installed-CLI tests). A worktree's gitdir
 lives under `/opt`, which the VM cannot see, so the script clones `<ref>` (a
 committed ref in this repository) into a unique `/private/tmp/vonk-vm-lane.*`
@@ -366,15 +381,15 @@ tool dependency goes into a dependency group and the lock.
 Tests never download, build an environment or pull an image. A test that needs
 a wheel builds it with the locked `hatchling` in the running interpreter; one
 that installs a wheel into a scratch venv installs it `--no-deps` and links the
-CLI's own locked dependencies, which `scripts/sync-cli-dependencies` prepares
+CLI's own locked dependencies, which `scripts/dev/sync-cli-dependencies` prepares
 (`scripts/test` runs it first); Docker-backed tests use the pinned images
-`scripts/pull-test-images` pulls beforehand (CI does the same, with retries).
+`scripts/ci/pull-test-images` pulls beforehand (CI does the same, with retries).
 
 The CLI dependency environment holds compiled packages (rpds, ...), so it is
 keyed by OS and architecture: `.cli-dependencies/<os>-<arch>` (for example
 `darwin-arm64` and `linux-arm64`), stamped with the platform and interpreter
 that built it. The macOS host and the `vonk-ci` VM see the same files, so they
-must never share one environment; `scripts/sync-cli-dependencies` rebuilds any
+must never share one environment; `scripts/dev/sync-cli-dependencies` rebuilds any
 environment whose stamp does not match, and the tests and the
 `needs_cli_dependencies` prerequisite refuse one (`tools/cli_dependencies.py`,
 guarded by `tests/test_cli_dependencies_platform.py`). A `No module named
@@ -395,7 +410,7 @@ cache paths with the task name. Run from the active task worktree:
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 export UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache
 scripts/build-control-wheel
-scripts/sync-cli-dependencies
+scripts/dev/sync-cli-dependencies
 
 # Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
 uv run --project control --frozen pytest -q control/tests -m "not lane" -n auto --dist worksteal
@@ -404,7 +419,7 @@ uv run --project control --frozen pytest -q tests -m "not lane" -n auto
 # Lane tier: the same trees without the marker filter. Run it in OrbStack or
 # the designated CI lane; it needs Docker, PostgreSQL, cargo, dpkg and a
 # Linux/ARM64 host.
-scripts/pull-test-images postgres caddy tailscale python
+scripts/ci/pull-test-images postgres caddy tailscale python
 uv run --project control --frozen pytest -q control/tests
 uv run --project control --frozen pytest -q tests
 uv run --project control --frozen pytest -q -n auto deploy/compose/tests
@@ -534,7 +549,7 @@ uv run --project control --frozen ruff format --check .
 # from that same environment.
 scripts/build-control-wheel
 uv sync --project control --frozen
-scripts/check-python-types
+scripts/dev/check-python-types
 
 # Web behavior and types; the build runs tsc --noEmit before bundling.
 npm ci --prefix control/web
@@ -548,24 +563,24 @@ named by production source, so deleting a component also deletes its CSS.
 Generated clients and wire outputs are ignored build inputs. Test setup prepares
 them, and `tests/test_generated_contracts.py` compares them with their Pydantic
 producers alongside the remaining checked-in installer and qualification
-schemas. CI runs `scripts/check-generated-determinism` for control clients and
+schemas. CI runs `scripts/dev/check-generated-determinism` for control clients and
 `--wire` for Rust outputs: both compare two generation runs, including Python
 file membership. Existing contract round-trip tests still exercise the real
 producer and consumer boundaries.
 
 Python lint, formatting and types share one configuration, the root
 `pyproject.toml`, and one locked tool version each (uv.lock, control dev group).
-Ruff targets Python 3.14, the uv environment's. A file another interpreter runs
+Ruff targets py314, one below the uv environment's 3.15, so it rejects PEP 810 `lazy import` as invalid syntax (the no-lazy-imports rule). A file another interpreter runs
 keeps that interpreter's syntax through `per-file-target-version`: `agent_protocol`
-3.12 (the Sparks), and 3.13 for `deploy/` (container images), `scripts/` and
+3.12 (the recipe adapter images' system python), 3.13 for `deploy/` (container images), and 3.12 for `scripts/` and
 `tests/nodes/` (a runner's or host's `python3`) and for a repository module such a
 script imports (`tools/generated_contracts.py`, loaded by `check-generated-determinism`,
 `prepare-generated-contracts` and the web `pre*` hooks), and for `tests/acceptance/`
 (the clean-Spark lane `ast.parse`s `test_spark_lifecycle.py` with the runner's 3.12);
-Ruff then refuses 3.14-only
-syntax there; such a file imports the 3.14 packages only when uv runs it. It runs its default rules plus the families in `[tool.ruff.lint] extend-select`;
+Ruff then refuses newer
+syntax there; such a file imports the 3.15 packages only when uv runs it. It runs its default rules plus the families in `[tool.ruff.lint] extend-select`;
 every ignore, global or per file, states its reason next to it. `extend-include`
-makes every extensionless file in `scripts/` and `bin/` Python unless
+makes every extensionless file under `scripts/` (all group directories) and `bin/` Python unless
 `extend-exclude` names it as a shell script, so a new script is either linted or
 fails Ruff loudly. Imports sit at module level (PLC0415, E402): a cycle is broken
 by moving shared definitions into a lower module, never by a function-local or
@@ -574,22 +589,22 @@ runtime import graph of the four installable packages acyclic. Inside those
 packages imports are absolute (TID252); tests, scripts and tools keep relative
 ones, whose absolute name depends on how pytest roots them.
 
-`scripts/check-python-types` runs pyright in `standard` mode plus the nine strict
+`scripts/dev/check-python-types` runs pyright in `standard` mode plus the nine strict
 checks listed in `[tool.pyright]`, on the Linux platform, over `include` and the
 extensionless scripts Ruff selects; `agent_protocol/src` is checked as Python
 3.12. There is no baseline: a justified site carries
 `# pyright: ignore[rule]` with its reason, and reportUnnecessaryTypeIgnoreComment
 fails an ignore that is no longer needed. The commit hook passes the staged
 files Ruff treats as Python; CI checks the whole tree with the same commands.
-Both run pyright through `pyright_environment()` in `scripts/check_environment.py`:
+Both run pyright through `pyright_environment()` in `scripts/dev/check_environment.py`:
 the version is the one `uv.lock` installs (`importlib.metadata`), with the nodejs
 wheel and no global Node, so hook and CI cannot use different pyright builds.
 
-New syntax is checked by `scripts/check-added-lines [PATCH_FILE|-]`, which consumes
+New syntax is checked by `scripts/dev/check-added-lines [PATCH_FILE|-]`, which consumes
 an externally supplied unified diff. CI creates that patch against its explicit
 PR/merge-group base over the pathspec in `ci.yml`'s `lint` job (a workflow test keeps the hook's list equal to it). Only added lines can fail. The adapter, scanners and fixture
 tests never read Git.
-The pre-commit hook (`scripts/check-staged-code`) runs the same guards on the
+The pre-commit hook (`scripts/dev/check-staged-code`) runs the same guards on the
 staged diff with the same path set as CI, preparing the control environment
 through the same preparer as the Python checks. A violation fails the commit.
 If a staged file also has unstaged edits the hook names it and skips the guards
@@ -627,7 +642,7 @@ Controller startup and sparse-serialization exceptions remain semantic registrie
 Lifecycle writer ownership remains checked without a baseline.
 
 The lifecycle also has a hardware canary that nothing in CI runs:
-`scripts/lifecycle-canary` drives one load, one cancel during start and one
+`scripts/fleet/lifecycle-canary` drives one load, one cancel during start and one
 Controller-restart-tolerant wait through `vonkctl` and asserts that no operator
 wait lacks an action and no admission is stuck. It is run by hand after
 lifecycle releases; see [the runbook](runbooks/lifecycle-canary.md).
@@ -678,7 +693,7 @@ SC2115 and SC2086 as errors; CI installs `shellcheck` for it.
 
 ### Supply-chain verification
 
-Run `scripts/verify-supply-chain --json` to validate authored lockfiles, the
+Run `scripts/release/verify-supply-chain --json` to validate authored lockfiles, the
 third-party contract wheel digest, and image pins. CI builds the protocol
 wheel, generates SPDX documents and a digest manifest, and uploads them as
 verified release evidence. These generated files are not committed or staged
@@ -802,7 +817,7 @@ upgrade baseline. PR acceptance cannot substitute for production acceptance.
 `Repository guards` runs the fast cross-area checks on every CI invocation,
 including documentation-only and control-only PRs, merge queues, and releases
 that need fresh CI. `CI gate` requires its success independently
-of `scripts/select-ci-areas`. The sharded repository suite runs on every full run and excludes the same files/nodes
+of `scripts/ci/select-ci-areas`. The sharded repository suite runs on every full run and excludes the same files/nodes
 to avoid running guards twice.
 
 A guard in `tests/test_workflow_assertions.py` requires every `uses: owner/action@<sha>` under
@@ -815,12 +830,12 @@ unclassified files, including scans delegated to helpers. A new whole-tree guard
 belongs in `GUARDS`; a narrower test needs its owning boundary in `SCOPED`.
 Mixed integration files select their cross-area guard nodes individually. The
 local command `scripts/test guards` runs them in parallel (`-n auto`; they share no state). The runner
-`python3 scripts/repository-guards` prints that selection; `--exclusions`
+`python3 scripts/ci/repository-guards` prints that selection; `--exclusions`
 prints its complement's pytest options. No test reads Git history for this decision.
 
 `tests/test_guard_paths_exist.py` fails when a plain repository path string literal names
 nothing. It reads the `added_line_guards/` package, `principle_guards.py`, `repository_guards.py`,
-`scripts/select-ci-areas`, the boundary and reader tables (`document_read_boundaries.py`,
+`scripts/ci/select-ci-areas`, the boundary and reader tables (`document_read_boundaries.py`,
 `untyped_mapping_boundaries.py`, `whole_collection_readers.py`,
 `deterministic_retries.py`, `lifecycle_writer_boundaries.py`) and `tools/*.json`. A prefix
 passes when it matches at least one path. There is no allowlist. It cannot see a scope
@@ -859,7 +874,7 @@ its `platform_ref` pin (see `docs/runbooks/supply-chain.md`).
 `rust/fuzz/` is a cargo-fuzz crate outside the Cargo workspace (its own
 `[workspace]`; the job copies the root `Cargo.lock` in, so the fuzzer tests the
 shipped dependency set), so no batch compiles it and the pinned stable
-toolchain is untouched. `scripts/select-ci-areas` treats a change under it as
+toolchain is untouched. `scripts/ci/select-ci-areas` treats a change under it as
 fast-tier only (no Rust build, carry or acceptance). Its targets cover the hand-written parsers that
 untrusted bytes reach; each states its invariant in its first comment:
 
@@ -904,7 +919,7 @@ suites through `scripts/test` with the same shards as `ci.yml`, and the Rust
 workspace through `cargo llvm-cov`, all under coverage. The result is one list,
 written to the job summary and to the `code-no-test-executes` artifact (with an
 HTML report, kept 7 days): the files and functions with no executed line,
-as deletion candidates (`scripts/coverage-unexecuted`). It stores and compares
+as deletion candidates (`scripts/dev/coverage-unexecuted`). It stores and compares
 no percentage and gates nothing. `agent_protocol/src` is not listed because its
 tests run in their own consumer environment. The tool versions are pinned once, in the
 workflow's `env`.
@@ -921,7 +936,7 @@ substitute for the PR candidate. A workflow dispatch accepts an explicit `ref`.
 The candidate images are built natively, one job per architecture, and bound
 into one index per role with `docker buildx imagetools create`; the index job
 verifies both platforms and their provenance and SBOM attestations with
-`scripts/verify-published-image` before anything consumes them. Development and
+`scripts/images/verify-published-image` before anything consumes them. Development and
 candidate images also carry an `ai.vonkforge.source.tree` label: the Git tree
 they were built from. Acceptance and reuse bind an image to the tree of the
 commit they verify, while `org.opencontainers.image.revision` and the embedded
@@ -933,15 +948,22 @@ tree` is its tree, which equals the release commit's
 (`git rev-parse <release commit>^{tree}`).
 An image without the tree label is refused.
 Main's release reuses the candidate images of the successful pull request CI run
-that tested its exact tree (`scripts/resolve-tested-ci`): when all four verify
-for main's commit (`scripts/reuse-pr-candidate-images`), `dev-images.yml` skips
+that tested its exact tree (`scripts/ci/resolve-tested-ci`): when all four verify
+for main's commit (`scripts/images/reuse-pr-candidate-images`), `dev-images.yml` skips
 its builds and runs every scan, deep scan, smoke test, publication and signature
 on those digests. Otherwise it builds. A reused Controller image reports the pull
 request's tested merge commit as its `source_sha`; that commit has main's exact
 tree and resolves on GitHub. A pull
 request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
-weekly CI base image mirror run prunes the caches of closed pull requests.
+weekly CI base image mirror run prunes the caches of closed pull requests. The
+pruner reads the package versions one page at a time, each request with its own
+timeout; a timeout, 5xx, rate limit or connection error skips only that work
+with a notice and the next weekly run continues, while any other failure fails.
+It reads every page on every run (newest first with no cursor, a page cap would
+strand the oldest caches), and a delete of an already-gone version counts as done. The mirror job copies with
+the lock's pinned skopeo image (`build_bases.skopeo`), not the runner's apt skopeo,
+which cannot keep some OCI indexes digest-exact.
 
 The lane's `Candidate ARM64 agent packages` job is a two-leg matrix (candidate and
 lower lifecycle baseline) that builds both packages in parallel, as `agent-release.yml`
@@ -972,8 +994,8 @@ is required.
 
 ## Dependency acquisition failures
 
-`scripts/retry-dependency-fetch` permits only the acquisition commands listed
-in `scripts/retry_dependency_fetch.py`; `tests/test_workflow_retry_commands.py`
+`scripts/ci/retry-dependency-fetch` permits only the acquisition commands listed
+in `scripts/ci/retry_dependency_fetch.py`; `tests/test_workflow_retry_commands.py`
 fails when any workflow or composite action wraps a command it would refuse,
 such as `cargo install`. The Controller and wire
 jobs resolve locked dependencies before running checks. Controller image tests
@@ -993,7 +1015,7 @@ wrapped, so a retry cannot turn a failing test into a passing job.
 ## Reusing accepted component images
 
 Development publication reuses LiteLLM by their exact build inputs.
-`scripts/dev-image-inputs` hashes Git paths, file modes and blob identities for
+`scripts/images/dev-image-inputs` hashes Git paths, file modes and blob identities for
 an isolated build context plus the complete build/acceptance policy. BuildKit
 receives only that context: a new `COPY` cannot silently depend on an unhashed
 Controller file. Dockerfile/base-image pins, copied protocol code, mounted

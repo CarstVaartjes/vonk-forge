@@ -65,6 +65,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/scripts/test_stable_preflight.py",
+        "The stable preflight reports every kind of gap in the release settings once, by subject, and nothing for a complete shape.",
+    ),
+    (
         "tests/test_console_script_entry_points.py",
         "Every [project.scripts] target of the four pyprojects names a module file that defines its callable.",
     ),
@@ -79,6 +83,14 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "control/tests/test_schema_contention.py",
         "Startup schema repair re-raises lock timeouts and deadlocks so startup retries; other errors stay logged skips.",
+    ),
+    (
+        "control/tests/test_gateway_external_contract.py",
+        "An external entry is accepted or refused with a field path and rule code, never echoing a secret, and renders beside local routes.",
+    ),
+    (
+        "control/tests/test_gateway_alias_namespace.py",
+        "An external row reads back and owns its name; run creation and rename_run are refused a name an external model owns; a local run owns its name against an external claim.",
     ),
     (
         "control/tests/test_identity_creation_postgres.py",

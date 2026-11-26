@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _module():
     loader = importlib.machinery.SourceFileLoader(
-        "lifecycle_canary", str(ROOT / "scripts/lifecycle-canary")
+        "lifecycle_canary", str(ROOT / "scripts/fleet/lifecycle-canary")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None

@@ -30,7 +30,7 @@ DEV_API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:dev"
 DEV_WORKER_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
 
 
-SCRIPT = ROOT / "scripts/render-dev-compose"
+SCRIPT = ROOT / "scripts/release/render-dev-compose"
 
 
 def _renderer_module() -> Any:

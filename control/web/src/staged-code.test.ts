@@ -20,7 +20,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
   const root = mkdtempSync(join(tmpdir(), "vonk-staged-generated-"));
   try {
     const web = join(root, "control/web");
-    mkdirSync(join(root, "scripts"), { recursive: true });
+    mkdirSync(join(root, "scripts/dev"), { recursive: true });
     mkdirSync(join(web, "src/api"), { recursive: true });
     for (const script of [
       "check-staged-code",
@@ -28,7 +28,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
       "check_environment.py",
       "hook_words_generated.py",
     ]) {
-      copyFileSync(join(workspace, "scripts", script), join(root, "scripts", script));
+      copyFileSync(join(workspace, "scripts/dev", script), join(root, "scripts/dev", script));
     }
     // This fixture tests check dispatch: the added-line guards are a stub and the
     // control environment is not prepared.
@@ -39,7 +39,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
       "import sys\nsys.stdin.read()\nraise SystemExit(0)\n",
     );
     appendFileSync(
-      join(root, "scripts/check_environment.py"),
+      join(root, "scripts/dev/check_environment.py"),
       "\n\ndef ensure_control(root, environment):\n    return None\n",
     );
     copyFileSync(join(process.cwd(), "biome.json"), join(web, "biome.json"));
@@ -62,7 +62,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
       'import type { CurrentWire } from "./api/generated";\nexport const value: CurrentWire = "ready";\n',
     );
     const check = () =>
-      spawnSync("python3", ["scripts/check-staged-code"], {
+      spawnSync("python3", ["scripts/dev/check-staged-code"], {
         cwd: root,
         env: {
           ...process.env,

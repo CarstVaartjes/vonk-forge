@@ -6,6 +6,8 @@ Compose file, the portable Python NAS setup wheel, and the native `arm64`
 Spark installer and agent package with checksums, SBOMs, provenance, and
 Sigstore bundles. A signed installer-channel manifest binds those assets to
 the stable curl endpoints.
+The order of work for a release, and for moving a deployment between channels,
+is in the [stable release runbook](stable-release.md).
 The same signed candidate includes a source-stamped `vonkctl` wheel; operators
 [check and install it explicitly](../operators/cli-updates.md).
 
@@ -34,7 +36,9 @@ through the existing agent relay without SSH. The default one-at-a-time
 strategy requires the exact new agent and helper activation evidence before it
 queues the next Spark. Rerunning the Spark installer remains the package repair,
 fresh-install, and explicit re-enrollment path; there is no A/B rollback slot or
-offline Spark rollback bundle.
+offline Spark rollback bundle. A fleet upgrade also moves a Spark between
+channels, with no installer rerun: it finds the installed package under either
+channel.
 
 ## CI authority boundary
 
@@ -85,10 +89,27 @@ Repository and control shards use recent successful CI timing artifacts; missing
 stale, or invalid timings fall back to collection counts. Timing data affects only
 assignment, never whether a test is selected.
 
+## Stable preflight
+
+Before signing a `v*` tag, run the read-only preflight:
+
+```sh
+scripts/release/stable-preflight --repo CarstVaartjes/vonk-forge --tag vX.Y.Z --sha <sha>
+```
+
+It reads repository switches, the stable environments with their deployment
+policies, secret and variable name parity with the development twins, the
+owner reviewer, the tag against the workspace version, that `<sha>` is on main
+with a successful Release, the three `:dev-sha-<sha>` images with the same
+attestation flags `stable-release.yml` uses, and the release signers file. It
+prints every problem and exits 1 if any; it never writes GitHub or registry
+state. `--reviewer-environment installer-promotion-stable` selects the
+alternative reviewer placement. The checks are `tools/stable_preflight.py`.
+
 ## Local verification
 
 ```sh
-scripts/verify-supply-chain --json
+scripts/release/verify-supply-chain --json
 uv run --project control --frozen \
   pytest -q 'tests/scripts/test_install_release_publication_*.py'
 ```
@@ -107,7 +128,7 @@ require operator migration, particularly PostgreSQL data directories.
 The public NAS channel wrapper verifies the signed manifest and release, then
 verifies the selected bootstrap digest. That bootstrap verifies the exact NAS
 wheel and payload against their release-bound digests before installed `uv`
-runs the Python setup in an isolated Python 3.14 environment. Both fresh installs
+runs the Python setup in an isolated Python 3.15 environment. Both fresh installs
 and reruns replace `docker-compose.yaml` with this channel policy while
 preserving operator configuration, secrets, and named volumes.
 Immutable image records and `docker-compose.pinned.yml` are publication evidence

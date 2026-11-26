@@ -37,6 +37,7 @@ from vonk_control.agent_upgrades.contract import (
 )
 from vonk_control.agent_upgrades.errors import AgentUpgradeConflict, AgentUpgradeInvalid
 from vonk_control.agent_upgrades.intent import _request_intent
+from vonk_control.agent_upgrades.package_source import load_package_source
 from vonk_control.agent_upgrades.service import AgentUpgradeService
 from vonk_control.agent_upgrades.status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
@@ -145,6 +146,28 @@ class Clock:
 
     def advance(self, *, seconds: int) -> None:
         self.value += timedelta(seconds=seconds)
+
+
+def test_installed_package_is_found_under_the_other_channel() -> None:
+    """A stable Controller finds a Spark's package published only under dev."""
+
+    source = AgentPackageSource.model_validate(SOURCE)
+    served = f"/{source.object_key('dev')}"
+
+    def handler(request):
+        if request.url.path == served:
+            return httpx2.Response(200, content=source.model_dump_json().encode())
+        return httpx2.Response(404)
+
+    with httpx2.Client(
+        base_url="https://install.vonkforge.ai", transport=httpx2.MockTransport(handler)
+    ) as client:
+        assert (
+            load_package_source(
+                client, "stable", source.build_digest, source.package.binary_sha256
+            )
+            == source
+        )
 
 
 def test_every_spark_upgrades_independently_of_a_busy_one(tmp_path) -> None:

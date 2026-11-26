@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from pydantic import field_validator
 from sqlalchemy import func, literal_column, select
@@ -172,6 +173,35 @@ class LiveEngineReading:
     alias: str
     #: The stored row; its columns are the wire ``EngineReading`` fields.
     reading: NodeEngineSample
+
+
+@dataclass(frozen=True)
+class EngineWindow:
+    """One run's engine readings received inside a window, aggregated.
+
+    ``progress_ranges`` holds ``(min, max)`` of each progress field, in
+    ``ENGINE_PROGRESS_FIELDS`` order, or None when no reading carried it.
+    """
+
+    oldest_received_at: datetime
+    newest_received_at: datetime
+    readings: int
+    #: Readings that report both requests running and waiting.
+    pending_readings: int
+    #: The smallest running plus waiting across the readings.
+    pending_min: int
+    progress_ranges: tuple[tuple[float, float] | None, ...]
+
+
+#: The fields whose change shows a run is working. TensorFold and SGLang count
+#: tokens of finished requests only, so a long generation keeps the counters
+#: flat; the KV ratio moves per token (measured on TensorFold).
+ENGINE_PROGRESS_FIELDS = (
+    NodeEngineSample.prompt_tokens,
+    NodeEngineSample.generation_tokens,
+    NodeEngineSample.e2e_seconds_count,
+    NodeEngineSample.kv_cache_usage_ratio,
+)
 
 
 class TelemetryRepository:
@@ -425,7 +455,10 @@ class TelemetryRepository:
         node_ids: Sequence[str],
         since: datetime,
     ) -> dict[str, int]:
-        """Kernel OOM kills per node among samples observed at or after ``since``.
+        """Kernel OOM kills per node among samples received at or after ``since``.
+
+        The window is by receive time, the Controller's clock, like the other
+        host-attention windows, so an agent clock that runs off does not move it.
 
         Each boot's counter only rises, so the kills are the sum of every boot's
         rise; a reboot starts a new boot and adds nothing. Nodes with none are omitted.
@@ -442,7 +475,7 @@ class TelemetryRepository:
             )
             .where(
                 NodeTelemetrySample.node_id.in_(identities),
-                NodeTelemetrySample.observed_at >= since,
+                NodeTelemetrySample.received_at >= since,
                 NodeTelemetrySample.oom_kills.is_not(None),
             )
             .group_by(NodeTelemetrySample.node_id, NodeTelemetrySample.boot_id)
@@ -452,6 +485,66 @@ class TelemetryRepository:
             if rise:
                 kills[node_id] = kills.get(node_id, 0) + int(rise)
         return kills
+
+    def engine_windows_in_session(
+        self,
+        session: Session,
+        node_ids: Sequence[str],
+        since: datetime,
+    ) -> dict[tuple[str, str], EngineWindow]:
+        """Per ``(node_id, run_id)``, the engine readings received at or after ``since``.
+
+        By receive time, the Controller's clock; ``observed_at`` only bounds
+        the scan, as in ``live_engine_readings``. No join to the run table: the
+        node's loaded runs name the runs to look up.
+        """
+
+        identities = tuple(dict.fromkeys(node_ids))
+        if not identities:
+            return {}
+        pending = NodeEngineSample.requests_running + NodeEngineSample.requests_waiting
+        rows = session.execute(
+            select(
+                NodeTelemetrySample.node_id,
+                NodeEngineSample.run_id,
+                func.min(NodeTelemetrySample.received_at),
+                func.max(NodeTelemetrySample.received_at),
+                func.count(),
+                func.count(pending),
+                func.min(pending),
+                *(
+                    aggregate(field)
+                    for field in ENGINE_PROGRESS_FIELDS
+                    for aggregate in (func.min, func.max)
+                ),
+            )
+            .join(
+                NodeEngineSample,
+                NodeEngineSample.sample_id == NodeTelemetrySample.id,
+            )
+            .where(
+                NodeTelemetrySample.node_id.in_(identities),
+                NodeTelemetrySample.received_at >= since,
+                NodeTelemetrySample.observed_at >= since - TELEMETRY_ACCEPTANCE_WINDOW,
+            )
+            .group_by(NodeTelemetrySample.node_id, NodeEngineSample.run_id)
+        ).all()
+        windows: dict[tuple[str, str], EngineWindow] = {}
+        for result in rows:
+            row: tuple[Any, ...] = tuple(result)
+            ranges = row[7:]
+            windows[(row[0], row[1])] = EngineWindow(
+                oldest_received_at=_stored_utc(row[2]),
+                newest_received_at=_stored_utc(row[3]),
+                readings=row[4],
+                pending_readings=row[5],
+                pending_min=0 if row[6] is None else int(row[6]),
+                progress_ranges=tuple(
+                    None if low is None else (low, high)
+                    for low, high in zip(ranges[0::2], ranges[1::2], strict=True)
+                ),
+            )
+        return windows
 
     def live_engine_readings(self, now: datetime) -> list[LiveEngineReading]:
         """The newest reading of each (node, run) received within ``ENGINE_LIVE_WINDOW``.

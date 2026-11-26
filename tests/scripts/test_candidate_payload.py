@@ -14,8 +14,8 @@ import pytest
 from tests.scripts import install_release_publication_support as publication
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/install-release-publication"
-SEAL = ROOT / "scripts/seal-agent-deb"
+SCRIPT = ROOT / "scripts/release/install-release-publication"
+SEAL = ROOT / "scripts/agent/seal-agent-deb"
 PR_SHA = "d" * 40
 PR_RUN = 777001
 

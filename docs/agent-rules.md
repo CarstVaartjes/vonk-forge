@@ -7,7 +7,7 @@
 Package direction is one way: the Controller (`vonk_control`) and `nas_setup`
 may import `vonk_agent_protocol`; nothing else imports a sibling package, and
 the server never imports vonkctl (`cluster_profiles`). Facts reach the CLI only
-through the generated client (`scripts/generate-control-clients`);
+through the generated client (`scripts/dev/generate-control-clients`);
 `tests/test_package_import_direction.py` enforces it, function-level imports
 included, and also fails any import cycle within or across the four packages:
 imports sit at module level, and a shared name moves to a lower module instead
@@ -22,8 +22,8 @@ module that defines it.
 Every model an `/agent/` route takes or returns (grant requests and replies, the
 bounded error envelope, the capability-unavailable reply, the enrollment
 observation reply) lives in `vonk_agent_protocol`, never in `vonk_control`. The
-wire exporter (`scripts/export-agent-wire-schema`) walks only the protocol and
-runs with only the protocol member installed (`scripts/check_environment.py`
+wire exporter (`scripts/dev/export-agent-wire-schema`) walks only the protocol and
+runs with only the protocol member installed (`scripts/dev/check_environment.py`
 `run_in_protocol`, into the workspace's one `.venv`, or `UV_PROJECT_ENVIRONMENT`
 when set), so Cargo's `build.rs` and the Rust jobs need no Controller environment. A route model defined outside the protocol fails
 `require_wire_exports` in `control/tests/test_api_contract_completeness.py`.
@@ -39,7 +39,7 @@ security.
 
 Package lifecycle logic lives in `vonk-agent-helper::package_hooks`; the Debian
 maintainer scripts (`packaging/debian/{postinst,prerm,postrm}`) are shims that
-exec it, and `scripts/verify-agent-deb` requires them to equal the packaged
+exec it, and `scripts/agent/verify-agent-deb` requires them to equal the packaged
 shim sources. A new dpkg action is a new `Hook` variant (the `match` is
 exhaustive), never new shell. `packaging/systemd` units run binaries, not
 `/bin/sh -c`. The `maintainershim` added-line guard enforces both. The rollback
@@ -66,10 +66,16 @@ In the web the text is the one `NOT_REPORTED_TEXT` in `control/web/src/lib/fleet
 types the words. Fleet totals (power, tokens, energy, decode speed) are the Controller's fleet line or total of
 the metric series, never a sum made in the browser.
 
-Startup schema reconciliation drops every table in the Controller's schema `public`
-that `Base.metadata` does not declare (except `alembic_version`), foreign keys
-first, no CASCADE. Never keep another tool's table there (LiteLLM has its own
-database). A rollback to an older Controller drops the tables a newer one added.
+On the stable channel, startup schema reconciliation keeps every table in the Controller's schema `public`
+that `Base.metadata` does not declare (except `alembic_version`) for one minor
+release, then drops it. The table carries `COMMENT ... 'vonk-undeclared-since
+<major>.<minor>'` (the Controller's own minor from `vonk-control`'s version); the first
+Controller of a later minor drops it, foreign keys first, no CASCADE. An unparseable
+stamp is stamped again, a declared table loses a stale stamp, and an unknown
+Controller version drops nothing. Never keep another tool's table there (LiteLLM has
+its own database). A rollback to the previous minor finds the tables a newer one
+added; older rollbacks are unsupported. The dev channel (`VONK_INSTALL_CHANNEL`, read once by
+`settings.install_channel_from_env`) keeps nothing: it drops an undeclared table at once.
 
 ## State ownership and resilient recovery
 
@@ -230,10 +236,10 @@ word only when the change adds it to a file more often than it removes it there
 (a reflow is not new). On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
-The pre-commit hook (`scripts/check-staged-code`) also runs the CI added-line
+The pre-commit hook (`scripts/dev/check-staged-code`) also runs the CI added-line
 guards on the staged diff, so a violation fails before push; it skips with a
 message only when a staged file also has unstaged edits.
-A plain path literal in a guard module, `scripts/select-ci-areas` or a `tools/*.json` allowlist must name a path or the prefix of one (`tests/test_guard_paths_exist.py`); write guard scopes as plain full-path literals (composed or regex scopes are invisible to it), and move or delete the literal with the code.
+A plain path literal in a guard module, `scripts/ci/select-ci-areas` or a `tools/*.json` allowlist must name a path or the prefix of one (`tests/test_guard_paths_exist.py`); write guard scopes as plain full-path literals (composed or regex scopes are invisible to it), and move or delete the literal with the code.
 `cross-repo-nightly.yml` validates the recipes `main` library with the platform `main` validator every
 night; a red run is the drift alarm.
 `fuzz.yml` (daily, dispatch only otherwise) fuzzes the parsers in `rust/fuzz` (outside the Cargo workspace); a red run is a crash, and the fix adds one case to the parser's existing test (docs/testing-and-ci.md, Fuzzing).
@@ -248,12 +254,12 @@ that). Never exact-sync a subset into the shared environment: `uv sync --package
 or `--project X` for a member other than `control` uninstalls the other members.
 Run a subset with `uv sync --inexact --package X` (what `check_environment`
 `ensure_protocol` does) or `uv run --package X`, or give it its own
-`UV_PROJECT_ENVIRONMENT` through `scripts/ensure-project-venv`. After changing any
+`UV_PROJECT_ENVIRONMENT` through `scripts/dev/ensure-project-venv`. After changing any
 member's dependencies or version run `uv lock`; CI runs `uv lock --check` in the
 lint job, the only place the lock is compared with the pyprojects.
 
 Every change lands through an integration PR (same-repository `integration/*`
-head, or the `release-acceptance` label); `full` in `scripts/select-ci-areas`
+head, or the `release-acceptance` label); `full` in `scripts/ci/select-ci-areas`
 owns that rule. A member PR runs only the quick tier (`Ruff` with the added-line guards, web
 typecheck/Biome, and Rust fmt/clippy when Rust changed; no full suite) and a
 gate that reports `CI gate (member PR)`, never the required `CI gate`, so it cannot merge
@@ -283,7 +289,7 @@ for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.
 
 For the local repository and Controller pytest suites, use
-`scripts/test-local`; it splits Linux-marked tests into the `vonk-ci` OrbStack
+`scripts/dev/test-local`; it splits Linux-marked tests into the `vonk-ci` OrbStack
 VM on macOS and reports unavailable local prerequisites explicitly. CI must
 run the required Linux lane and must fail when its prerequisites are absent.
 
@@ -308,14 +314,33 @@ fixture tests for the detectors; retain the contract and type registries.
 
 ## Current contracts only: no legacy compatibility
 
-This is a first internal release, not a migration. Keep one current definition
+The dev channel keeps one current contract with no compatibility; transitions
+happen by deploy order. From 1.0.0 the stable channel answers the previous
+stable vonkctl and agent (N-1 minor) for one minor release. A breaking response
+shape ships only in a minor release, consumer first: the vonkctl that tolerates
+it is in a published stable release before the Controller change lands, and the
+`client-compatibility-report` CI job fails against a stable release of 1.0 or
+later. A deprecated API field or CLI flag keeps working for one minor and is
+announced in the release notes. The stable carry proves the N-1 agent. An
+added optional response field is not a break: vonkctl's shipped OpenAPI copy
+drops `additionalProperties: false` on every response object, including
+one a request also carries (`open_shown_words`, run by `scripts/dev/generate-control-clients`), so the gate
+fires only on real breaks. Even during that window, keep one current definition
 and one current execution path for each document and operation. Remove retired
 parsers, DTOs, database models/tables, endpoints, CLI compatibility aliases,
 fixtures, packaged assets, and callers together. Do not retain deprecated
 constructors, old field names, dual readers/writers, or fallback shapes merely
-to keep old tests or old worktrees working. The current parser and
+to keep old tests or old worktrees working; the one-minor window above is
+carried by the release process, not by a second reader. The current parser and
 [operator runbook](runbooks/vonkctl.md) own command vocabulary; do not
 restore the obsolete `fleet profile` alias from a historical guide.
+
+Forward tolerance in a reader is not legacy compatibility. vonkctl reads the
+closed response word sets it only shows as open, so an installed vonkctl keeps
+reading a newer Controller that adds a word there; it keeps one contract and one
+reading path, and nothing is kept for an older Controller. The sets it decides
+by stay closed (`cluster_profiles.control_client.shown_words.DECIDED_BY`,
+guarded by `tests/test_generated_contracts.py`).
 
 Published Model and Recipe structures are defined by the canonical Pydantic
 package in vonk-forge-recipes. The Controller reads the signed catalog index
@@ -516,7 +541,7 @@ for their merge, honoring authorization already given for that action. Describe
 the deployment impact in the PR. Controller startup reconciles the live schema
 to current model metadata transactionally under the startup advisory lock.
 Missing tables, safe columns, indexes and constraints are applied. Unknown
-columns are preserved (the NOT NULL barrier is lifted); undeclared tables are dropped
+columns are preserved (the NOT NULL barrier is lifted); undeclared tables are kept one minor on stable (dropped at once on dev), then dropped
 (see the schema reconciliation rule above), while obsolete constraints and indexes are
 replaced only after a safe replacement is installed. Data conflicts and unsafe
 casts are logged and deferred when the application can continue safely.

@@ -97,6 +97,19 @@ WORKER_MEMORY_TRACE_FRAMES = 5
 WORKER_MEMORY_REPORT_MAX_AGE_SECONDS = 120
 
 
+def install_channel_from_env() -> str:
+    """The install channel, ``dev`` or ``stable``; an unknown value is ``stable``."""
+
+    install_channel = os.environ.get("VONK_INSTALL_CHANNEL", "").strip()
+    if install_channel not in {"dev", "stable"}:
+        if install_channel:
+            _LOGGER.warning(
+                "unknown VONK_INSTALL_CHANNEL %r; using stable", install_channel
+            )
+        install_channel = "stable"
+    return install_channel
+
+
 @dataclass(frozen=True, slots=True)
 class DatabaseWaitBudgets:
     """Every finite upper bound on a PostgreSQL wait, in one place.
@@ -289,13 +302,7 @@ class Settings:
         control_hostname = (
             os.environ.get("VONK_CONTROL_HOSTNAME", "").strip().lower().rstrip(".")
         )
-        install_channel = os.environ.get("VONK_INSTALL_CHANNEL", "").strip()
-        if install_channel not in {"dev", "stable"}:
-            if install_channel:
-                _LOGGER.warning(
-                    "unknown VONK_INSTALL_CHANNEL %r; using stable", install_channel
-                )
-            install_channel = "stable"
+        install_channel = install_channel_from_env()
         release = os.environ.get("VONK_RECIPE_LIBRARY_RELEASE", "").strip()
         if release != "latest" and _RELEASE_TAG.fullmatch(release) is None:
             if release:

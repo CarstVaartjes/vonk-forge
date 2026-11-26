@@ -47,7 +47,7 @@ jobs:
         uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version-file: .tool-versions
-          python-version: "3.14"
+          python-version: "3.15"
           enable-cache: true
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/ci-apt-install rclone
+          scripts/ci/ci-apt-install rclone
 
       - name: Detect published channel
         id: availability
@@ -133,7 +133,7 @@ jobs:
           openssl pkey -pubin -in "$public_key" -text -noout \
             | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
           scripts/build-control-wheel
-          uv run --project control --frozen python scripts/install-release-publication refresh \
+          uv run --project control --frozen python scripts/release/install-release-publication refresh \
             --channel "$CHANNEL" \
             --expires-at "$(($(date +%s) + 604800))" \
             --signing-key "$signing_key" \
@@ -181,7 +181,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n "$CHILD_ID" ]]; then
-            python scripts/tailscale-acceptance-tailnet cleanup --id "$CHILD_ID"
+            python scripts/ci/tailscale-acceptance-tailnet cleanup --id "$CHILD_ID"
           else
-            python scripts/tailscale-acceptance-tailnet cleanup
+            python scripts/ci/tailscale-acceptance-tailnet cleanup
           fi

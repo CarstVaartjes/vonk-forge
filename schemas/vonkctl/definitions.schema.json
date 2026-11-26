@@ -1879,6 +1879,7 @@
         "3d-generation",
         "audio-generation",
         "audio-understanding",
+        "background-removal",
         "chat",
         "code-generation",
         "decision",
@@ -1893,6 +1894,7 @@
         "parametric-body-model",
         "person-detection",
         "reasoning",
+        "retopology",
         "speculative-decoding",
         "speech-recognition",
         "text-generation",
@@ -13355,6 +13357,7 @@
     "ProfileReasonCode": {
       "description": "Reasons a fleet profile cannot be applied or is waiting.",
       "enum": [
+        "profile.alias_taken",
         "profile.admission_busy",
         "profile.admission_defect",
         "profile.admission_effect_busy",
@@ -13509,6 +13512,7 @@
         "profile.retrying",
         "recipe.update_available",
         "run.degraded",
+        "run.not-progressing",
         "telemetry.delayed",
         "telemetry.missing",
         "telemetry.stale"

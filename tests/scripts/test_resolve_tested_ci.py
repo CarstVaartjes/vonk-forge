@@ -16,7 +16,7 @@ REPO = "owner/repo"
 
 def module():
     loader = importlib.machinery.SourceFileLoader(
-        "tested_ci", str(ROOT / "scripts/resolve-tested-ci")
+        "tested_ci", str(ROOT / "scripts/ci/resolve-tested-ci")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec

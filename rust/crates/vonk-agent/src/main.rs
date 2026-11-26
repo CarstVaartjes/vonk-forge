@@ -833,8 +833,11 @@ async fn run_inventory_lane(
                 inventory.nas_route_interface = evidence.nas_route_interface;
                 if let Some(host) = inventory.host_settings.as_mut() {
                     host.memory_fragmentation = memory.snapshot();
-                    host.fabric_devices = traffic
-                        .observe(Path::new("/sys/class/infiniband"));
+                    host.fabric_devices = vonk_agent::fabric_traffic::observe_bounded(
+                        traffic,
+                        PathBuf::from("/sys/class/infiniband"),
+                    )
+                    .await;
                 }
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();

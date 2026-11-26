@@ -5,6 +5,8 @@ import importlib.util
 import io
 import json
 import os
+import re
+import runpy
 import shlex
 import stat
 import struct
@@ -19,8 +21,21 @@ import pytest
 pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
 
 ROOT = Path(__file__).resolve().parents[2]
-BUILD = ROOT / "scripts/build-agent-deb"
-VERIFY = ROOT / "scripts/verify-agent-deb"
+VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"][
+    "version"
+]
+
+
+def baseline_version(sha12: str) -> str:
+    """The acceptance baseline for this workspace, from the rule's owner."""
+
+    owner = runpy.run_path(str(ROOT / "scripts/agent/agent-package-metadata"))
+    return owner["acceptance_baseline_version"](VERSION, sha12)
+
+
+BASELINE_SEMANTIC = baseline_version("0" * 12).split("~")[0]
+BUILD = ROOT / "scripts/agent/build-agent-deb"
+VERIFY = ROOT / "scripts/agent/verify-agent-deb"
 POSTRM = ROOT / "packaging/debian/postrm"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
 PACKAGE_BINARIES = (
@@ -66,7 +81,7 @@ def _elf_fixture(path: Path, marker: bytes, architecture: str = "linux-arm64") -
     raw[64 : 64 + len(marker)] = marker
     identity_marker = f"VONK_AGENT_BUILD_DIGEST={BUILD_DIGEST}".encode()
     raw[128 : 128 + len(identity_marker)] = identity_marker
-    semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.1"
+    semantic_marker = f"VONK_AGENT_SEMANTIC_VERSION={VERSION}".encode()
     raw[256 : 256 + len(semantic_marker)] = semantic_marker
     if path.name in {"vonk-build-egress", "vonk-runtime-probe"}:
         struct.pack_into("<Q", raw, 32, 320)
@@ -115,7 +130,7 @@ def _build(
     output: Path,
     binaries: Path,
     key: Path,
-    version: str = "0.1.1",
+    version: str = VERSION,
     architecture: str = "linux-arm64",
     acceptance_baseline: bool = False,
 ) -> subprocess.CompletedProcess[str]:
@@ -235,7 +250,7 @@ def _unsealed_build(output: Path, binaries: Path) -> subprocess.CompletedProcess
         [
             BUILD,
             "--version",
-            "0.1.1",
+            VERSION,
             "--architecture",
             "linux-arm64",
             "--build-digest",
@@ -258,7 +273,7 @@ def _unsealed_build(output: Path, binaries: Path) -> subprocess.CompletedProcess
 def _seal(unsealed: Path, key: Path, output: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
-            ROOT / "scripts/seal-agent-deb",
+            ROOT / "scripts/agent/seal-agent-deb",
             "--unsealed",
             unsealed,
             "--release-private-key",
@@ -298,8 +313,8 @@ def test_sealing_the_unsealed_build_is_exactly_the_keyed_build(tmp_path: Path) -
     assert _build(keyed, binaries, key).returncode == 0
     result = _unsealed_build(unsealed_dir, binaries)
     assert result.returncode == 0, result.stderr
-    unsealed = unsealed_dir / "vonk-forge-agent_0.1.1_arm64.unsealed.deb"
-    package_name = "vonk-forge-agent_0.1.1_arm64.deb"
+    unsealed = unsealed_dir / f"vonk-forge-agent_{VERSION}_arm64.unsealed.deb"
+    package_name = f"vonk-forge-agent_{VERSION}_arm64.deb"
     assert not (unsealed_dir / package_name).exists()
     trust = {
         "usr/lib/vonk-forge/release/artifact.sig",
@@ -333,14 +348,15 @@ def test_main_recovers_exactly_the_packages_a_pull_request_accepted(
     agent.chmod(0o755)
     agent.write_bytes(
         agent.read_bytes().replace(
-            b"VONK_AGENT_SEMANTIC_VERSION=0.1.1", b"VONK_AGENT_SEMANTIC_VERSION=0.1.0"
+            f"VONK_AGENT_SEMANTIC_VERSION={VERSION}".encode(),
+            f"VONK_AGENT_SEMANTIC_VERSION={BASELINE_SEMANTIC}".encode(),
         )
     )
     agent.chmod(0o555)
     key = tmp_path / "pull-request.pem"
     _release_key(key)
-    version = "0.1.1~dev.1792000000+gabcdefabcdef"
-    baseline = "0.1.0~acceptance.1+gabcdefabcdef"
+    version = f"{VERSION}~dev.1792000000+gabcdefabcdef"
+    baseline = baseline_version("abcdefabcdef")
     pr = tmp_path / "pr"
     assert _build(pr / "package", binaries, key, version=version).returncode == 0
     assert (
@@ -354,7 +370,7 @@ def test_main_recovers_exactly_the_packages_a_pull_request_accepted(
         == 0
     )
     result = subprocess.run(
-        [ROOT / "scripts/reuse-agent-packages", pr, tmp_path / "unsealed"],
+        [ROOT / "scripts/agent/reuse-agent-packages", pr, tmp_path / "unsealed"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -397,10 +413,10 @@ def test_main_recovers_exactly_the_packages_a_pull_request_accepted(
         ).read_bytes()
 
     (pr / "package" / f"vonk-forge-agent_{version}_arm64.deb").rename(
-        pr / "package" / "vonk-forge-agent_0.1.1_arm64.deb"
+        pr / "package" / f"vonk-forge-agent_{VERSION}_arm64.deb"
     )
     refused = subprocess.run(
-        [ROOT / "scripts/reuse-agent-packages", pr, tmp_path / "refused"],
+        [ROOT / "scripts/agent/reuse-agent-packages", pr, tmp_path / "refused"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -411,7 +427,13 @@ def test_main_recovers_exactly_the_packages_a_pull_request_accepted(
 
 def _unseal(sealed: Path, output: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [ROOT / "scripts/seal-agent-deb", "--sealed", sealed, "--output-dir", output],
+        [
+            ROOT / "scripts/agent/seal-agent-deb",
+            "--sealed",
+            sealed,
+            "--output-dir",
+            output,
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -428,20 +450,21 @@ def test_unsealing_recovers_exactly_what_any_key_sealed(tmp_path: Path) -> None:
     for name in PACKAGE_BINARIES:
         _aarch64_fixture(binaries / name, name.encode())
     assert _unsealed_build(tmp_path / "unsealed", binaries).returncode == 0
-    unsealed = tmp_path / "unsealed/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    unsealed = tmp_path / f"unsealed/vonk-forge-agent_{VERSION}_arm64.unsealed.deb"
     recovered = []
     for name in ("pull-request", "production"):
         key = tmp_path / f"{name}.pem"
         _release_key(key)
         assert _seal(unsealed, key, tmp_path / name).returncode == 0
         result = _unseal(
-            tmp_path / name / "vonk-forge-agent_0.1.1_arm64.deb",
+            tmp_path / name / f"vonk-forge-agent_{VERSION}_arm64.deb",
             tmp_path / f"{name}-recovered",
         )
         assert result.returncode == 0, result.stderr
         recovered.append(
             (
-                tmp_path / f"{name}-recovered/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+                tmp_path
+                / f"{name}-recovered/vonk-forge-agent_{VERSION}_arm64.unsealed.deb"
             ).read_bytes()
         )
     assert recovered == [unsealed.read_bytes()] * 2
@@ -457,18 +480,18 @@ def test_unsealing_refuses_unsealed_input_and_exposes_any_other_change(
     key = tmp_path / "release.pem"
     _release_key(key)
     assert _unsealed_build(tmp_path / "unsealed", binaries).returncode == 0
-    unsealed = tmp_path / "unsealed/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    unsealed = tmp_path / f"unsealed/vonk-forge-agent_{VERSION}_arm64.unsealed.deb"
     assert _unseal(unsealed, tmp_path / "refused").returncode != 0
     # A package built from other bytes never unseals to the accepted package.
     (binaries / "vonk-monitor").unlink()
     _aarch64_fixture(binaries / "vonk-monitor", b"another monitor")
     assert _build(tmp_path / "other", binaries, key).returncode == 0
     result = _unseal(
-        tmp_path / "other/vonk-forge-agent_0.1.1_arm64.deb", tmp_path / "recovered"
+        tmp_path / f"other/vonk-forge-agent_{VERSION}_arm64.deb", tmp_path / "recovered"
     )
     assert result.returncode == 0, result.stderr
     assert (
-        tmp_path / "recovered/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+        tmp_path / f"recovered/vonk-forge-agent_{VERSION}_arm64.unsealed.deb"
     ).read_bytes() != unsealed.read_bytes()
 
 
@@ -484,7 +507,7 @@ def test_an_unsealed_package_is_never_accepted_and_never_sealed_twice(
     key = tmp_path / "release.pem"
     _release_key(key)
     assert _unsealed_build(tmp_path / "unsealed", binaries).returncode == 0
-    unsealed = tmp_path / "unsealed/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    unsealed = tmp_path / f"unsealed/vonk-forge-agent_{VERSION}_arm64.unsealed.deb"
     verified = subprocess.run(
         [VERIFY, "--json", unsealed],
         cwd=ROOT,
@@ -496,7 +519,7 @@ def test_an_unsealed_package_is_never_accepted_and_never_sealed_twice(
     assert _build(tmp_path / "keyed", binaries, key).returncode == 0
     resealed = tmp_path / "resealed.unsealed.deb"
     resealed.write_bytes(
-        (tmp_path / "keyed/vonk-forge-agent_0.1.1_arm64.deb").read_bytes()
+        (tmp_path / f"keyed/vonk-forge-agent_{VERSION}_arm64.deb").read_bytes()
     )
     refused = _seal(resealed, key, tmp_path / "out")
     assert refused.returncode != 0
@@ -519,7 +542,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
 
     assert first_result.returncode == 0, first_result.stderr
     assert second_result.returncode == 0, second_result.stderr
-    package_name = "vonk-forge-agent_0.1.1_arm64.deb"
+    package_name = f"vonk-forge-agent_{VERSION}_arm64.deb"
     first_deb = first / package_name
     second_deb = second / package_name
     assert first_deb.read_bytes() == second_deb.read_bytes()
@@ -530,8 +553,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         == f"{hashlib.sha256(first_deb.read_bytes()).hexdigest()}  {package_name}"
     )
     package_signature = (first / f"{package_name}.host.sig").read_text().strip()
-    assert len(package_signature) == 128
-    assert all(character in "0123456789abcdef" for character in package_signature)
+    assert re.fullmatch(r"[0-9a-f]{128}", package_signature)
     public_key = tmp_path / "release.pub"
     signature = tmp_path / "package.sig"
     claims = tmp_path / "package.claims"
@@ -788,7 +810,7 @@ def test_builder_and_verifier_make_each_architecture_a_real_package_output(
     built = _build(output, binaries, key, architecture=architecture)
 
     assert built.returncode == 0, built.stderr
-    package = output / f"vonk-forge-agent_0.1.1_{debian_architecture}.deb"
+    package = output / f"vonk-forge-agent_{VERSION}_{debian_architecture}.deb"
     assert package.is_file()
     verified = subprocess.run(
         [VERIFY, "--json", package],
@@ -845,14 +867,14 @@ def test_builder_allows_only_an_explicit_lower_acceptance_baseline(
     agent.chmod(0o755)
     agent.write_bytes(
         agent.read_bytes().replace(
-            b"VONK_AGENT_SEMANTIC_VERSION=0.1.1",
-            b"VONK_AGENT_SEMANTIC_VERSION=0.1.0",
+            f"VONK_AGENT_SEMANTIC_VERSION={VERSION}".encode(),
+            f"VONK_AGENT_SEMANTIC_VERSION={BASELINE_SEMANTIC}".encode(),
         )
     )
     agent.chmod(0o555)
     key = tmp_path / "release.pem"
     _release_key(key)
-    version = "0.1.0~acceptance.1+g0123456789ab"
+    version = baseline_version("0123456789ab")
 
     result = _build(
         tmp_path / "dist",
@@ -905,7 +927,7 @@ def test_builder_rejects_a_build_digest_that_is_not_embedded_in_the_agent(
         [
             BUILD,
             "--version",
-            "0.1.1",
+            VERSION,
             "--architecture",
             "linux-arm64",
             "--build-digest",
@@ -940,7 +962,7 @@ def test_builder_rejects_an_agent_with_a_different_embedded_semantic_version(
     agent.chmod(0o755)
     agent.write_bytes(
         agent.read_bytes().replace(
-            b"VONK_AGENT_SEMANTIC_VERSION=0.1.1",
+            f"VONK_AGENT_SEMANTIC_VERSION={VERSION}".encode(),
             b"VONK_AGENT_SEMANTIC_VERSION=9.9.9",
         )
     )
@@ -1028,7 +1050,7 @@ def test_verifier_rejects_tampered_release_sidecar(tmp_path: Path) -> None:
     output = tmp_path / "dist"
     result = _build(output, binaries, key)
     assert result.returncode == 0, result.stderr
-    deb = output / "vonk-forge-agent_0.1.1_arm64.deb"
+    deb = output / f"vonk-forge-agent_{VERSION}_arm64.deb"
     (output / f"{deb.name}.sha256").write_text(f"{'0' * 64}  {deb.name}\n")
 
     verified = subprocess.run(
@@ -1053,7 +1075,7 @@ def test_verifier_rejects_tampered_host_package_signature(tmp_path: Path) -> Non
     output = tmp_path / "dist"
     result = _build(output, binaries, key)
     assert result.returncode == 0, result.stderr
-    deb = output / "vonk-forge-agent_0.1.1_arm64.deb"
+    deb = output / f"vonk-forge-agent_{VERSION}_arm64.deb"
     (output / f"{deb.name}.host.sig").write_text(f"{'0' * 128}\n")
 
     verified = subprocess.run(
@@ -1109,7 +1131,7 @@ def test_builder_accepts_exact_derived_development_version(tmp_path: Path) -> No
         _aarch64_fixture(binaries / name, name.encode())
     key = tmp_path / "release.pem"
     _release_key(key)
-    version = "0.1.1~dev.1786300000+g0123456789ab"
+    version = f"{VERSION}~dev.1786300000+g0123456789ab"
 
     result = _build(tmp_path / "dist", binaries, key, version)
 

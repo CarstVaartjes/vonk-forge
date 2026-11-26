@@ -247,8 +247,13 @@ or equality between two manually written fixtures is insufficient.
 ## Rust and generated clients
 
 The server never imports vonkctl. The Controller owns the document bound
-(`vonk_control.control_limits`); `scripts/generate-control-clients` writes
-`generated_control/limits.py` for the CLI beside `media_types.py`. The
+(`vonk_control.control_limits`); `scripts/dev/generate-control-clients` writes
+`generated_control/limits.py` for the CLI beside `media_types.py`. The CLI's
+copy (`src/cluster_profiles/schemas/control-openapi.json`) and the Python client
+are generated from the admin contract with the closed response sets vonkctl
+only shows opened to any word (`cluster_profiles.control_client.shown_words`);
+`control/openapi.json` and the TypeScript client stay exact. See
+[error reporting](error-reporting.md) for which sets stay closed. The
 Controller reads its own `build-identity.json` from the image, which
 `tools/stamp_build_identity.py` writes; the Dockerfile's `server-identity` stage
 and the CLI wheel hook run that one writer. The CLI keeps its own stdlib
@@ -262,7 +267,7 @@ and requires its `control_contract_sha256` to equal the served
 Rust wire structs and enums are generated from the authoritative Pydantic
 models by the `vonk-wire-codegen` renderer, using pinned typify 0.8.0. Cargo's
 `build.rs` exports the validation schema and generates declarations into
-`OUT_DIR`; `scripts/generate-agent-wire` invokes the same renderer for local
+`OUT_DIR`; `scripts/dev/generate-agent-wire` invokes the same renderer for local
 contract checks. The exporter reads only `vonk_agent_protocol`: the models of
 the `/agent/` routes (grant requests, the bounded error envelope, the
 capability-unavailable and enrollment-observation replies) are defined there, and
@@ -351,7 +356,7 @@ used to validate that body.
 Work claiming takes due operations in creation order; authority, lease and
 concurrent-mutation checks still apply.
 
-`scripts/generate-control-clients` derives the Controller OpenAPI document and
+`scripts/dev/generate-control-clients` derives the Controller OpenAPI document and
 Python/TypeScript clients from the actual API. Never fix drift by hand-editing
 generated clients or weakening their schema. Rust wire compatibility requires
 tests that serialize actual producer values and pass them to the other
@@ -455,9 +460,9 @@ The closed words of the lifecycle core and of an agent's result have one
 definition: `agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py`
 (states, effects, outcome kinds, event kinds, operator actions, wait reasons,
 failure codes, the security-refusal and invalid-request reason codes, the error
-categories, and the typed outcome categories). `scripts/generate-agent-wire`
+categories, and the typed outcome categories). `scripts/dev/generate-agent-wire`
 carries them into `wire.json` and the Rust declarations, and
-`scripts/generate-control-clients` into the OpenAPI document, the generated
+`scripts/dev/generate-control-clients` into the OpenAPI document, the generated
 TypeScript types and the runtime constants in
 `control/web/src/api/vocabulary.generated.ts`. `vonk_control/lifecycle/types.py`,
 the adapters, `failures.classification` and the syntax guards import them;
@@ -541,6 +546,7 @@ machines in `agent_protocol/src/vonk_agent_protocol/state_machines.py`: the
 installation and its ranks (`InstallationState`, `InstallationNodeState`), the
 distribution assignment (`DistributionAssignmentState`), the run and its route
 (`RunState`, `RouteState`, `RoutePublicationState`, `GatewayRouteState`), the
+external model deployment (`ExternalPublicationState`), the
 fleet-profile endpoint and observed assignment (`EndpointState`,
 `ObservedAssignmentState`, `DesiredAssignmentState`), and the certificate,
 enrollment grant, model file, asset availability, catalog sync, reservation and

@@ -1,0 +1,410 @@
+#!/usr/bin/env python3
+"""Find accepted release evidence a development producer can reuse.
+
+The release workflow runs a producer only when no earlier release run already
+produced it from identical inputs. Every release run records each producer it
+completed with a small ``release-producer-<name>`` marker artifact; this looks
+up the newest marker on an ancestor of the source whose producer paths are
+unchanged and whose producer artifacts are still available.
+
+Exit 0 prints run ID, run number and producer source SHA; 2 means the producer
+must run for this source; 1 rejects invalid input or unreadable evidence.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import json
+import os
+import re
+import subprocess
+import sys
+from enum import StrEnum
+from typing import NamedTuple, Required, TypedDict, cast
+
+RELEASE_WORKFLOW = ".github/workflows/installer-publication.yml"
+RELEASE_EVENTS = {"push", "workflow_dispatch"}
+SETUP_PLATFORMS = ("nas", "linux-arm64")
+SHA = re.compile(r"[a-f0-9]{40}\Z")
+PAGE_SIZE = 100
+# Every producer is rebuilt when the release graph or this reuse rule changes.
+ORCHESTRATION = (
+    RELEASE_WORKFLOW,
+    "scripts/ci/resolve-publication-producer",
+    ".tool-versions",
+)
+PROTOCOL_WHEEL_INPUTS = (
+    "scripts/release/protocol-wheel-name",
+    "scripts/release/protocol_wheel.py",
+)
+
+
+class ProducerName(StrEnum):
+    """The development producers a release builds or reuses."""
+
+    AGENT = "agent"
+    IMAGES = "images"
+    SETUPS = "setups"
+
+
+class Producer(NamedTuple):
+    paths: tuple[str, ...]
+    artifacts: tuple[str, ...]
+
+    def artifact_names(self, sha: str) -> set[str]:
+        return {name.format(sha=sha) for name in self.artifacts}
+
+
+PRODUCERS = {
+    # Exactly the files the agent and apt jobs read: the workspace crates
+    # (cargo test --workspace), their build-script and include inputs, and what
+    # agent-release.yml, its local actions and the scripts they run name.
+    # tests/scripts/test_resolve_publication_producer.py holds this equality.
+    ProducerName.AGENT: Producer(
+        paths=(
+            *ORCHESTRATION,
+            ".github/actions/agent-apt-publish/**",
+            ".github/actions/agent-package-build/**",
+            ".github/actions/agent-package-compile/**",
+            ".github/actions/agent-package-security/**",
+            ".github/workflows/agent-release.yml",
+            "Cargo.lock",
+            "Cargo.toml",
+            "packaging/bin/vonk-forge-docker-firewall",
+            "packaging/config/containers-storage.conf",
+            "packaging/debian/**",
+            "packaging/systemd/**",
+            "rust/crates/vonk-agent/**",
+            "rust/crates/vonk-monitor/**",
+            "rust/crates/vonk-agent-helper/**",
+            "rust/crates/vonk-agent-protocol/**",
+            "rust/crates/vonk-build-egress/**",
+            "scripts/agent/agent-apt-metadata",
+            "scripts/agent/agent-apt-state",
+            "scripts/agent/agent-package-metadata",
+            "scripts/agent/agent-package-versions",
+            "scripts/agent/reuse-agent-packages",
+            "scripts/agent/seal-agent-deb",
+            "scripts/release/sign-package-keyless",
+            "scripts/images/dev-publication-sequence",
+            "scripts/agent/build-agent-deb",
+            "scripts/agent/materialize-agent-tools",
+            "scripts/agent/test-agent-package-native-lifecycle",
+            "tests/acceptance/fixtures/nvidia-smi.sh",
+            "tests/scripts/conftest.py",
+            "tests/scripts/test_agent_deb.py",
+            "tests/scripts/test_docker_firewall.sh",
+            "scripts/agent/verify-agent-binaries",
+            ".github/actions/protocol-env/**",
+            "agent_protocol/fixtures/**",
+            "agent_protocol/pyproject.toml",
+            "agent_protocol/src/**",
+            "agent_protocol/tests/fixtures/catalog-launch/**",
+            "agent_protocol/tests/fixtures/compiled-execution-plan-v2.json",
+            "agent_protocol/tests/fixtures/http_status_dispositions.json",
+            "agent_protocol/tests/fixtures/runtime_scan_cutoffs.json",
+            "uv.lock",
+            "control/pyproject.toml",
+            "nas_setup/pyproject.toml",
+            "control/src/vonk_control/resources/site-ports.json",
+            "control/src/vonk_control/settings.py",
+            "scripts/agent/verify-agent-deb",
+            "scripts/agent/verify-agent-systemd",
+            "scripts/release/verify-release-tag-authority",
+            ".github/actions/agent-package-seal/**",
+            "control/tests/fixtures/compiled_plan_751.json",
+            "control/tests/fixtures/compiled_workload_v2.json",
+            "control/tests/fixtures/stored_installation_33dc45f0.json",
+            "install/installer-release-public.pem",
+            "pyproject.toml",
+            "rust-toolchain.toml",
+            "rust/crates/vonk-spark-setup/**",
+            "rust/crates/vonk-wire-codegen/**",
+            "scripts/dev/check_environment.py",
+            "scripts/ci/ci-apt-install",
+            "scripts/dev/export-agent-wire-schema",
+            "scripts/ci/retry-dependency-fetch",
+            "scripts/ci/retry_dependency_fetch.py",
+            "tests/nodes/test_agent_package_native_lifecycle.sh",
+        ),
+        artifacts=(
+            "vonk-agent-development-{sha}",
+            "vonk-agent-development-{sha}-acceptance-baseline",
+        ),
+    ),
+    # Exactly the files the image job reads: the Dockerfile COPY sources, the
+    # isolated LiteLLM contexts and policy (scripts/images/dev-image-inputs),
+    # and what .github/workflows/dev-images.yml names. Tests are not inputs.
+    # tests/scripts/test_resolve_publication_producer.py holds this equality.
+    ProducerName.IMAGES: Producer(
+        paths=(
+            *ORCHESTRATION,
+            ".dockerignore",
+            ".github/actions/free-runner-disk/**",
+            ".github/actions/image-scan/**",
+            ".github/actions/image-security/**",
+            ".github/workflows/dev-images.yml",
+            "agent_protocol/pyproject.toml",
+            "agent_protocol/src/**",
+            "control/Dockerfile",
+            "control/alembic.ini",
+            "control/migrations/**",
+            "control/openapi-python-client.yaml",
+            "control/packaging/public-contracts.lock",
+            "control/pyproject.toml",
+            "control/src/**",
+            "control/web/**",
+            "deploy/compose/Caddyfile",
+            "deploy/compose/caddy/entrypoint.sh",
+            "deploy/compose/compose.yaml",
+            "deploy/compose/litellm/**",
+            "deploy/compose/python-bootstrap.lock",
+            "deploy/compose/uv-bootstrap.lock",
+            "deploy/compose/postgres/**",
+            "deploy/compose/prometheus/**",
+            "deploy/compose/tailscale/compose.yaml",
+            "deploy/compose/tailscale/configure.sh",
+            "deploy/compose/tests/test.env",
+            "install/installer-release-public.pem",
+            "inventory/wheels/vonk_forge_public_contracts-5.7.0-py3-none-any.whl",
+            "nas_setup/hatch_build.py",
+            "nas_setup/pyproject.toml",
+            "nas_setup/src/**",
+            "pyproject.toml",
+            "uv.lock",
+            "schemas/install-release-manifest.schema.json",
+            "scripts/images/accept-development-image-archive",
+            "scripts/build-control-wheel",
+            *PROTOCOL_WHEEL_INPUTS,
+            "scripts/dev/check_environment.py",
+            "scripts/dev/ensure-project-venv",
+            "scripts/ci/ci-apt-install",
+            "scripts/images/dev-image-acceptance-receipt",
+            "scripts/images/dev-image-inputs",
+            "scripts/images/dev-image-metadata",
+            "scripts/dev/export-agent-wire-schema",
+            "scripts/dev/generate-control-clients",
+            "scripts/release/image_policy.py",
+            "scripts/images/publish-immutable-image",
+            "scripts/ci/pull-test-images",
+            "scripts/release/render-dev-compose",
+            "scripts/ci/retry-dependency-fetch",
+            "scripts/ci/retry_dependency_fetch.py",
+            "scripts/images/reuse-development-image",
+            "scripts/images/reuse-pr-candidate-images",
+            "scripts/images/reuse-pr-image-security",
+            "scripts/images/verify-litellm-base-signature",
+            "scripts/images/verify-multiarch-image-manifest",
+            "scripts/images/verify-public-image-inputs",
+            "scripts/images/verify-published-image",
+            "src/cluster_profiles/**",
+            "tools/hatch_build.py",
+            "tools/stamp_build_identity.py",
+            "tools/openapi-client/**",
+        ),
+        artifacts=("vonk-forge-dev-compose-{sha}",),
+    ),
+    # Exactly the files the setup jobs read: vonk-spark-setup and its path
+    # dependencies with their build-script and include inputs, the NAS wheel
+    # project, and what installer-setups.yml and its local actions name.
+    ProducerName.SETUPS: Producer(
+        paths=(
+            *ORCHESTRATION,
+            ".github/workflows/installer-setups.yml",
+            "Cargo.lock",
+            "Cargo.toml",
+            "nas_setup/**",
+            ".github/actions/python-env/**",
+            "uv.lock",
+            "rust-toolchain.toml",
+            "scripts/ci/retry-dependency-fetch",
+            "scripts/ci/retry_dependency_fetch.py",
+            "agent_protocol/fixtures/**",
+            "agent_protocol/pyproject.toml",
+            "agent_protocol/src/**",
+            "agent_protocol/tests/fixtures/catalog-launch/**",
+            "agent_protocol/tests/fixtures/compiled-execution-plan-v2.json",
+            "rust/crates/vonk-agent-protocol/**",
+            "rust/crates/vonk-wire-codegen/**",
+            "control/src/vonk_control/resources/site-ports.json",
+            "scripts/dev/export-agent-wire-schema",
+            "scripts/dev/check_environment.py",
+            "scripts/release/verify-nas-setup-wheel",
+            "scripts/release/nas_setup_wheel.py",
+            "install/installer-release-public.pem",
+            "rust/crates/vonk-spark-setup/**",
+            "scripts/tests/run_installer_pty_recovery.sh",
+            "control/tests/fixtures/compiled_workload_v2.json",
+            "control/tests/fixtures/stored_installation_33dc45f0.json",
+        ),
+        artifacts=tuple(
+            f"installer-setup-{{sha}}-{platform}" for platform in SETUP_PLATFORMS
+        ),
+    ),
+}
+
+
+def marker_name(producer: str) -> str:
+    return f"release-producer-{producer}"
+
+
+def run(*args: str) -> str:
+    return subprocess.check_output(args, text=True, timeout=60).strip()
+
+
+class GitHubRunRef(TypedDict, total=False):
+    """The run an artifact came from: the fields this script reads."""
+
+    id: int
+    head_sha: str
+    head_branch: str
+
+
+class GitHubArtifact(TypedDict, total=False):
+    """A listed Actions artifact: the fields this script reads."""
+
+    name: Required[str]
+    expired: bool
+    workflow_run: GitHubRunRef
+
+
+class GitHubDocument(TypedDict, total=False):
+    """An artifact listing or a run record: the fields this script reads.
+
+    Only the listing endpoints carry ``artifacts``; the run record carries the rest.
+    """
+
+    artifacts: Required[list[GitHubArtifact]]
+    path: str
+    head_branch: str
+    event: str
+    head_sha: str
+    run_number: int
+
+
+def api(endpoint: str) -> GitHubDocument:
+    document = json.loads(run("gh", "api", endpoint))
+    if not isinstance(document, dict):
+        raise TypeError("unexpected API response")
+    # Each field is re-checked where it is read.
+    return cast(GitHubDocument, document)
+
+
+def changed_matches(base: str, source: str, patterns: tuple[str, ...]) -> bool:
+    # Disable rename detection: both the removed source and added destination
+    # are inputs, even when Git recognizes their contents as one renamed file.
+    names = run("git", "diff", "--name-only", "--no-renames", base, source).splitlines()
+    # fnmatch is deliberately conservative: '*' may match '/' here, selecting
+    # extra work rather than silently reusing a changed producer.
+    return any(
+        fnmatch.fnmatchcase(name, pattern) for name in names for pattern in patterns
+    )
+
+
+def is_ancestor(base: str, source: str) -> bool:
+    status = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", base, source],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=30,
+        check=False,
+    ).returncode
+    if status not in {0, 1}:
+        raise ValueError("cannot establish producer ancestry")
+    return status == 0
+
+
+def available_artifacts(repo: str, run_id: int) -> set[str]:
+    names: set[str] = set()
+    page = 1
+    while True:
+        artifacts = api(
+            f"repos/{repo}/actions/runs/{run_id}/artifacts"
+            f"?per_page={PAGE_SIZE}&page={page}"
+        )["artifacts"]
+        names.update(
+            artifact["name"] for artifact in artifacts if not artifact.get("expired")
+        )
+        if len(artifacts) < PAGE_SIZE:
+            return names
+        page += 1
+
+
+def release_run_number(repo: str, run_id: int, base: str) -> int | None:
+    record = api(f"repos/{repo}/actions/runs/{run_id}")
+    run_number = record.get("run_number")
+    if (
+        record.get("path") == RELEASE_WORKFLOW
+        and record.get("head_branch") == "main"
+        and record.get("event") in RELEASE_EVENTS
+        and record.get("head_sha") == base
+        and isinstance(run_number, int)
+    ):
+        return run_number
+    return None
+
+
+def resolve(
+    producer: str, source: str, repo: str
+) -> tuple[int, tuple[int, int, str] | None]:
+    if producer not in PRODUCERS or not SHA.fullmatch(source):
+        raise ValueError("invalid producer identity")
+    spec = PRODUCERS[ProducerName(producer)]
+    marker = marker_name(producer)
+    page = 1
+    while True:
+        # The artifacts API lists the newest markers first.
+        markers = api(
+            f"repos/{repo}/actions/artifacts?name={marker}"
+            f"&per_page={PAGE_SIZE}&page={page}"
+        )["artifacts"]
+        for record in markers:
+            origin = record.get("workflow_run") or {}
+            base = origin.get("head_sha", "")
+            run_id = origin.get("id")
+            if (
+                record.get("expired")
+                or record.get("name") != marker
+                or origin.get("head_branch") != "main"
+                or not isinstance(run_id, int)
+                or not SHA.fullmatch(base)
+                or not is_ancestor(base, source)
+            ):
+                continue
+            # The newest ancestor that produced this evidence has different
+            # inputs, so an older one can only match after a revert: build.
+            if changed_matches(base, source, spec.paths):
+                return 2, None
+            if not spec.artifact_names(base) <= available_artifacts(repo, run_id):
+                continue
+            run_number = release_run_number(repo, run_id, base)
+            if run_number is not None:
+                return 0, (run_id, run_number, base)
+        if len(markers) < PAGE_SIZE:
+            return 2, None
+        page += 1
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        return 64
+    try:
+        status, evidence = resolve(
+            sys.argv[1], sys.argv[2], os.environ["GITHUB_REPOSITORY"]
+        )
+        if evidence is not None:
+            print(*evidence, sep="\t")
+        return status
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        subprocess.SubprocessError,
+        OSError,
+    ) as error:
+        print(f"producer evidence: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
