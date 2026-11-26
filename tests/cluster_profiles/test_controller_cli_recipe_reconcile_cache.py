@@ -446,6 +446,7 @@ def test_parser_exposes_current_singular_operator_roots_and_update() -> None:
     parser = cli._parser()
     assert set(_subparser_choices(parser)) == {
         "fleet",
+        "gateway",
         "job",
         "model",
         "recipe",
