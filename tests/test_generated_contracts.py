@@ -217,7 +217,6 @@ def test_only_shown_response_words_open() -> None:
         "title": "ShownCode",
         "type": "string",
         "minLength": 1,
-        "maxLength": 128,
     }
     # Decided by vonkctl, and authored by it in a request: both stay closed.
     assert schemas["LifecycleState"]["enum"] == ["queued"]

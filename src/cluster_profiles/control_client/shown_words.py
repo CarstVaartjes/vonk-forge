@@ -40,8 +40,9 @@ DECIDED_BY: frozenset[str] = frozenset(
     }
 )
 
-#: The schema of an opened word set: any non-empty word of a reason-code length.
-_SHOWN_WORD: dict[str, str | int] = {"type": "string", "minLength": 1, "maxLength": 128}
+#: The schema of an opened word set: any non-empty word. The response document
+#: bound (``MAX_CONTROL_DOCUMENT_BYTES``) already bounds its length.
+_SHOWN_WORD: dict[str, str | int] = {"type": "string", "minLength": 1}
 
 _REFERENCE = "#/components/schemas/"
 
