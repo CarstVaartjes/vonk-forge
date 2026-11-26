@@ -85,6 +85,23 @@ Repository and control shards use recent successful CI timing artifacts; missing
 stale, or invalid timings fall back to collection counts. Timing data affects only
 assignment, never whether a test is selected.
 
+## Stable preflight
+
+Before signing a `v*` tag, run the read-only preflight:
+
+```sh
+scripts/stable-preflight --repo CarstVaartjes/vonk-forge --tag vX.Y.Z --sha <sha>
+```
+
+It reads repository switches, the stable environments with their deployment
+policies, secret and variable name parity with the development twins, the
+owner reviewer, the tag against the workspace version, that `<sha>` is on main
+with a successful Release, the three `:dev-sha-<sha>` images with the same
+attestation flags `stable-release.yml` uses, and the release signers file. It
+prints every problem and exits 1 if any; it never writes GitHub or registry
+state. `--reviewer-environment installer-promotion-stable` selects the
+alternative reviewer placement. The checks are `tools/stable_preflight.py`.
+
 ## Local verification
 
 ```sh
