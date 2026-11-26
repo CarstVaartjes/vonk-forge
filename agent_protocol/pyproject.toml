@@ -34,4 +34,4 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 
 [tool.uv]
-required-version = ">=0.13.10"
+required-version = ">=0.13.7"
