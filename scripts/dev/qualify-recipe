@@ -153,6 +153,20 @@ class _Interface(Protocol):
     model_aliases: Sequence[str]
 
 
+class _RuntimeArgument(Protocol):
+    name: str
+    value: object
+    setting: str | None
+
+
+class _Runtime(Protocol):
+    arguments: Sequence[_RuntimeArgument]
+
+
+class _BoundSetting(Protocol):
+    value: object
+
+
 class _Recipe(Protocol):
     identity: _Identity
     models: Sequence[_ModelSelection]
@@ -160,6 +174,7 @@ class _Recipe(Protocol):
     validation: _Validation
     topology: _Topology
     interfaces: Sequence[_Interface]
+    runtime: _Runtime
     settings: object
 
     def with_option_choices(self, choices: Mapping[str, str]) -> _Recipe: ...
@@ -570,19 +585,24 @@ def _chat_api(recipe: _Recipe, library_root: Path) -> object | None:
     return block if isinstance(block, ChatApi) else None
 
 
-def _argument_value(recipe: _Recipe) -> Callable[[str], int | None] | None:
-    """The library contracts' integer reading of the recipe's runtime arguments, as launched.
-
-    A library whose contracts predate it yields none: the check is sent as declared.
-    """
-    try:
-        from vonk_forge_contracts.api_checks import (  # noqa: PLC0415 - optional: older library contracts lack it
-            integer_argument,
-        )
-    except ImportError:
-        return None
+def _argument_value(recipe: _Recipe) -> Callable[[str], int | None]:
+    """The integer a runtime argument of the recipe carries as launched, a setting binding resolved."""
     resolved = recipe.with_option_choices({})
-    return lambda name: integer_argument(resolved, name, resolved.settings)  # pyright: ignore[reportArgumentType]  # the library's RecipeDefinition, read through _Recipe
+    settings = resolved.settings
+
+    def value(name: str) -> int | None:
+        for argument in resolved.runtime.arguments:
+            if argument.name != name:
+                continue
+            raw = argument.value
+            if argument.setting is not None:
+                knobs: Mapping[str, _BoundSetting] = getattr(settings, "knobs", None) or {}
+                bound = knobs.get(argument.setting) or getattr(settings, argument.setting, None)
+                raw = getattr(bound, "value", None)
+            return raw if isinstance(raw, int) and not isinstance(raw, bool) else None
+        return None
+
+    return value
 
 
 def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Namespace) -> dict[str, object] | None:

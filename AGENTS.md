@@ -263,6 +263,17 @@ text of this section:
   `platform-features.json` and `.tool-versions` by path: move them only together with the recipes reader. Release acceptance runs the extracted
   bundle against the pinned library, and promotion writes its pointer last; see
   [Recipe-tools bundle](docs/runbooks/platform-release-publication.md#recipe-tools-bundle).
+- The public contracts are the attested wheel asset of one recipes release
+  (`control/packaging/public-contracts.lock`: `package`, `release`, `wheel`,
+  `sha256`; a uv `path` source to the committed wheel). Only
+  `scripts/dev/refresh-public-contracts` moves it: it verifies the wheel's
+  attestation at ingress and regenerates what the contract feeds; the build and
+  `verify-supply-chain` check the committed digest offline. The acceptance pin
+  (`tests/acceptance/recipe-library-revision.txt`) is its own input. At every
+  forge batch cut the merge captain runs
+  `scripts/dev/refresh-public-contracts --latest --acceptance-latest` and commits
+  any change as the batch's first commit
+  ([supply chain](docs/runbooks/supply-chain.md)).
 - `cross-repo-nightly.yml` validates the recipes `main` library with the published
   dev recipe-tools bundle every night (a red run is the drift alarm); `fuzz.yml` fuzzes
   the parsers in `rust/fuzz` (the fix adds one case to the parser's existing test).

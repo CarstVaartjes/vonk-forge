@@ -240,6 +240,11 @@ The pre-commit hook (`scripts/dev/check-staged-code`) also runs the CI added-lin
 guards on the staged diff, so a violation fails before push; it skips with a
 message only when a staged file also has unstaged edits.
 A plain path literal in a guard module, `scripts/ci/select-ci-areas` or a `tools/*.json` allowlist must name a path or the prefix of one (`tests/test_guard_paths_exist.py`); write guard scopes as plain full-path literals (composed or regex scopes are invisible to it), and move or delete the literal with the code.
+The public contracts are pinned to the attested wheel asset of one recipes release, never a git
+ref or a sibling checkout; `scripts/dev/refresh-public-contracts` is the one ingress that verifies
+its attestation, and the acceptance pin is its own input. At every forge batch cut the merge
+captain runs `scripts/dev/refresh-public-contracts --latest --acceptance-latest` and commits any
+change as the batch's first commit (docs/runbooks/supply-chain.md).
 `cross-repo-nightly.yml` validates the recipes `main` library with the published dev recipe-tools
 bundle every night, verified and run as recipes CI runs it; a red run is the drift alarm.
 Recipes CI validates with that signed per-channel bundle; its `platform-features.json` comes only

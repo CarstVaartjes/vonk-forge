@@ -47,5 +47,5 @@
       "$ref": "definitions.schema.json#/$defs/ObservedArtifactDownload"
     }
   ],
-  "title": "vonkctl observation document (schema_version 3)"
+  "title": "vonkctl observation document (schema_version 4)"
 }

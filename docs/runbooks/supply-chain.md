@@ -60,19 +60,45 @@ Dockerfile `FROM` lines equal the lock, then runs
 `cosign verify --key deploy/compose/trust/litellm-cosign.pub` on the locked
 base through `scripts/ci/retry-dependency-fetch`, failing closed. A workflow test
 requires that step, installed cosign and ordering before every LiteLLM build.
-To move the public-contracts pin, run
-`scripts/dev/refresh-public-contracts <recipes-commit>`. It builds the wheel from that
-commit and writes exactly: the revision in `control/pyproject.toml`;
-the workspace `uv.lock` (`uv lock`); `control/packaging/public-contracts.lock`;
-`tests/acceptance/recipe-library-revision.txt` (the library the suites and the
-profile-effect proof check out, which must equal the lock revision); the wheel in
-`inventory/wheels`; and the wheel name in `control/Dockerfile` and
-`scripts/ci/resolve-publication-producer`, failing if either does not name the old wheel.
+The public contracts are pinned to the contracts wheel of one recipes release,
+never to a git ref or a sibling checkout. Each recipes release `vX.Y.Z` carries
+`vonk_forge_public_contracts-X.Y.Z-py3-none-any.whl` as an immutable asset,
+attested by the recipes `publish.yml`. To move the pin, run
+`scripts/dev/refresh-public-contracts --latest` (or `--version X.Y.Z`). That run is
+the only ingress of the wheel: it downloads it and checks its attestation with
+`gh attestation verify --signer-workflow CarstVaartjes/vonk-forge-recipes/.github/workflows/publish.yml
+--source-ref refs/heads/main --deny-self-hosted-runners`, failing closed, and
+records its sha256. When the release's signed `recipe-library.tar` lists a
+`future-canary-index.json`, the tool streams the tar, verifies its `SHA256SUMS`
+the same way and copies the vector to
+`control/tests/fixtures/future-canary-index.json` only if its digest matches;
+a release without one leaves the fixture as it is. Nothing is written before
+every download verified. It then writes exactly:
+`control/packaging/public-contracts.lock` (`package`, `release`, `wheel`,
+`sha256`, nothing else); the wheel in `inventory/wheels`; the wheel name in
+`control/pyproject.toml` (a uv `path` source, so uv, the image and CI install
+the same reviewed bytes), `control/Dockerfile` and
+`scripts/ci/resolve-publication-producer`; the workspace `uv.lock` (`uv lock`);
+and the regenerated contract consumers (`scripts/dev/prepare-generated-contracts`,
+`schemas/vonkctl` and `scripts/dev/generate-python-vocabulary`). When the
+vonkctl schema regeneration refuses an incompatible change, raise that kind's
+version in `DOCUMENT_VERSIONS` and run the tool again.
 The wheels directory is git-ignored: stage the new wheel with `git add -f`.
-The lock owns the version; the verifier derives the wheel path and checks the
-Dockerfile names it, so no script or test carries a version literal. A recipes
-contract major is deployed consumer-first: pin the recipes commit here, deploy,
-then move the recipes `platform_ref`.
+The acceptance pin, `tests/acceptance/recipe-library-revision.txt` (the library
+the suites and the profile-effect proof check out), is its own input and need
+not match the lock: `--acceptance-revision SHA` or `--acceptance-latest` (the
+recipes `main` head) sets it, and without either it is left as it is.
+`--check` prints whether a newer release than the lock exists and writes nothing.
+The lock owns the version; the verifier derives the release, the wheel path and
+the uv source from it and checks the committed wheel bytes, `uv.lock` and the
+Dockerfile against the recorded digest, offline. A lock with any other key, such
+as a source `revision`, fails. A recipes contract major is deployed
+consumer-first: pin the release here, deploy, then move the recipes
+`platform_ref`.
+
+The merge captain's routine: at every forge batch cut, run
+`scripts/dev/refresh-public-contracts --latest --acceptance-latest` on the batch
+branch. If it changes anything, commit it as the batch's first commit.
 The verifier does not require
 generated inventory in the checkout. The
 protocol wheel and SPDX 2.3 files are build outputs. Generate release evidence
