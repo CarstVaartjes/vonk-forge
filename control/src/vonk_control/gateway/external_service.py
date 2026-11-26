@@ -15,6 +15,7 @@ import hashlib
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from math import ceil
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -26,6 +27,7 @@ from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.route_activation import (
     ROUTE_ACK_TIMEOUT_SECONDS,
     ROUTE_SHUTDOWN_SECONDS,
+    ROUTE_STARTUP_SECONDS,
 )
 from vonk_agent_protocol.state_machines import (
     ExternalPublicationState,
@@ -85,6 +87,7 @@ from vonk_control.models.gateway import (
     GatewayCredentialBinding,
     GatewayExternalDeployment,
 )
+from vonk_control.recipe_routes.shared import ROUTE_RECONCILE_SECONDS
 from vonk_control.waits.persisted import schedule_wait
 
 
@@ -553,10 +556,19 @@ def _effects(action: ExternalModelAction) -> list[ExternalEffect]:
 
 
 def _dark_seconds(action: ExternalModelAction) -> int:
-    """The longest a failing start of this change keeps local models down."""
+    """The longest a failing start of this change keeps local models down.
+
+    Per try: the failed generation waits out its acknowledgement, the next
+    reconcile pass comes a few seconds later, and the gateway restarts without the
+    entry (shutdown and startup, as the supervisor budgets them).
+    """
 
     if action in {ExternalModelAction.PUT, ExternalModelAction.ENABLE}:
-        return START_FAILURE_LIMIT * ROUTE_ACK_TIMEOUT_SECONDS
+        return START_FAILURE_LIMIT * (
+            ROUTE_ACK_TIMEOUT_SECONDS
+            + ceil(ROUTE_RECONCILE_SECONDS)
+            + ROUTE_STARTUP_SECONDS
+        )
     return 0
 
 

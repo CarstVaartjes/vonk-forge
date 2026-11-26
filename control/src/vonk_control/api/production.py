@@ -84,6 +84,7 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.recipe_routes.shared import ROUTE_RECONCILE_SECONDS
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runs.admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.preparation import (
@@ -174,7 +175,7 @@ async def _keep_recipe_routes(
     gateway_keys: GatewayKeyService,
     stop: asyncio.Event,
     *,
-    interval_seconds: float = 5.0,
+    interval_seconds: float = ROUTE_RECONCILE_SECONDS,
 ) -> None:
     """Recover route/grant effects from durable intent independently of catalog sync."""
 

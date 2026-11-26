@@ -32,6 +32,7 @@ from vonk_control.recipe_routes.shared import (
     _LOGGER,
     _WITHDRAWAL_ATTEMPTS,
     _WITHDRAWAL_BACKOFF_SECONDS,
+    RECIPE_ROUTE_CLAIM_ID,
     STOP_DISPATCH_GRACE,
     STOP_WITHDRAWAL_PENDING,
     RecipeEndpointAuthorityRefused,
@@ -346,7 +347,15 @@ def maintain(self) -> bool:
     )
     if isinstance(step, bool):
         return step
-    self._execute(step)
+    try:
+        self._execute(step)
+    except _ActivatedRecipeRouteError:
+        if not step.settles_failure:
+            raise
+        # The failure hook already blocked the entries the generation introduced:
+        # that is progress, not a failure to back off from, so the next pass (the
+        # API tick, a few seconds away) publishes the local routes without them.
+        return True
     return True
 
 
@@ -597,10 +606,18 @@ def _maintain_empty_routes(
     owner = session.get(RoutePublicationOwner, 1)
     publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
     live = self._publisher.active_marker_digest()
+    claim = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
+    in_flight = (
+        claim is not None and claim.state == RoutePublicationState.PUBLICATION_PENDING
+    )
     # A generation that was written and never recorded (its entries did not start)
-    # is live: nothing served may stay on the gateway beyond the recorded one.
-    unrecorded = live is not None and (
-        publication is None or live != publication.activation_marker_digest
+    # is live: nothing served may stay on the gateway beyond the recorded one. A
+    # publication still in flight has written its generation and not yet recorded
+    # it; withdrawing now would supersede it.
+    unrecorded = (
+        not in_flight
+        and live is not None
+        and (publication is None or live != publication.activation_marker_digest)
     )
     if (
         candidate.externals.withdrawing

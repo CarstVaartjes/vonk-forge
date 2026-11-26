@@ -23,6 +23,7 @@ from vonk_agent_protocol.state_machines import (
     ExternalBlockReason,
     ExternalPublicationState,
 )
+from vonk_agent_protocol.state_machines import RouteState as RunRouteState
 from vonk_control.gateway.external_contract import (
     ApprovedDestination,
     CredentialBinding,
@@ -43,6 +44,7 @@ from vonk_control.gateway.route_runtime import (
     verify_active_route_bundle,
 )
 from vonk_control.model_primitives import Base
+from vonk_control.models.execution import RecipeRun
 from vonk_control.models.gateway import (
     GatewayCredentialBinding,
     GatewayExternalDeployment,
@@ -244,7 +246,9 @@ def test_a_failed_start_blocks_the_entry_and_the_next_pass_publishes_without_it(
     # An entry the pinned LiteLLM no longer accepts (admitted before a pin change).
     _seed(service.sessions, _bad_spec())
 
-    assert service.maintain() is False  # the generation was not acknowledged
+    # The failure is progress (the entry is blocked): no backoff, the very next
+    # pass republishes the local routes without it.
+    assert service.maintain() is True
     assert "odd-model" in _live_models(tmp_path / "live")  # live, and dark
     row = _row(service, "odd-model")
     assert row is not None
@@ -287,7 +291,7 @@ def test_three_failed_starts_stop_the_retries_until_an_edit_or_an_enable(
     for _failure in range(3):
         clock.now += timedelta(minutes=6)  # the retry of a blocked entry is due
         service.maintain()  # introduces the entry; the generation fails
-        clock.now += timedelta(seconds=90)
+        clock.now += timedelta(seconds=5)  # the next API tick
         service.maintain()  # publishes without it
     row = _row(service, "odd-model")
     assert row is not None
@@ -507,3 +511,30 @@ def test_a_direct_run_load_shows_alias_taken_up_front(tmp_path: Path) -> None:
     plan = service.preview(_request(sessions, nodes[0]), actor="admin")
     assert plan.allowed is False
     assert RunSwitchCode.ALIAS_TAKEN in {item.code for item in plan.blockers}
+
+
+def test_a_run_publication_in_flight_is_not_superseded_by_maintenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Break caught: worker maintenance read the generation a run publication had
+    # written and not yet recorded as an unrecorded one, withdrew it and superseded
+    # the run's publication, again and again.
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    passes: list[bool] = []
+
+    def acknowledge(marker: ActivationMarker, required: SupervisorPhase) -> None:
+        passes.append(service.maintain())  # maintenance meets the run in flight
+
+    service._publisher._publisher._await_supervisor_ack = acknowledge
+
+    generation = service.publish_run(run_id)
+
+    assert passes == [False]
+    assert _live_models(tmp_path / "live") == ["qwen"]
+    with service.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        assert run.route_state == RunRouteState.PUBLISHED
+        assert run.route_generation == generation.generation

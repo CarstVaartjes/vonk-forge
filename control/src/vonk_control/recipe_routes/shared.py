@@ -42,6 +42,8 @@ _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 # A serving route is kept while its Sparks keep talking to the Controller,
 # even when their rank reports are missing; a Spark silent this long is gone.
 _LOGGER = logging.getLogger(__name__)
+#: How often the API reconciles the gateway: the next pass after a failed start.
+ROUTE_RECONCILE_SECONDS = 5.0
 _WITHDRAWAL_ATTEMPTS = 5
 _WITHDRAWAL_BACKOFF_SECONDS = 0.05
 #: Why a running run's route is withdrawn: a Stop claimed it and has not been

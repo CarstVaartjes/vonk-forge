@@ -112,8 +112,9 @@ def test_a_model_is_accepted_exactly_as_reviewed_and_replays_by_request_id(
         "local-models-dark-on-failed-start",
     ]
     assert review["grace_seconds"] == 30
-    # Three tries of one content, each waiting out the 165 s acknowledgement.
-    assert review["failed_start_dark_seconds"] == 3 * 165
+    # Three tries of one content: the 165 s acknowledgement, the next reconcile pass
+    # (5 s) and the restart without the entry (120 s).
+    assert review["failed_start_dark_seconds"] == 3 * (165 + 5 + 120)
     assert accepted.status_code == 200, accepted.text
     assert RECEIPT_HEADER in accepted.headers
     request_id = accepted.json()["request_id"]

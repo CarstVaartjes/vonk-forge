@@ -393,11 +393,13 @@ def test_the_default_https_port_is_one_origin_in_an_entry_and_a_binding() -> Non
     )
 
 
-def test_the_supervisor_and_the_controller_agree_on_the_custody_words() -> None:
+def test_the_supervisor_and_the_controller_agree_on_the_custody_words(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # Break caught: the LiteLLM supervisor (a file the image loads with no package
     # around it) kept its own copy of the binding rule, the size bound, the
     # variable prefix and the file names, and one side moved alone.
-    sys.path.insert(0, str(ROOT / "agent_protocol/src/vonk_agent_protocol"))
+    monkeypatch.syspath_prepend(str(ROOT / "agent_protocol/src/vonk_agent_protocol"))
     spec = importlib.util.spec_from_file_location(
         "supervisor_for_custody_words",
         ROOT / "deploy/compose/litellm/config_supervisor.py",
@@ -405,7 +407,7 @@ def test_the_supervisor_and_the_controller_agree_on_the_custody_words() -> None:
     assert spec is not None
     assert spec.loader is not None
     supervisor = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = supervisor
+    monkeypatch.setitem(sys.modules, spec.name, supervisor)
     spec.loader.exec_module(supervisor)
     assert supervisor.CREDENTIAL_NAME.pattern == BINDING_NAME_PATTERN + r"\Z"
     assert supervisor.CREDENTIAL_ENV_PREFIX == CREDENTIAL_ENV_PREFIX
