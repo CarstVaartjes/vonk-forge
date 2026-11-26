@@ -20,9 +20,10 @@ rebuilds the block:
   without it, :class:`BlockWithheld` is raised and the caller withholds the
   block and notes it.
 
-The rebuilt block is validated by the contract under the reader's context, so
-what comes back holds known words plus the kept capability names only. Any
-failure to rebuild one block, expected or not, withholds that block alone.
+The rebuilt block is validated by the contract, in the reader's context only
+when it keeps a capability name, so what comes back holds known words plus the
+kept capability names only. Any failure to rebuild one block, expected or not,
+withholds that block alone.
 """
 
 from __future__ import annotations
@@ -81,8 +82,11 @@ def known_block[B: BaseModel](block: B) -> B:
 
     try:
         rebuilt = _model(block, block.model_dump(mode="json"))
+        # Only a block that keeps a capability name validates in the reader's
+        # context; any other refuses an unknown word that is left.
+        keeps = any(type(block) is model for model, _ in KEPT)
         return type(block).model_validate_json(
-            json.dumps(rebuilt), context=read_context()
+            json.dumps(rebuilt), context=read_context() if keeps else None
         )
     # One block's rebuild never stops the sync, whatever fails: the caller
     # withholds that block and notes it.

@@ -322,9 +322,14 @@ def _document_text(row: CatalogDocument) -> DocumentText:
     if row.kind == ReceiptOwner.RECIPE:
         return DocumentText(row.title, recipe=row.readable_recipe_display())
     display = row.readable_model_display()
-    return DocumentText(
-        row.title, model=None if display is None else LibraryModelDisplay.of(display)
-    )
+    try:
+        model = None if display is None else LibraryModelDisplay.of(display)
+    except ValueError as error:
+        # A stored display the Library cannot serve costs only its own text.
+        model = note_unreadable(
+            "catalog display", f"{row.kind}/{row.slug}", str(error)[:120]
+        )
+    return DocumentText(row.title, model=model)
 
 
 _note_unreadable = note_unreadable

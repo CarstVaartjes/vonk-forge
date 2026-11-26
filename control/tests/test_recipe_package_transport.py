@@ -102,7 +102,7 @@ def _repack(files: dict[str, bytes]) -> bytes:
 
 
 def _canonical_package_fixture(
-    *, adapter_source: bytes | None = None
+    *, adapter_source: bytes | None = None, slug: str = "tiny-recipe"
 ) -> tuple[bytes, dict[str, object], bytes]:
     """Create a tiny valid package without depending on another checkout."""
     model = ModelDefinition.model_validate(
@@ -139,7 +139,7 @@ def _canonical_package_fixture(
     model_digest = document_sha256(model_document)
     recipe = RecipeDefinition.model_validate(
         {
-            "identity": {"publisher": "fixture", "slug": "tiny-recipe"},
+            "identity": {"publisher": "fixture", "slug": slug},
             "models": [
                 {
                     "id": "primary",
@@ -278,7 +278,7 @@ def _canonical_package_fixture(
     }
     package = _repack({"manifest.json": _canonical(manifest) + b"\n", **files})
     row = {
-        "source_path": "recipes/tiny-recipe.json",
+        "source_path": f"recipes/{slug}.json",
         "source_bundle_sha256": source_digest,
         "document": recipe_document,
         "display": published_json(
@@ -291,7 +291,7 @@ def _canonical_package_fixture(
         ),
         "content_sha256": recipe_digest,
         "package": {
-            "path": "packages/tiny-recipe.tar.gz",
+            "path": f"packages/{slug}.tar.gz",
             "source_bundle_sha256": source_digest,
             "sha256": hashlib.sha256(package).hexdigest(),
             "expected_bytes": len(package),
@@ -969,51 +969,74 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
 def test_an_entry_needing_a_newer_platform_is_withheld_and_the_sync_completes(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    """A recipe whose document uses an executed kind a newer contract added is
-    left out with a note; every other entry applies and the sync is current."""
-    index_bytes, _, package = _canonical_package_fixture()
-    index = json.loads(index_bytes)
-    newer = deepcopy(index["recipes"][0])
-    newer["source_path"] = "recipes/newer-recipe.json"
-    newer["document"]["identity"]["slug"] = "newer-recipe"
-    newer["document"]["settings"]["kind"] = "teleportation"
-    del newer["display"]
-    digest = document_sha256(newer["document"])
-    newer["content_sha256"] = digest
-    newer["package"]["recipe_content_sha256"] = digest
-    index["recipes"].append(newer)
-    release = _release_for(_canonical(index) + b"\n", package)
+    """A recipe whose new revision uses an executed kind a newer contract added
+    is withheld with a note: every other entry applies, the sync is current,
+    its older revision stops being offered and still resolves for running work."""
+    first_bytes, _, first_package = _canonical_package_fixture()
+    _, other, other_package = _canonical_package_fixture(slug="other-recipe")
+
+    def release(index: dict[str, object], tag: str) -> _Release:
+        index["contract_version"] = tag.removeprefix("v")
+        return _Release(
+            tag,
+            {
+                "catalog-index.json": _canonical(index) + b"\n",
+                "tiny-recipe.tar.gz": first_package,
+                "other-recipe.tar.gz": other_package,
+            },
+        )
+
+    readable = json.loads(first_bytes)
+    readable["recipes"].append(other)
+    served = release(deepcopy(readable), f"v{MAJOR}.1.0")
+    newer = deepcopy(readable)
+    newer["source_commit"] = "b" * 40
+    newer["updated_at"] = "2026-11-26T12:00:00Z"
+    withheld = newer["recipes"][1]
+    withheld["document"]["settings"]["kind"] = "teleportation"
+    digest = document_sha256(withheld["document"])
+    withheld["content_sha256"] = digest
+    withheld["package"]["recipe_content_sha256"] = digest
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     now = datetime(2026, 11, 26, tzinfo=UTC)
+    catalog = CatalogService(
+        sessions,
+        clock=lambda: now,
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        source_bundles=SourceBundleStore(tmp_path / "bundles"),
+    )
     sync = ManagedRecipeCatalogSyncService(
         sessions,
-        catalog=CatalogService(
-            sessions,
-            clock=lambda: now,
-            cursors=TokenCodec(b"s" * 32).cursor_codec(),
-            source_bundles=SourceBundleStore(tmp_path / "bundles"),
-        ),
-        reader=_client(release, tmp_path / "packages"),
+        catalog=catalog,
+        reader=_client(served, tmp_path / "packages"),
         clock=lambda: now,
     )
+    assert sync.automatic().imported_count == 2
+    key = ("fixture", "other-recipe")
+    older = catalog.recipe_catalog_local_revisions([key])[key]
 
-    sync.sync(
-        ManagedCatalogSyncRequest(
-            request_key=str(uuid.uuid4()),
-            trigger=CatalogSyncTrigger.MANUAL,
-            actor="test",
-        )
-    )
+    _replace_with(served, release(newer, f"v{MAJOR}.1.1"))
+    status = sync.automatic()
 
-    status = sync.latest()
-    assert status is not None
     assert status.state == CatalogSyncState.CURRENT
-    assert (status.imported_count, status.skipped_count) == (1, 0)
+    assert status.skipped_count == 0
     [note] = status.problems
     assert note.recipe_uri is None
-    assert "fixture/newer-recipe" in note.detail
+    assert "fixture/other-recipe" in note.detail
+    assert [item.recipe_id for item in status.withdrawn_recipes] == [older.recipe_id]
+    assert key not in catalog.recipe_catalog_local_revisions([key])
+    [kept] = (
+        sessions()
+        .scalars(
+            select(CatalogDocumentRevision.id).where(
+                CatalogDocumentRevision.slug == "other-recipe"
+            )
+        )
+        .all()
+    )
+    assert catalog.get_recipe(kept).id == kept
 
 
 def test_an_unknown_blame_leaves_out_only_its_evidence_record() -> None:
