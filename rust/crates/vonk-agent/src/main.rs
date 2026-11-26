@@ -833,8 +833,13 @@ async fn run_inventory_lane(
                 inventory.nas_route_interface = evidence.nas_route_interface;
                 if let Some(host) = inventory.host_settings.as_mut() {
                     host.memory_fragmentation = memory.snapshot();
-                    host.fabric_devices = traffic
-                        .observe(Path::new("/sys/class/infiniband"));
+                    // Sysfs reads (fabric hw_counters may query firmware) block.
+                    let traffic = traffic.clone();
+                    host.fabric_devices = tokio::task::spawn_blocking(move || {
+                        traffic.observe(Path::new("/sys/class/infiniband"))
+                    })
+                    .await
+                    .unwrap_or_default();
                 }
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();

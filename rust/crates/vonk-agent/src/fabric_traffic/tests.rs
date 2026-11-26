@@ -68,11 +68,11 @@ fn the_shared_sample_reads_as_the_shared_deltas() {
     let meter = Meter::default();
     let start = Instant::now();
     let first = sysfs(&sample["devices"], "first");
-    assert!(
-        meter
-            .observe_at(&first.path().join("class/infiniband"), start)
-            .is_empty(),
-        "unexpected content"
+    // No window yet: the rate, a fact that needs none, is still reported.
+    let opening = meter.observe_at(&first.path().join("class/infiniband"), start);
+    assert_eq!(
+        serde_json::to_value(&opening).unwrap(),
+        sample["expected_first"]
     );
     let second = sysfs(&sample["devices"], "second");
     let window = Duration::from_secs(sample["window_seconds"].as_u64().unwrap());
@@ -107,9 +107,17 @@ fn a_counter_that_went_backwards_is_skipped() {
         &low.path().join("class/infiniband"),
         start + Duration::from_secs(120),
     );
-    // Only the device whose counters stayed (at zero) has a delta.
-    assert_eq!(observed.len(), 1);
-    assert_eq!(observed[0].port, "01:00.0");
+    // Only the device whose counters stayed (at zero) has a delta; the others
+    // keep their rate alone.
+    assert_eq!(observed.len(), 3);
+    let windowed: Vec<_> = observed.iter().filter(|d| d.bytes.is_some()).collect();
+    assert_eq!(windowed.len(), 1);
+    assert_eq!(windowed[0].port, "01:00.0");
+    for device in observed.iter().filter(|d| d.bytes.is_none()) {
+        assert_eq!(device.window_seconds, None);
+        assert_eq!(device.errors, None);
+        assert_eq!(device.rate_mbps, Some(200_000));
+    }
 }
 
 #[test]
@@ -128,6 +136,9 @@ fn an_error_counter_that_went_backwards_is_unknown_but_the_bytes_stay() {
         &second.path().join("class/infiniband"),
         start + Duration::from_secs(120),
     );
-    let device = observed.iter().find(|d| d.bytes == 3_200_000_000).unwrap();
+    let device = observed
+        .iter()
+        .find(|d| d.bytes == Some(3_200_000_000))
+        .unwrap();
     assert_eq!(device.errors, None);
 }

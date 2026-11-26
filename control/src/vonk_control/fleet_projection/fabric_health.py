@@ -55,7 +55,9 @@ def fabric_health_warnings(
     erroring = [
         device
         for device in host.fabric_devices
-        if device.errors is not None and device.errors >= FABRIC_ERROR_FLOOR
+        if device.errors is not None
+        and device.window_seconds is not None
+        and device.errors >= FABRIC_ERROR_FLOOR
     ]
     if erroring:
         worst = max(erroring, key=lambda device: device.errors or 0)

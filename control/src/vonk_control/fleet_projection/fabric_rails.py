@@ -36,24 +36,27 @@ MIN_WINDOW_SECONDS = 30
 
 def is_busy(device: FabricDevice) -> bool:
     return (
-        device.window_seconds >= MIN_WINDOW_SECONDS
+        device.window_seconds is not None
+        and device.bytes is not None
+        and device.window_seconds >= MIN_WINDOW_SECONDS
         and device.bytes >= BUSY_BYTES_PER_SECOND * device.window_seconds
     )
 
 
 def is_flat_beside(device: FabricDevice, busy: FabricDevice) -> bool:
-    return device.bytes * FLAT_SHARE_DENOMINATOR < busy.bytes
+    return (device.bytes or 0) * FLAT_SHARE_DENOMINATOR < (busy.bytes or 0)
 
 
 def rails_in_use(devices: list[FabricDevice]) -> tuple[int, int] | None:
     """``(rails used, rails active)`` of the most imbalanced port; None if none."""
     ports: dict[str, list[FabricDevice]] = defaultdict(list)
     for device in devices:
-        if device.active:
+        # A device without a window (its rate only) says nothing of traffic.
+        if device.active and device.bytes is not None:
             ports[device.port].append(device)
     worst: tuple[int, int] | None = None
     for siblings in ports.values():
-        busiest = max(siblings, key=lambda device: device.bytes)
+        busiest = max(siblings, key=lambda device: device.bytes or 0)
         if len(siblings) < 2 or not is_busy(busiest):
             continue
         used = sum(not is_flat_beside(device, busiest) for device in siblings)
