@@ -52,6 +52,28 @@ fn launch_shared_memory_as_declared(arguments: &mut [String], image_index: usize
     }
 }
 
+/// A workload's `/tmp` is on disk, not in RAM: memory is for the models
+/// (owner 2026-11-26). The launch binds the run's own temp directory, the one
+/// `TMPDIR=/outputs/tmp` already names, at `/tmp` in place of the signed
+/// `--tmpfs`. The helper reset that directory before this launch (the agent
+/// asks for it on every fresh start), so `/tmp` starts empty as the tmpfs did.
+/// Docker takes no `nosuid`/`nodev` on a bind; validation already requires
+/// `--cap-drop=ALL`, `no-new-privileges` and a non-root user, so no setuid
+/// bit is honoured and no device node can be made, as on the `/outputs` bind.
+/// The signed argv keeps the tmpfs: it is part of the run identity digest, so
+/// a run started before this change is still adopted as is, and agent and
+/// helper upgrade in either order. Validation proved the flag and its exact
+/// value come before the image.
+fn launch_tmp_on_disk(arguments: &mut [String], image_index: usize, outputs: &Path) {
+    if let Some(index) = arguments[..image_index]
+        .iter()
+        .position(|argument| argument == "--tmpfs")
+    {
+        "--mount".clone_into(&mut arguments[index]);
+        arguments[index + 1] = format!("type=bind,src={},dst=/tmp", outputs.join("tmp").display());
+    }
+}
+
 /// Every workload runs with unlimited memlock (owner 2026-11-18): Docker's
 /// default 8 MiB breaks engines that pin memory. Host-network runs also name
 /// it in the signed argv; Docker takes the last repeated value. For every
@@ -60,7 +82,7 @@ fn launch_shared_memory_as_declared(arguments: &mut [String], image_index: usize
 /// helper upgrade in either order.
 const WORKLOAD_MEMLOCK: [&str; 2] = ["--ulimit", vonk_agent_protocol::WORKLOAD_MEMLOCK_ULIMIT];
 
-/// Every workload starts in `/tmp`, the tmpfs validation requires under the
+/// Every workload starts in `/tmp`, its writable disk temp directory under the
 /// read-only rootfs. An adapted image sets the same `WORKDIR`; an image the
 /// platform did not adapt keeps whatever its creator set, so the launch names
 /// it. Helper-owned and outside the run identity digest: a run started before
@@ -245,6 +267,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // as a validation marker; Docker already receives it via --entrypoint.
         let mut compiled = validated.docker_arguments()?;
         launch_shared_memory_as_declared(&mut compiled, validated.image_index);
+        launch_tmp_on_disk(&mut compiled, validated.image_index, &validated.outputs);
         let image_index = omit_container_memory_limit(&mut compiled, validated.image_index);
         compiled[image_index] = operational_image;
         // Helper-owned launch policy also covers accepted images built before

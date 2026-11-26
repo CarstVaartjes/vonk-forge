@@ -586,7 +586,9 @@ numeric non-root user, and checks resource limits, mounts, ports, and optional
 Every workload, on any network, runs with unlimited memlock
 (`--ulimit memlock=-1:-1`): the helper adds it at launch for workloads whose
 signed argv does not carry it (today every non-host workload), outside the run
-identity digest, so runs started earlier are adopted as is.
+identity digest, so runs started earlier are adopted as is. In the same way
+the launch replaces the signed `/tmp` tmpfs with a bind of the run's disk temp
+directory, so `/tmp` never takes memory from the models.
 A signed distributed serving placement uses one native fabric shape: host
 networking, the exact `/dev/infiniband` device mount, fixed memlock/stack limits,
 private IPC, and bounded shared memory. It has no Docker port publications, so

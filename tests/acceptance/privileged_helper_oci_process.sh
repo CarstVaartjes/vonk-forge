@@ -203,6 +203,13 @@ done
 printf '{}\n' >/var/lib/vonk-forge-agent/run-metadata/$run_id/runtime.json
 chown vonk-agent:vonk-agent /var/lib/vonk-forge-agent/run-metadata/$run_id/runtime.json
 chmod 0600 /var/lib/vonk-forge-agent/run-metadata/$run_id/runtime.json
+# The agent asks for a fresh runtime tmp on every start (prepare_start); the
+# probe starts directly, so it leaves the same marker before each start.
+request_tmp_reset() {
+  install -o vonk-agent -g vonk-agent -m 0600 /dev/null \
+    /var/lib/vonk-forge-agent/run-metadata/$run_id/tmp-reset-required
+}
+request_tmp_reset
 
 export VONK_HELPER_ARCHIVE_SHA="$archive_sha"
 export VONK_HELPER_ARCHIVE_BYTES="$archive_bytes"
@@ -285,6 +292,7 @@ test ! -e "$history_root"
 printf 'damaged history root\n' >"$history_root"
 # A damaged disposable receipt cannot veto the signed current content identity.
 printf 'damaged receipt\n' >"/var/lib/vonk-forge/runtime-images/$archive_sha"
+request_tmp_reset
 sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_ARCHIVE_SHA="$archive_sha" \
   VONK_HELPER_ARCHIVE_BYTES="$archive_bytes" \
@@ -348,6 +356,17 @@ target = "/outputs/cache"
 mounts = json.loads(Path(sys.argv[1]).read_text())[0]["Mounts"]
 assert next(mount["Source"] for mount in mounts if mount["Destination"] == target) == sys.argv[2]
 PY_CACHE
+# /tmp is the run's disk temp directory, never a RAM tmpfs.
+python3 - "$report_root/container-inspect.json" "/var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp" <<'PY_TMP'
+import json
+import sys
+from pathlib import Path
+
+container = json.loads(Path(sys.argv[1]).read_text())[0]
+tmp = [mount for mount in container["Mounts"] if mount["Destination"] == "/tmp"]
+assert [(mount["Type"], mount["Source"]) for mount in tmp] == [("bind", sys.argv[2])], tmp
+assert "/tmp" not in (container["HostConfig"].get("Tmpfs") or {}), container["HostConfig"]
+PY_TMP
 test -f /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp/helper-tmp-ok
 printf 'helper-process-proof=passed\narchive_sha256=%s\narchive_bytes=%s\nimage_ref=%s\nplatform_digest=%s\nplatform_config_digest=%s\nconfig_id=%s\ndocker_local_image_id=%s\n' \
   "$archive_sha" "$archive_bytes" "$image_ref" "$platform_digest" "$platform_config_digest" "$config_id" "$docker_local_image_id" \

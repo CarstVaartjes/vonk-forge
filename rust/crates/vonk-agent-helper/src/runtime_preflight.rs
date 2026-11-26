@@ -50,6 +50,11 @@ pub fn run(
     fs::create_dir(&staging)?;
     fs::set_permissions(&staging, fs::Permissions::from_mode(0o700))?;
     let _cleanup = Cleanup(staging.clone());
+    // The probe's `/tmp` is a disk bind, as a workload's is; it leaves with
+    // the staging directory.
+    let probe_tmp = staging.join("tmp");
+    fs::create_dir(&probe_tmp)?;
+    fs::set_permissions(&probe_tmp, fs::Permissions::from_mode(0o1777))?;
     let archive_path = staging.join("probe.tar");
     let mut archive = tar::Builder::new(fs::File::create(&archive_path)?);
     archive.append_path_with_name(probe_binary, "probe")?;
@@ -83,7 +88,7 @@ pub fn run(
         if !success {
             return Ok(30);
         }
-        let (success, stdout) = docker(&run_arguments(&name, &image), remaining())?;
+        let (success, stdout) = docker(&run_arguments(&name, &image, &probe_tmp), remaining())?;
         Ok(if success && stdout == b"vonk-runtime-preflight-ok\n" {
             0
         } else {
@@ -130,7 +135,11 @@ fn cleanup_budget(started: Instant, deadline: Instant) -> Duration {
         .max(deadline.saturating_duration_since(Instant::now()))
 }
 
-pub fn run_arguments(name: &str, image: &str) -> Vec<String> {
+/// `tmp` is the probe's own staging directory, bound at `/tmp` as a
+/// workload's disk temp directory is (Docker takes no `nosuid`/`nodev` on a
+/// bind; `no-new-privileges` and no capabilities hold that line).
+pub fn run_arguments(name: &str, image: &str, tmp: &Path) -> Vec<String> {
+    let tmp = format!("type=bind,src={},dst=/tmp", tmp.display());
     [
         "run",
         "--rm",
@@ -143,7 +152,8 @@ pub fn run_arguments(name: &str, image: &str) -> Vec<String> {
         "--pids-limit=64",
         "--memory=64m",
         "--cpus=1",
-        "--tmpfs=/tmp:rw,nosuid,nodev,noexec,mode=1777,size=1m",
+        "--mount",
+        tmp.as_str(),
         "--name",
         name,
         image,

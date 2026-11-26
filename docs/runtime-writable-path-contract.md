@@ -56,6 +56,19 @@ central environment values. OCI startup creates the installation cache and
 binds it at `/outputs/cache`; it does not make the image root writable or
 replace packaged image content.
 
+`/tmp` is on disk, never in RAM: memory is for the models. The helper binds
+the run's own temp directory, the one behind `/outputs/tmp`
+(`runs/<run>/outputs/tmp` below the agent data root, never another host path),
+at `/tmp` too, so `/tmp` and `TMPDIR` are one directory. The helper empties it
+before every fresh start, after proving the run's container absent, so each
+start sees an empty `/tmp` as it did with a tmpfs; the directory leaves with
+the run scope. Its size is bounded by the disk, not by the old 1 GiB tmpfs.
+Docker takes no `nosuid`/`nodev` on a bind; the fixed `--cap-drop=ALL`,
+`no-new-privileges` and numeric non-root user mean no setuid bit is honoured
+and no device node can be created, as on the `/outputs` bind. The signed argv
+still names the old `--tmpfs` as part of the run identity digest; only the
+launch replaces it, so runs started earlier are adopted as is.
+
 Validation evidence is separated by boundary. The Python harness/runtime
 contract suite covers structural projection and distribution-independent
 engine defaults; the
