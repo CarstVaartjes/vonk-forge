@@ -351,14 +351,19 @@ class UndeclaredTableAction(StrEnum):
 
 
 def _undeclared_table_action(
-    stamp: str | None, current: Minor
+    stamp: str | None, current: Minor | None, channel: str
 ) -> UndeclaredTableAction:
     """The one transition for an undeclared table.
 
     unstamped -> STAMP; stamped with this minor or newer -> KEEP; stamped with
-    an older minor -> DROP; an unparseable stamp is stamped again.
+    an older minor -> DROP; an unparseable stamp is stamped again. The dev
+    channel keeps nothing: every undeclared table is DROP at once.
     """
 
+    if channel == "dev":
+        return UndeclaredTableAction.DROP
+    if current is None:
+        return UndeclaredTableAction.KEEP
     found = _STAMP_PATTERN.fullmatch(stamp) if stamp else None
     if found is None:
         return UndeclaredTableAction.STAMP
@@ -399,7 +404,9 @@ def _clear_declared_stamps(connection: Connection) -> None:
         )
 
 
-def _reconcile_undeclared_tables(connection: Connection, ops: Any) -> None:
+def _reconcile_undeclared_tables(
+    connection: Connection, ops: Any, channel: str
+) -> None:
     """Keep every table the model does not declare for one minor release.
 
     The rule, not a list: a table the code does not declare is nothing the
@@ -433,16 +440,16 @@ def _reconcile_undeclared_tables(connection: Connection, ops: Any) -> None:
                     "Could not drop foreign key %s.%s: %s", table_name, name, error
                 )
     current = _CONTROLLER_MINOR
-    if current is None:
+    if current is None and channel != "dev":
         return  # unknown version: keep every table, drop none
     for table_name in undeclared:
-        action = _undeclared_table_action(stamps.get(table_name), current)
+        action = _undeclared_table_action(stamps.get(table_name), current, channel)
         try:
             with connection.begin_nested():
                 if action is UndeclaredTableAction.DROP:
                     ops.drop_table(table_name)
                     _LOGGER.info("Dropped undeclared table %s", table_name)
-                elif action is UndeclaredTableAction.STAMP:
+                elif action is UndeclaredTableAction.STAMP and current is not None:
                     connection.exec_driver_sql(
                         f"COMMENT ON TABLE {quote(table_name)} "
                         f"IS '{_UNDECLARED_STAMP}{current[0]}.{current[1]}'"

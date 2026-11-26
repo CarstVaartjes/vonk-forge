@@ -66,7 +66,7 @@ In the web the text is the one `NOT_REPORTED_TEXT` in `control/web/src/lib/fleet
 types the words. Fleet totals (power, tokens, energy, decode speed) are the Controller's fleet line or total of
 the metric series, never a sum made in the browser.
 
-Startup schema reconciliation keeps every table in the Controller's schema `public`
+On the stable channel, startup schema reconciliation keeps every table in the Controller's schema `public`
 that `Base.metadata` does not declare (except `alembic_version`) for one minor
 release, then drops it. The table carries `COMMENT ... 'vonk-undeclared-since
 <major>.<minor>'` (the Controller's own minor from `vonk-control`'s version); the first
@@ -74,7 +74,8 @@ Controller of a later minor drops it, foreign keys first, no CASCADE. An unparse
 stamp is stamped again, a declared table loses a stale stamp, and an unknown
 Controller version drops nothing. Never keep another tool's table there (LiteLLM has
 its own database). A rollback to the previous minor finds the tables a newer one
-added; older rollbacks are unsupported.
+added; older rollbacks are unsupported. The dev channel (`VONK_INSTALL_CHANNEL`, read once by
+`settings.install_channel_from_env`) keeps nothing: it drops an undeclared table at once.
 
 ## State ownership and resilient recovery
 
@@ -521,7 +522,7 @@ for their merge, honoring authorization already given for that action. Describe
 the deployment impact in the PR. Controller startup reconciles the live schema
 to current model metadata transactionally under the startup advisory lock.
 Missing tables, safe columns, indexes and constraints are applied. Unknown
-columns are preserved (the NOT NULL barrier is lifted); undeclared tables are kept one minor, then dropped
+columns are preserved (the NOT NULL barrier is lifted); undeclared tables are kept one minor on stable (dropped at once on dev), then dropped
 (see the schema reconciliation rule above), while obsolete constraints and indexes are
 replaced only after a safe replacement is installed. Data conflicts and unsafe
 casts are logged and deferred when the application can continue safely.

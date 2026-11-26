@@ -17,7 +17,7 @@ from vonk_control.db.connections import (
 from vonk_control.db.startup import initialize_database
 from vonk_control.runtime_init import read_runtime_secret
 from vonk_control.security.browser_auth import bootstrap_administrator
-from vonk_control.settings import SECRETS_ROOT
+from vonk_control.settings import SECRETS_ROOT, install_channel_from_env
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def prepare_owned_state() -> None:
     password among them), the runtime kit and the shared-volume ownership.
     """
     database_url = (SECRETS_ROOT / "database-url").read_text(encoding="utf-8").strip()
-    initialize_database(database_url)
+    initialize_database(database_url, channel=install_channel_from_env())
     password_path = SECRETS_ROOT / "admin-password"
     if not password_path.exists():
         # Only an older Compose file stages no password. An existing

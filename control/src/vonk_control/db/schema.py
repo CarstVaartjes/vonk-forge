@@ -60,7 +60,7 @@ def _schema_differences(connection: Connection) -> list[tuple[Any, ...]]:
     ]
 
 
-def reconcile_schema(connection: Connection) -> None:
+def reconcile_schema(connection: Connection, channel: str = "stable") -> None:
     """Apply safe metadata differences inside the caller's startup transaction."""
 
     exact_integer_adoption.adopt_exact_integer_columns(connection)
@@ -505,7 +505,7 @@ def reconcile_schema(connection: Connection) -> None:
     drift[SchemaDriftKind.UNDECLARED_UNIQUE_CONSTRAINT].extend(
         sorted(undeclared_uniques)
     )
-    _reconcile_undeclared_tables(connection, ops)
+    _reconcile_undeclared_tables(connection, ops, channel)
 
     # Contact first: the runtime move reads the contact clock from its owner.
     node_facts.move_contact_facts(connection)

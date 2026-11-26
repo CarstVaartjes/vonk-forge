@@ -413,6 +413,21 @@ def test_postgres_reconciliation_keeps_undeclared_table_for_one_minor(
         assert "some_retired_table" in inspect(connection).get_table_names()
 
 
+def test_postgres_reconciliation_on_dev_drops_undeclared_table_at_once(
+    postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dev channel keeps nothing: an undeclared table goes at once."""
+
+    monkeypatch.setattr(schema_helpers, "_CONTROLLER_MINOR", (1, 0))
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.execute(text("CREATE TABLE some_retired_table (id INTEGER)"))
+    with postgres_engine.begin() as connection:
+        verify_schema_is_current(connection, "dev")
+    with postgres_engine.connect() as connection:
+        assert "some_retired_table" not in inspect(connection).get_table_names()
+
+
 def test_postgres_reconciliation_drops_older_stamp_and_clears_declared(
     postgres_engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
