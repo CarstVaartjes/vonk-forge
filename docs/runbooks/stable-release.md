@@ -68,35 +68,30 @@ Only the owner signs and pushes the tag, with the key listed in
 The tag must be signed with the allowed release signer: principal
 `cvaartjes@visualfabriq.com` in `.github/release-allowed-signers`. A plain
 `git tag -s` signs with the machine's default key, which is not that signer and
-fails the release's signature check. Name the key explicitly. Replace
-`<allowed release signing key>` with the public key of the allowed release
-signer (the line the signing agent lists for it); the key's location is
-filled in by the owner:
+fails the release's signature check. The release key lives in the 1Password SSH
+agent, so no key file is needed; 1Password asks for approval when it signs.
+`/Applications/1Password.app/Contents/MacOS/op-ssh-sign` is the signing program
+(present on this Mac; elsewhere 1Password places it in the `MacOS` folder of its
+app bundle).
+
+From an up-to-date main checkout:
 
 ```sh
 git checkout main && git pull --ff-only origin main
-git -c gpg.format=ssh -c user.signingkey='<allowed release signing key>' \
-  tag -s vX.Y.Z <sha> -m "Vonk Forge X.Y.Z"
-git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag vX.Y.Z
+git -c gpg.format=ssh \
+  -c gpg.ssh.program=/Applications/1Password.app/Contents/MacOS/op-ssh-sign \
+  -c user.signingkey="key::ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB8F2mAFzxnRmpCedoSC+acezPYg35X6sVUg8CP2IlgV" \
+  tag -s vX.Y.Z <sha> -m "vX.Y.Z"
+git -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-If the signing program is not the default (for example the 1Password SSH
-agent), add `-c gpg.ssh.program=<path of its ssh-sign program>` to the `tag`
-command. Run `verify-tag` in an up-to-date main checkout, because it reads
-`.github/release-allowed-signers` from the working tree. It must print
+The `key::` value is the public key in `.github/release-allowed-signers` (check
+it still matches before signing). `verify-tag` reads that file from the working
+tree, so run it on the up-to-date main checkout; it must print
 `Good "git" signature` for that principal before you push. To retry, delete the
 local tag with `git tag -d vX.Y.Z` and sign again; never push a tag that failed
 verification.
-
-The owner then approves two deployments in the Actions run:
-
-- `apt-release`, once the GitHub Release is published;
-- `installer-acceptance-stable`, after every canary passed. It signs the
-  acceptance right before promotion, so approving it means "promote this
-  release". The reviewer is not on `installer-promotion-stable`: the daily
-  `installer-maintenance` refresh runs in that environment from `main` and would
-  otherwise wait for a click every day.
 
 ## What becomes public when
 
