@@ -448,6 +448,8 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "wget " not in text
     assert "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in text
     assert "uses: ./.github/actions/install-cosign" in text
+    install = (ROOT / ".github/actions/install-cosign/action.yml").read_text()
+    assert install.index("sha256sum --check") < install.index('>> "$GITHUB_PATH"')
     assert "scripts/release/sign-package-keyless" in text
     assert "agent-release\\.yml@refs/heads/main" in text
 

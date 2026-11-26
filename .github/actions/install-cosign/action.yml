@@ -21,10 +21,10 @@ runs:
         esac
         dir="$RUNNER_TEMP/cosign-bin"
         mkdir -p "$dir"
-        scripts/ci/retry-dependency-fetch curl --fail --location --silent --show-error \
+        scripts/ci/retry-dependency-fetch curl --fail --location --silent --show-error --connect-timeout 30 \
           --proto '=https' --proto-redir '=https' --tlsv1.2 \
           "https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-$arch" \
           --output "$dir/cosign"
-        printf '%s  %s\n' "$sha256" "$dir/cosign" | sha256sum --check --status
+        printf '%s  %s\n' "$sha256" "$dir/cosign" | sha256sum --check
         chmod 0755 "$dir/cosign"
         echo "$dir" >> "$GITHUB_PATH"
