@@ -1894,6 +1894,7 @@
         "parametric-body-model",
         "person-detection",
         "reasoning",
+        "retopology",
         "speculative-decoding",
         "speech-recognition",
         "text-generation",
