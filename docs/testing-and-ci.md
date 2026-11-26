@@ -302,7 +302,7 @@ The protocol is an editable workspace member, so no test or
 `inventory/wheels` that the Controller image and the release carry; every CI job
 that builds `control/Dockerfile` runs it first, and the adapter-Python job
 installs that wheel into a Python 3.12 venv, which is what proves the protocol's
-3.12 support (the workspace lock itself resolves for 3.14). Nothing compares the
+3.12 support (the workspace lock itself resolves for 3.15). Nothing compares the
 wheel with a lock: it is our own build output, not ingress.
 
 On Linux, this runs both suites in full. On macOS, it runs portable tests on
@@ -555,15 +555,15 @@ producer and consumer boundaries.
 
 Python lint, formatting and types share one configuration, the root
 `pyproject.toml`, and one locked tool version each (uv.lock, control dev group).
-Ruff targets Python 3.14, the uv environment's. A file another interpreter runs
+Ruff targets py314, one below the uv environment's 3.15, so it rejects PEP 810 `lazy import` as invalid syntax (the no-lazy-imports rule). A file another interpreter runs
 keeps that interpreter's syntax through `per-file-target-version`: `agent_protocol`
-3.12 (the Sparks), and 3.13 for `deploy/` (container images), `scripts/` and
+3.12 (the recipe adapter images' system python), 3.13 for `deploy/` (container images), and 3.12 for `scripts/` and
 `tests/nodes/` (a runner's or host's `python3`) and for a repository module such a
 script imports (`tools/generated_contracts.py`, loaded by `check-generated-determinism`,
 `prepare-generated-contracts` and the web `pre*` hooks), and for `tests/acceptance/`
 (the clean-Spark lane `ast.parse`s `test_spark_lifecycle.py` with the runner's 3.12);
-Ruff then refuses 3.14-only
-syntax there; such a file imports the 3.14 packages only when uv runs it. It runs its default rules plus the families in `[tool.ruff.lint] extend-select`;
+Ruff then refuses newer
+syntax there; such a file imports the 3.15 packages only when uv runs it. It runs its default rules plus the families in `[tool.ruff.lint] extend-select`;
 every ignore, global or per file, states its reason next to it. `extend-include`
 makes every extensionless file under `scripts/` (all group directories) and `bin/` Python unless
 `extend-exclude` names it as a shell script, so a new script is either linted or

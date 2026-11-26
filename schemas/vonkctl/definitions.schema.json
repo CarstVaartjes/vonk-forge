@@ -13510,6 +13510,7 @@
         "profile.retrying",
         "recipe.update_available",
         "run.degraded",
+        "run.not-progressing",
         "telemetry.delayed",
         "telemetry.missing",
         "telemetry.stale"

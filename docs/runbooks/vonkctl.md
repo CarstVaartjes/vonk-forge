@@ -4,7 +4,7 @@
 
 On macOS or Linux, install the latest accepted stable CLI without cloning the
 repository. The workstation needs `curl`, `openssl`, Python 3, and `uv`; the CLI
-requires Python 3.14 or newer, which `uv` can manage for its tool environment:
+requires Python 3.15 or newer, which `uv` can manage for its tool environment:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/vonkctl | sh

@@ -1,7 +1,7 @@
 [project]
 name = "vonk-control"
 version = "0.1.1"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 dependencies = [
   "alembic>=1.20.0",
   "argon2-cffi>=25.1.0",

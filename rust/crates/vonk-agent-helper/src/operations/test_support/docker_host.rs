@@ -12,6 +12,9 @@ pub(in crate::operations) const INSTALLATION: &str = "50000000-0000-4000-8000-00
 pub(in crate::operations) const STOP_REFUSAL: &str =
     "Error response from daemon: cannot stop container\n";
 /// When every exited container of this host exited, as Docker records it.
+/// The container lifetime the fake reports through `EXIT_FORMAT`.
+pub(in crate::operations) const STARTED_AT: &str = "2026-10-01T00:00:00Z";
+pub(in crate::operations) const FINISHED_AT: &str = "2026-10-01T00:10:00Z";
 pub(in crate::operations) const EXITED_AT: &str = "2026-10-01T00:00:00.123456789Z";
 /// Every container of this host carries this plan digest label.
 pub(in crate::operations) const PLAN_DIGEST: &str =
@@ -270,9 +273,14 @@ impl Host {
                 if *format == crate::runtime_logs::EXIT_FORMAT =>
             {
                 match find(&name) {
-                    Some(index) => {
-                        docker_output(true, &format!("{}\tfalse\t\n", containers[index].exit), 0)
-                    }
+                    Some(index) => docker_output(
+                        true,
+                        &format!(
+                            "{}\tfalse\t{STARTED_AT}\t{FINISHED_AT}\t\n",
+                            containers[index].exit
+                        ),
+                        0,
+                    ),
                     None => docker_output(false, "", 1),
                 }
             }

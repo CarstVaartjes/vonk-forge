@@ -605,11 +605,45 @@ def test_isolated_wheel_build_guard_rejects_a_rebuilt_contract_wheel(
     assert isolated_wheel_build_violations(tmp_path, [path.name]) == []
 
 
-def test_python_targets_agree_across_projects() -> None:
-    """CI runs Python 3.14; the agent protocol wheel also runs on adapter 3.12.
+PYTHON = (ROOT / ".python-version").read_text().strip()
 
-    So three projects require 3.14 and the protocol wheel requires 3.12. Ruff
-    checks the protocol at its own 3.12 floor and the projects at 3.14.
+
+def test_python_version_has_one_owner() -> None:
+    """`.python-version` owns the interpreter; every spelling follows it.
+
+    3.12 is allowed only at the adapter-image venv sites the protocol wheel is
+    proven on."""
+    spelled = re.compile(
+        r"--python[= ][\"']?(\d+\.\d+)"
+        r"|\"--python\",\s*\"(\d+\.\d+)\""
+        r"|python-version: [\"']?(\d+\.\d+)"
+        r"|python:(\d+\.\d+)(?:\.\d+)?-"
+        r"|PYTHON_VERSION=(\d+\.\d+)"
+    )
+    adapter_venv = {".github/workflows/ci.yml", "scripts/dev/test-changed"}
+    surfaces = {
+        "control/Dockerfile",
+        "deploy/compose/litellm/Dockerfile",
+        "deploy/compose/images.lock.json",
+    }
+    wrong = [
+        f"{path}: {m.group(0)}"
+        for path in tracked_files(ROOT)
+        if path.startswith((".github/", "install/", "scripts/", "src/"))
+        or path in surfaces
+        for m in spelled.finditer((ROOT / path).read_text(errors="ignore"))
+        if next(g for g in m.groups() if g) != PYTHON
+        and not (path in adapter_venv and m.group(0).endswith("3.12"))
+    ]
+    assert wrong == []
+
+
+def test_python_targets_agree_across_projects() -> None:
+    """CI runs Python 3.15; the agent protocol wheel also runs on adapter 3.12.
+
+    So three projects require 3.15 and the protocol wheel requires 3.12. Ruff
+    checks the protocol at its own 3.12 floor and the projects at py314, which
+    rejects PEP 810 `lazy import`.
     """
 
     def load(path: str) -> dict[str, Any]:
@@ -621,7 +655,7 @@ def test_python_targets_agree_across_projects() -> None:
         "control/pyproject.toml",
         "nas_setup/pyproject.toml",
     ):
-        assert load(path)["project"]["requires-python"] == ">=3.14", path
+        assert load(path)["project"]["requires-python"] == f">={PYTHON}", path
     protocol = load("agent_protocol/pyproject.toml")
     assert protocol["project"]["requires-python"] == ">=3.12"
     targets = root["tool"]["ruff"]["per-file-target-version"]
@@ -631,4 +665,4 @@ def test_python_targets_agree_across_projects() -> None:
     assert {"root": "agent_protocol/src", "pythonVersion": "3.12"}.items() <= (
         environments[0].items()
     )
-    assert root["tool"]["pyright"]["pythonVersion"] == "3.14"
+    assert root["tool"]["pyright"]["pythonVersion"] == PYTHON

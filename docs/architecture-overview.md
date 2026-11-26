@@ -443,7 +443,7 @@ NAS/project setup and admin tooling are Python. The standalone `nas_setup`
 project builds one portable wheel, bundling the canonical protocol source. The
 signed schema-2 release binds `nas-setup-wheel` and the NAS template payload to
 exact digests. The shell entry point verifies both before installed `uv` runs the
-wheel in an isolated Python 3.14 environment. It prepares the same Compose
+wheel in an isolated Python 3.15 environment. It prepares the same Compose
 project on Intel or ARM Linux and macOS; there is no native NAS executable
 matrix or desktop installer. `vonkctl` remains the separate Python admin CLI.
 
@@ -525,9 +525,11 @@ serving one alias and a client key. It asserts that simple-shuffle reaches both
 members, a stream stays on one member, `num_retries: 0` leaves a failed
 member's error with the client (no request reaches two members), a missing
 health sample counts as eligible, and a member that answers again is served
-without manual action. What an all-unhealthy group does is recorded by the
-proof (`ALL_UNHEALTHY_OUTCOME`), as is the status code of cooldown exhaustion
-(`cooldown exhaustion status`); both are pinned here after the first run.
+without manual action. When every member is unhealthy,
+health-driven cooldown makes LiteLLM refuse with 429 without reaching any member
+(observed at v1.106.7; the proof pins "not 200 and no member reached", or one
+member reached answering 401 when a request lands between health passes).
+An all-unhealthy pool therefore refuses requests until a member recovers.
 
 The Compose project keeps PostgreSQL, agent ingress, revision authority,
 and inference networks separate. Only Caddy

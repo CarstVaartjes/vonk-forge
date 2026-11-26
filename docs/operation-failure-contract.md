@@ -28,6 +28,11 @@ Cache details and Activity return the same failure, including recovery actions,
 retry timing, capacity measurements, and the failed artifact key. A queued
 retry retains its failure evidence until execution resumes.
 
+A workload's process-exit summary (the helper's one-line account of an exited
+container) may carry `gpu_xid=<code>`: the first NVIDIA Xid code the helper saw
+in the kernel journal during that container's lifetime. It is evidence only and
+never changes `exit_cause`.
+
 Library feedback accepts the generated `AvailabilityOperationFailure` type.
 Callers pass the operation ID and retained progress as explicit display context.
 The display adapter sanitizes text and labels canonical recovery actions; it

@@ -26,6 +26,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             image_pulls: std::sync::RwLock::new(()),
             runtime_stores: std::sync::RwLock::new(()),
             job_cancellation: JobCancellationFence::default(),
+            xids: crate::host_memory_guard::XidLog::default(),
         })
     }
 }
@@ -33,6 +34,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
 impl<R: CommandRunner> OperationExecutor<R> {
     pub fn with_package_owner(mut self, uid: u32) -> Self {
         self.package_owner_uid = Some(uid);
+        self
+    }
+}
+
+impl<R: CommandRunner> OperationExecutor<R> {
+    /// Read exit evidence's Xid from this log (shared with the journal follower).
+    pub fn with_xid_log(mut self, xids: crate::host_memory_guard::XidLog) -> Self {
+        self.xids = xids;
         self
     }
 }
