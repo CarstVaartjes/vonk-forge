@@ -225,7 +225,7 @@ For the trust and network model, see the
 | `nas_setup/` | Portable Python NAS/project setup wheel and recovery |
 | `rust/` | Native Spark agent, privileged helpers, installer and local enforcement |
 | `deploy/` | Signed controller/Spark installation and Compose contract |
-| `scripts/` | Validation, import, publication, and operator tooling |
+| `scripts/` | Validation, publication, and operator tooling, grouped by purpose (`dev/`, `ci/`, `images/`, `agent/`, `release/`, `fleet/`, `recipes/`) |
 | `docs/` | Architecture, security, runbooks, and contributor policy |
 
 The public recipe standard library lives in
@@ -252,7 +252,7 @@ uv run --project control --frozen \
 uv run --project control --frozen pytest -q tests -m "not lane" -n auto
 
 # Lane tier in the container or CI lane.
-scripts/pull-test-images postgres caddy tailscale python
+scripts/ci/pull-test-images postgres caddy tailscale python
 uv run --project control --frozen pytest -q control/tests
 uv run --project control --frozen pytest -q tests
 
@@ -260,7 +260,7 @@ uv run --project control --frozen pytest -q tests
 npm ci --prefix control/web
 npm test --prefix control/web -- --run
 uv run --frozen pytest -q deploy/compose/tests
-scripts/verify-supply-chain --json
+scripts/release/verify-supply-chain --json
 ```
 
 Start with the [documentation index](docs/README.md),

@@ -13,16 +13,17 @@ SOURCE = "a" * 40
 
 
 def _fixture(tmp_path: Path) -> tuple[list[str], dict[str, str], Path]:
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
+    scripts = tmp_path / "scripts/images"
+    scripts.mkdir(parents=True)
+    (tmp_path / "scripts/release").mkdir()
     for name in ("promote-accepted-channel", "promote-image-aliases"):
-        shutil.copy2(ROOT / "scripts" / name, scripts / name)
+        shutil.copy2(ROOT / "scripts/images" / name, scripts / name)
     binary = tmp_path / "bin"
     binary.mkdir()
     log = tmp_path / "log"
     # These stand-ins record boundaries; image copy/rollback has its own tests.
     helpers = {
-        scripts / "install-release-publication": """#!/usr/bin/env bash
+        tmp_path / "scripts/release/install-release-publication": """#!/usr/bin/env bash
 if [[ " $* " == *" --preflight-only "* ]]; then
   echo preflight >> "$LOG"
   [[ ${FAIL_PREFLIGHT:-0} != 1 ]]

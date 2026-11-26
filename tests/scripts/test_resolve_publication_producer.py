@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REPO = "owner/repo"
 
 
-def module(name="producer_evidence", path="scripts/resolve-publication-producer"):
+def module(name="producer_evidence", path="scripts/ci/resolve-publication-producer"):
     loader = importlib.machinery.SourceFileLoader(name, str(ROOT / path))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec
@@ -144,7 +144,7 @@ def github(monkeypatch):
         ("images", "tools/openapi-client/package.json", True),
         ("images", "docs/something.md", False),
         ("images", ".github/workflows/installer-publication.yml", True),
-        ("setups", "scripts/resolve-publication-producer", True),
+        ("setups", "scripts/ci/resolve-publication-producer", True),
         ("agent", "tests/nodes/test_agent_package_native_lifecycle.sh", True),
         ("agent", "rust/crates/vonk-spark-setup/src/lib.rs", True),
         ("agent", "agent_protocol/src/vonk_agent_protocol/error_response.py", True),
@@ -284,14 +284,14 @@ def test_release_workflow_records_every_producer_the_resolver_reads():
 
 def image_job_inputs() -> set[str]:
     """The path patterns the images job reads, derived from its own sources."""
-    images = module("dev_image_inputs", "scripts/dev-image-inputs")
+    images = module("dev_image_inputs", "scripts/images/dev-image-inputs")
 
     def pattern(path: str) -> str:
         path = path.rstrip("/")
         return f"{path}/**" if (ROOT / path).is_dir() else path
 
     wheel = module(
-        "protocol_wheel_inputs", "scripts/protocol_wheel.py"
+        "protocol_wheel_inputs", "scripts/release/protocol_wheel.py"
     ).protocol_wheel_name(ROOT)
     inputs: set[str] = set()
     # The Controller images read their COPY sources from the repository root.
@@ -599,7 +599,7 @@ def test_cargo_wire_export_reads_only_declared_cli_inputs(tmp_path):
 import fnmatch, importlib.util, runpy, sys
 from pathlib import Path
 root = Path.cwd()
-spec = runpy.run_path("scripts/resolve-publication-producer")
+spec = runpy.run_path("scripts/ci/resolve-publication-producer")
 paths = spec["PRODUCERS"][spec["ProducerName"].AGENT].paths
 watched = ("schemas/", "src/cluster_profiles/", "tools/openapi-client/")
 def audit(event, args):
@@ -614,10 +614,10 @@ def audit(event, args):
     if relative.startswith(watched) and not any(fnmatch.fnmatchcase(relative, pattern) for pattern in paths):
         raise AssertionError(f"undeclared Cargo schema input: {relative}")
 sys.addaudithook(audit)
-sys.path.insert(0, str(root / "scripts"))
+sys.path.insert(0, str(root / "scripts/dev"))
 # The exporter reads only the protocol: the Controller package never loads.
 sys.modules["vonk_control"] = None
-exporter = runpy.run_path("scripts/export-agent-wire-schema")
+exporter = runpy.run_path("scripts/dev/export-agent-wire-schema")
 Path(sys.argv[1]).write_text(exporter["rendered"]())
 """
     subprocess.run(

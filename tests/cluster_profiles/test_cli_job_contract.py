@@ -7,7 +7,8 @@ from typing import Any
 
 import pytest
 
-from cluster_profiles import cli, cli_artifact_jobs
+from cluster_profiles import cli
+from cluster_profiles.cli_artifact_jobs import contract as artifact_job_contract
 from cluster_profiles.cli_render.artifact_jobs import contract_knob_fields
 from cluster_profiles.cli_states_generated import JobContractState
 from cluster_profiles.control_client.errors import ControlNotFound
@@ -136,8 +137,8 @@ UNAVAILABLE = [
 
 
 def test_every_state_without_a_contract_has_a_next_step() -> None:
-    assert set(UNAVAILABLE) == set(cli_artifact_jobs._CONTRACT_NEXT_STEPS)
-    assert all(cli_artifact_jobs._CONTRACT_NEXT_STEPS.values())
+    assert set(UNAVAILABLE) == set(artifact_job_contract._CONTRACT_NEXT_STEPS)
+    assert all(artifact_job_contract._CONTRACT_NEXT_STEPS.values())
 
 
 @pytest.mark.parametrize("state", UNAVAILABLE)
@@ -156,7 +157,7 @@ def test_contract_that_cannot_be_given_is_typed_with_a_next_step_after_one_read(
     assert controller.paths == [f"{CONTRACT_PATH}/run/{RUN_ID}"]
     assert error["code"] == "job_contract." + state.value
     assert error["recovery_actions"] == list(
-        cli_artifact_jobs._CONTRACT_NEXT_STEPS[state]
+        artifact_job_contract._CONTRACT_NEXT_STEPS[state]
     )
     assert error["detail"]
 

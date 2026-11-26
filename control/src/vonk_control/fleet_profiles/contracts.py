@@ -172,6 +172,12 @@ class FleetProfileInvalid(InvalidRequestError, FleetProfileConflict):
     code = ProfileReasonCode.REQUEST_INVALID
 
 
+class FleetProfileAliasTaken(FleetProfileInvalid):
+    """A name an external model serves cannot be a profile assignment's name."""
+
+    code = ProfileReasonCode.ALIAS_TAKEN
+
+
 class FleetProfileRevisionConflict(FleetProfileInvalid):
     """A save named a revision other than the stored one; nothing was written."""
 

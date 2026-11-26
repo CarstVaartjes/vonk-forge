@@ -13,6 +13,7 @@ from vonk_control.models import (  # noqa: F401
     evidence,
     execution,
     fleet,
+    gateway,
     jobs,
     mapping,
     operations,

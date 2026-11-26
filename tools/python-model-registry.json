@@ -499,6 +499,14 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/gateway/external_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/gateway/litellm_surface.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/run_switch_contract/requests.py",
       "kind": "controller-contract"
     },

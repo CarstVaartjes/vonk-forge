@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Named test images are pulled from upstream (consumers resolve tag@digest).
+# --dockerfile and --image read the GHCR mirror first, then the same digest upstream.
+# --dockerfile prepares a BuildKit source policy without editing production pins.
+# --image acquires an explicit pin (e.g. QEMU) and exports its selected reference.
+set -euo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+if (($# == 0)); then
+    echo "usage: scripts/ci/pull-test-images NAME... [--dockerfile FILE] [--image PIN]" >&2
+    exit 2
+fi
+owner=${GITHUB_REPOSITORY_OWNER:-carstvaartjes}
+owner=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')
+policy=
+separator=
+
+canonical() {
+    local ref=${1#docker.io/}
+    if [[ "$ref" != */* ]]; then ref=library/$ref; fi
+    printf 'docker.io/%s' "$ref"
+}
+
+acquire() {
+    local image=$1 mode=$2 name mirror
+    name=${image#docker.io/}
+    name=${name#library/}
+    name=${name%@*}
+    name=${name%%:*}
+    # Only Docker Hub inputs need this mirror. Other registries stay unchanged.
+    if [[ "$name" == *.*/* || "$name" == *:*/* ]]; then
+        selected=$image
+        return
+    fi
+    mirror=ghcr.io/$owner/ci-mirror/$name@${image##*@}
+    # The mirror is a fast path: one attempt, then the upstream digest with
+    # bounded retries. Same digest, same content.
+    if [[ "$mode" == build ]]; then
+        if docker buildx imagetools inspect "$mirror" >/dev/null 2>&1; then
+            selected=$mirror
+        else
+            "$root/scripts/ci/retry-dependency-fetch" docker buildx imagetools inspect "$image" >/dev/null
+            selected=$image
+        fi
+    else
+        if docker pull --quiet "$mirror" 2>/dev/null; then
+            selected=$mirror
+        else
+            "$root/scripts/ci/retry-dependency-fetch" docker pull --quiet "$image"
+            selected=$image
+        fi
+    fi
+}
+
+while (($#)); do
+    case "$1" in
+        --dockerfile)
+            file=${2:?--dockerfile needs a path}
+            shift 2
+            : "${GITHUB_ENV:?--dockerfile needs GITHUB_ENV}"
+            if [[ -z "$policy" ]]; then
+                policy=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ci-source-policy.XXXXXX")
+                printf '{"rules":[' > "$policy"
+                printf 'EXPERIMENTAL_BUILDKIT_SOURCE_POLICY=%s\n' "$policy" >> "${GITHUB_ENV:?--dockerfile needs GITHUB_ENV}"
+            fi
+            # FROM pins and ARG defaults are the source of truth, not a registry.
+            while IFS= read -r image; do
+                acquire "$image" build
+                if [[ "$selected" != "$image" ]]; then
+                    printf '%s{"action":"CONVERT","selector":{"identifier":"docker-image://%s"},"updates":{"identifier":"docker-image://%s"}}' \
+                        "$separator" "$(canonical "$image")" "$selected" >> "$policy"
+                    separator=,
+                fi
+            done < <(grep -Eo '[a-zA-Z0-9./_-]+(:[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}' "$file" | sort -u)
+            ;;
+        --image)
+            image=${2:?--image needs a digest-pinned reference}
+            shift 2
+            : "${GITHUB_ENV:?--image needs GITHUB_ENV}"
+            acquire "$image" pull
+            printf 'CI_IMAGE_%s=%s\n' "${image##*:}" "$selected" >> "${GITHUB_ENV:?--image needs GITHUB_ENV}"
+            ;;
+        *)
+            name=$1
+            shift
+            case "$name" in
+                python) section=build_bases ;;
+                *) section=images ;;
+            esac
+            image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]][sys.argv[3]])' \
+                "$root/deploy/compose/images.lock.json" "$section" "$name")
+            # Consumers look these up as tag@digest, which Docker resolves
+            # only for an image pulled from that same repository, so a mirror
+            # copy would count as absent.
+            "$root/scripts/ci/retry-dependency-fetch" docker pull --quiet "$image"
+            ;;
+    esac
+done
+if [[ -n "$policy" ]]; then printf ']}\n' >> "$policy"; fi

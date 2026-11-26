@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/render-install-bootstrap"
+SCRIPT = ROOT / "scripts/release/render-install-bootstrap"
 
 
 def _artifacts(tmp_path: Path, kind: str) -> dict[str, Path]:

@@ -21,7 +21,7 @@ from vonk_forge_contracts import CONTRACT_MAJOR
 
 from cluster_profiles.control_client.schema import validate_control_document
 from control.tests.index_envelope import index_envelope
-from scripts.canary_package import canary_package_path
+from scripts.fleet.canary_package import canary_package_path
 from tests.spark_lifecycle_runner_support import ENTRY_POINT, _module
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState

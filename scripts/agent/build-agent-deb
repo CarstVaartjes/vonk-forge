@@ -1,0 +1,879 @@
+#!/usr/bin/python3
+"""Build a deterministic, signed Vonk Forge agent Debian package."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import struct
+import subprocess
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+PACKAGE = "vonk-forge-agent"
+BINARIES = ("vonk-agent", "vonk-monitor", "vonk-agent-helper", "oras")
+EGRESS_BINARY = "vonk-build-egress"
+RUNTIME_PROBE_BINARY = "vonk-runtime-probe"
+ORAS_VERSION = "1.3.4"
+ARCHITECTURES = {
+    "linux-arm64": {
+        "debian": "arm64",
+        "machine": 183,
+        "target": "aarch64-unknown-linux-gnu",
+    },
+    "linux-amd64": {
+        "debian": "amd64",
+        "machine": 62,
+        "target": "x86_64-unknown-linux-gnu",
+    },
+}
+SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+PACKAGE_VERSION = re.compile(
+    rf"(?:{SEMVER}|{SEMVER}\+lifecycle\.1|"
+    rf"{SEMVER}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
+)
+DEVELOPMENT_VERSION = re.compile(
+    rf"{SEMVER}~dev\.((?:0|[1-9][0-9]*))\+g[0-9a-f]{{12}}\Z"
+)
+ACCEPTANCE_BASELINE_VERSION = re.compile(rf"{SEMVER}~acceptance\.1\+g[0-9a-f]{{12}}\Z")
+BUILD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+MAX_EPOCH = 4_102_444_800
+MAX_BINARY_BYTES = 512 * 1024 * 1024
+ARTIFACT_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00agent\x00"
+PACKAGE_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00deb\x00"
+ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
+# The only key-dependent members of a sealed package.
+AGENT_BINARY = "usr/lib/vonk-forge/vonk-agent"
+ARTIFACT_SIGNATURE = "usr/lib/vonk-forge/release/artifact.sig"
+RELEASE_KEYRING = "usr/share/keyrings/vonk-forge-release.pub"
+UNSEALED_SUFFIX = ".unsealed.deb"
+
+
+class BuildError(RuntimeError):
+    pass
+
+
+def valid_package_version(version: str) -> bool:
+    if PACKAGE_VERSION.fullmatch(version) is None:
+        return False
+    development = DEVELOPMENT_VERSION.fullmatch(version)
+    return development is None or int(development.group(1)) <= MAX_EPOCH
+
+
+def canonical(value: object) -> bytes:
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def run(
+    argv: list[str],
+    *,
+    cwd: Path = ROOT,
+    env: dict[str, str] | None = None,
+) -> bytes:
+    environment = {
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+    }
+    if env:
+        environment.update(env)
+    completed = subprocess.run(
+        argv,
+        cwd=cwd,
+        env=environment,
+        capture_output=True,
+        timeout=1800,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise BuildError(f"command failed: {Path(argv[0]).name}: {detail}")
+    return completed.stdout
+
+
+def cargo_semantic_version() -> str:
+    document = tomllib.loads(source("Cargo.toml").decode("utf-8"))
+    try:
+        version = document["workspace"]["package"]["version"]
+    except (KeyError, TypeError) as error:
+        raise BuildError("Cargo semantic version is invalid") from error
+    if not isinstance(version, str) or re.fullmatch(SEMVER, version) is None:
+        raise BuildError("Cargo semantic version is invalid")
+    return version
+
+
+def package_semantic_version(version: str) -> str:
+    match = re.match(SEMVER, version)
+    if match is None:
+        raise BuildError("version is not canonical package version")
+    return match.group(0)
+
+
+def read_release_binary(
+    path: Path,
+    *,
+    machine: int,
+    build_digest: str | None = None,
+    semantic_version: str | None = None,
+    require_static: bool = False,
+) -> bytes:
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as error:
+        raise BuildError(f"unsafe release binary: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        metadata = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or not 64 <= metadata.st_size <= MAX_BINARY_BYTES
+            or metadata.st_mode & 0o022
+        ):
+            raise BuildError(f"unsafe release binary: {path}")
+        before = (
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_nlink,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+        )
+        raw = stream.read(MAX_BINARY_BYTES + 1)
+        after_metadata = os.fstat(stream.fileno())
+        after = (
+            after_metadata.st_dev,
+            after_metadata.st_ino,
+            after_metadata.st_nlink,
+            after_metadata.st_size,
+            after_metadata.st_mtime_ns,
+            after_metadata.st_ctime_ns,
+        )
+    if before != after or len(raw) != metadata.st_size:
+        raise BuildError(f"release binary changed while read: {path}")
+    if (
+        raw[:7] != b"\x7fELF\x02\x01\x01"
+        or struct.unpack_from("<H", raw, 18)[0] != machine
+    ):
+        raise BuildError(f"release binary architecture is invalid: {path.name}")
+    if require_static:
+        program_offset = struct.unpack_from("<Q", raw, 32)[0]
+        program_size = struct.unpack_from("<H", raw, 54)[0]
+        program_count = struct.unpack_from("<H", raw, 56)[0]
+        if (
+            program_size < 56
+            or program_count < 1
+            or program_offset + program_size * program_count > len(raw)
+            or any(
+                struct.unpack_from("<I", raw, program_offset + index * program_size)[0]
+                == 3
+                for index in range(program_count)
+            )
+        ):
+            raise BuildError(f"release binary is not static: {path.name}")
+    if build_digest is not None:
+        marker = f"VONK_AGENT_BUILD_DIGEST={build_digest}".encode()
+        if marker not in raw:
+            raise BuildError("agent embedded build digest does not match package build")
+    if semantic_version is not None:
+        marker = f"VONK_AGENT_SEMANTIC_VERSION={semantic_version}".encode()
+        if marker not in raw:
+            raise BuildError("agent embedded semantic version does not match package")
+    return raw
+
+
+def read_release_data(path: Path, maximum_bytes: int) -> bytes:
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as error:
+        raise BuildError(f"unsafe release data: {path}") from error
+    with os.fdopen(descriptor, "rb") as stream:
+        metadata = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or not 1 <= metadata.st_size <= maximum_bytes
+            or metadata.st_mode & 0o022
+        ):
+            raise BuildError(f"unsafe release data: {path}")
+        before = (
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+        )
+        raw = stream.read(maximum_bytes + 1)
+        after_metadata = os.fstat(stream.fileno())
+        after = (
+            after_metadata.st_dev,
+            after_metadata.st_ino,
+            after_metadata.st_size,
+            after_metadata.st_mtime_ns,
+            after_metadata.st_ctime_ns,
+        )
+    if before != after or len(raw) != metadata.st_size:
+        raise BuildError(f"release data changed while read: {path}")
+    return raw
+
+
+def compile_binaries(
+    epoch: int, architecture: str, build_digest: str, semantic_version: str
+) -> Path:
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        raise BuildError("cargo is unavailable")
+    environment = {
+        "CARGO_INCREMENTAL": "0",
+        "SOURCE_DATE_EPOCH": str(epoch),
+        "VONK_AGENT_BUILD_DIGEST": build_digest,
+        "VONK_AGENT_SEMANTIC_VERSION": semantic_version,
+    }
+    if architecture == "linux-amd64" and os.uname().machine not in {
+        "x86_64",
+        "amd64",
+    }:
+        environment.update(
+            {
+                "AR_x86_64_unknown_linux_gnu": "x86_64-linux-gnu-ar",
+                "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER": "x86_64-linux-gnu-gcc",
+                "CC_x86_64_unknown_linux_gnu": "x86_64-linux-gnu-gcc",
+            }
+        )
+    run(
+        [
+            cargo,
+            "build",
+            "--release",
+            "--locked",
+            "--target",
+            str(ARCHITECTURES[architecture]["target"]),
+            "--workspace",
+        ],
+        env=environment,
+    )
+    static_environment = {
+        **environment,
+        "RUSTFLAGS": "-C target-feature=+crt-static",
+    }
+    run(
+        [
+            cargo,
+            "build",
+            "--release",
+            "--locked",
+            "--target",
+            str(ARCHITECTURES[architecture]["target"]),
+            "--package",
+            "vonk-build-egress",
+        ],
+        env=static_environment,
+    )
+    return ROOT / "target" / str(ARCHITECTURES[architecture]["target"]) / "release"
+
+
+def install_file(root: Path, relative: str, raw: bytes, mode: int) -> Path:
+    target = root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(raw)
+    target.chmod(mode)
+    return target
+
+
+def source(relative: str) -> bytes:
+    path = ROOT / relative
+    if not path.is_file() or path.is_symlink():
+        raise BuildError(f"required packaging source is unsafe: {relative}")
+    return path.read_bytes()
+
+
+def sign_agent(
+    temporary: Path,
+    private_key: Path,
+    artifact: bytes,
+) -> tuple[bytes, bytes]:
+    public_der = run(
+        [
+            "/usr/bin/openssl",
+            "pkey",
+            "-in",
+            str(private_key),
+            "-pubout",
+            "-outform",
+            "DER",
+        ],
+        cwd=Path("/"),
+    )
+    if (
+        not public_der.startswith(ED25519_SPKI_PREFIX)
+        or len(public_der) != len(ED25519_SPKI_PREFIX) + 32
+    ):
+        raise BuildError("release key is not Ed25519")
+    claims = temporary / "artifact.claims"
+    claims.write_bytes(ARTIFACT_DOMAIN + hashlib.sha256(artifact).digest())
+    signature = run(
+        [
+            "/usr/bin/openssl",
+            "pkeyutl",
+            "-sign",
+            "-inkey",
+            str(private_key),
+            "-rawin",
+            "-in",
+            str(claims),
+        ],
+        cwd=Path("/"),
+    )
+    if len(signature) != 64:
+        raise BuildError("release signature is invalid")
+    return signature.hex().encode() + b"\n", public_der[
+        len(ED25519_SPKI_PREFIX) :
+    ].hex().encode() + b"\n"
+
+
+def sign_package(temporary: Path, private_key: Path, digest: str) -> bytes:
+    claims = temporary / "package.claims"
+    claims.write_bytes(PACKAGE_DOMAIN + bytes.fromhex(digest))
+    signature = run(
+        [
+            "/usr/bin/openssl",
+            "pkeyutl",
+            "-sign",
+            "-inkey",
+            str(private_key),
+            "-rawin",
+            "-in",
+            str(claims),
+        ],
+        cwd=Path("/"),
+    )
+    if len(signature) != 64:
+        raise BuildError("package signature is invalid")
+    return signature.hex().encode() + b"\n"
+
+
+def evidence(
+    version: str,
+    epoch: int,
+    architecture: str,
+    build_digest: str,
+    binaries: dict[str, bytes],
+) -> dict[str, bytes]:
+    components = [
+        {
+            "name": name,
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "type": "application",
+            "version": ORAS_VERSION if name == "oras" else version,
+        }
+        for name, raw in sorted(binaries.items())
+    ]
+    lock = tomllib.loads(source("Cargo.lock").decode("utf-8"))
+    crates = [
+        {
+            "checksum": item.get("checksum"),
+            "name": item["name"],
+            "source": item.get("source", "workspace"),
+            "version": item["version"],
+        }
+        for item in lock.get("package", [])
+    ]
+    created = (
+        dt.datetime.fromtimestamp(epoch, tz=dt.UTC).isoformat().replace("+00:00", "Z")
+    )
+    revision = os.environ.get("VONK_SOURCE_REVISION", "unknown")
+    repository = os.environ.get(
+        "VONK_SOURCE_REPOSITORY", "https://github.com/CarstVaartjes/vonk-forge"
+    )
+    cyclone_metadata_component: dict[str, object] = {
+        "name": PACKAGE,
+        "type": "application",
+        "version": version,
+    }
+    cyclone = {
+        "bomFormat": "CycloneDX",
+        "components": [
+            {
+                "hashes": [{"alg": "SHA-256", "content": item["sha256"]}],
+                "name": item["name"],
+                "type": item["type"],
+                "version": item["version"],
+            }
+            for item in components
+        ]
+        + [
+            {
+                "bom-ref": f"pkg:cargo/{item['name']}@{item['version']}",
+                "hashes": (
+                    [{"alg": "SHA-256", "content": item["checksum"]}]
+                    if item["checksum"]
+                    else []
+                ),
+                "name": item["name"],
+                "purl": f"pkg:cargo/{item['name']}@{item['version']}",
+                "type": "library",
+                "version": item["version"],
+            }
+            for item in crates
+        ],
+        "metadata": {
+            "component": cyclone_metadata_component,
+            "timestamp": created,
+        },
+        "serialNumber": f"urn:uuid:00000000-0000-4000-8000-{hashlib.sha256(version.encode()).hexdigest()[:12]}",
+        "specVersion": "1.6",
+        "version": 1,
+    }
+    spdx = {
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "creationInfo": {"created": created, "creators": ["Organization: Vonk Forge"]},
+        "dataLicense": "CC0-1.0",
+        "documentNamespace": f"https://vonkforge.ai/sbom/{PACKAGE}/{version}",
+        "name": f"{PACKAGE}-{version}",
+        "packages": [
+            {
+                "SPDXID": f"SPDXRef-{item['name']}",
+                "checksums": [{"algorithm": "SHA256", "checksumValue": item["sha256"]}],
+                "downloadLocation": "NOASSERTION",
+                "filesAnalyzed": False,
+                "name": item["name"],
+                "primaryPackagePurpose": "APPLICATION",
+                "versionInfo": item["version"],
+            }
+            for item in components
+        ]
+        + [
+            {
+                "SPDXID": "SPDXRef-Crate-"
+                + hashlib.sha256(
+                    f"{item['name']}@{item['version']}".encode()
+                ).hexdigest()[:20],
+                "checksums": (
+                    [{"algorithm": "SHA256", "checksumValue": item["checksum"]}]
+                    if item["checksum"]
+                    else []
+                ),
+                "downloadLocation": item["source"],
+                "filesAnalyzed": False,
+                "name": item["name"],
+                "primaryPackagePurpose": "LIBRARY",
+                "versionInfo": item["version"],
+            }
+            for item in crates
+        ],
+        "spdxVersion": "SPDX-2.3",
+    }
+    resolved_dependencies = [
+        {
+            "digest": {"gitCommit": revision},
+            "uri": repository,
+        }
+    ]
+    external_parameters: dict[str, object] = {
+        "architecture": architecture,
+        "build_digest": build_digest,
+        "source_date_epoch": epoch,
+        "version": version,
+    }
+    provenance = {
+        "_type": "https://in-toto.io/Statement/v1",
+        "predicate": {
+            "buildDefinition": {
+                "buildType": "https://vonkforge.ai/build-types/rust-deb/v2",
+                "externalParameters": external_parameters,
+                "resolvedDependencies": resolved_dependencies,
+            },
+            "runDetails": {"builder": {"id": repository}},
+        },
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "subject": [
+            {"digest": {"sha256": item["sha256"]}, "name": item["name"]}
+            for item in components
+        ],
+        "version": version,
+    }
+    return {
+        "sbom.cdx.json": canonical(cyclone),
+        "sbom.spdx.json": canonical(spdx),
+        "provenance.json": canonical(provenance),
+    }
+
+
+def normalize_tree(root: Path, epoch: int) -> None:
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if path.is_dir():
+            path.chmod(0o755)
+        os.utime(path, (epoch, epoch), follow_symlinks=False)
+    root.chmod(0o755)
+    os.utime(root, (epoch, epoch))
+
+
+def atomic_output(path: Path, raw: bytes, mode: int = 0o644) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.new")
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+        mode,
+    )
+    try:
+        offset = 0
+        while offset < len(raw):
+            offset += os.write(descriptor, raw[offset:])
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    temporary.replace(path)
+
+
+def check_release_key(private_key: Path) -> None:
+    key_metadata = private_key.lstat()
+    if (
+        not stat.S_ISREG(key_metadata.st_mode)
+        or key_metadata.st_nlink != 1
+        or key_metadata.st_mode & 0o077
+    ):
+        raise BuildError("release private key permissions are unsafe")
+
+
+def finish_package(
+    stage: Path,
+    temporary: Path,
+    output: Path,
+    package_name: str,
+    epoch: int,
+    private_key: Path | None,
+) -> Path:
+    """Write the package from a complete stage.
+
+    Without a key this is the unsealed package: everything but the trust
+    material. With a key it seals: the release keyring, the agent artifact
+    signature and the detached host signature are the only key-dependent bytes,
+    so sealing one unsealed package always yields the same sealed package.
+    """
+    if (stage / RELEASE_KEYRING).exists() or (stage / ARTIFACT_SIGNATURE).exists():
+        raise BuildError("an unsealed package must not carry trust material")
+    if private_key is not None:
+        check_release_key(private_key)
+        artifact_signature, release_public_key = sign_agent(
+            temporary, private_key, (stage / AGENT_BINARY).read_bytes()
+        )
+        install_file(stage, ARTIFACT_SIGNATURE, artifact_signature, 0o644)
+        install_file(stage, RELEASE_KEYRING, release_public_key, 0o644)
+    checksum_lines = []
+    for path in sorted(item for item in stage.rglob("*") if item.is_file()):
+        relative = path.relative_to(stage).as_posix()
+        if relative.startswith("DEBIAN/"):
+            continue
+        digest = hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()
+        checksum_lines.append(f"{digest}  {relative}\n")
+    install_file(stage, "DEBIAN/md5sums", "".join(checksum_lines).encode(), 0o644)
+    normalize_tree(stage, epoch)
+    temporary_deb = temporary / package_name
+    run(
+        [
+            "/usr/bin/dpkg-deb",
+            "--build",
+            "--root-owner-group",
+            "--uniform-compression",
+            "-Zxz",
+            "-z9",
+            str(stage),
+            str(temporary_deb),
+        ],
+        env={"SOURCE_DATE_EPOCH": str(epoch)},
+    )
+    if private_key is None:
+        package = output / package_name.replace(".deb", UNSEALED_SUFFIX)
+        atomic_output(package, temporary_deb.read_bytes())
+        return package
+    package = output / package_name
+    atomic_output(package, temporary_deb.read_bytes())
+    digest = hashlib.sha256(package.read_bytes()).hexdigest()
+    atomic_output(
+        output / f"{package_name}.sha256", f"{digest}  {package_name}\n".encode()
+    )
+    atomic_output(
+        output / f"{package_name}.host.sig",
+        sign_package(temporary, private_key, digest),
+    )
+    return package
+
+
+def seal(unsealed: Path, private_key: Path, output: Path) -> Path:
+    """Seal an unsealed package with a release key, nothing else changed."""
+    if not unsealed.name.endswith(UNSEALED_SUFFIX) or unsealed.is_symlink():
+        raise BuildError("only an unsealed agent package can be sealed")
+    check_release_key(private_key)
+    package_name = unsealed.name.removesuffix(UNSEALED_SUFFIX) + ".deb"
+    output = output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="vonk-agent-seal-") as temporary:
+        stage = Path(temporary) / "root"
+        run(["/usr/bin/dpkg-deb", "-R", str(unsealed), str(stage)])
+        # The unsealed build normalized every member to its SOURCE_DATE_EPOCH.
+        epoch = int((stage / "DEBIAN/control").stat().st_mtime)
+        (stage / "DEBIAN/md5sums").unlink(missing_ok=True)
+        return finish_package(
+            stage, Path(temporary), output, package_name, epoch, private_key
+        )
+
+
+def unseal(sealed: Path, output: Path) -> Path:
+    """Recover the unsealed package a sealed package was sealed from.
+
+    Removes exactly the trust material the seal adds and rebuilds the rest
+    unchanged, so ``unseal(seal(unsealed, key))`` is ``unsealed`` byte for byte
+    for any key: the identity of what a run accepted, independent of who sealed it.
+    """
+    if not sealed.name.endswith(".deb") or sealed.name.endswith(UNSEALED_SUFFIX):
+        raise BuildError("only a sealed agent package can be unsealed")
+    if sealed.is_symlink() or not sealed.is_file():
+        raise BuildError("sealed agent package is unsafe")
+    package_name = sealed.name
+    output = output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="vonk-agent-unseal-") as temporary:
+        stage = Path(temporary) / "root"
+        run(["/usr/bin/dpkg-deb", "-R", str(sealed), str(stage)])
+        epoch = int((stage / "DEBIAN/control").stat().st_mtime)
+        for relative in (ARTIFACT_SIGNATURE, RELEASE_KEYRING):
+            member = stage / relative
+            if member.is_symlink() or not member.is_file():
+                raise BuildError("sealed agent package lacks its trust material")
+            member.unlink()
+            # The seal created these directories only for its own members.
+            parent = member.parent
+            while parent != stage and not any(parent.iterdir()):
+                parent.rmdir()
+                parent = parent.parent
+        (stage / "DEBIAN/md5sums").unlink(missing_ok=True)
+        return finish_package(stage, Path(temporary), output, package_name, epoch, None)
+
+
+def build(
+    version: str,
+    private_key: Path | None,
+    output: Path,
+    binaries_dir: Path | None,
+    epoch: int,
+    architecture: str,
+    build_digest: str,
+    *,
+    acceptance_baseline: bool = False,
+) -> Path:
+    if not valid_package_version(version) and not (
+        acceptance_baseline and ACCEPTANCE_BASELINE_VERSION.fullmatch(version)
+    ):
+        raise BuildError("version is not canonical package version")
+    cargo_version = cargo_semantic_version()
+    semantic_version = package_semantic_version(version)
+    semantic_parts = tuple(int(part) for part in semantic_version.split("."))
+    cargo_parts = tuple(int(part) for part in cargo_version.split("."))
+    if acceptance_baseline and (
+        ACCEPTANCE_BASELINE_VERSION.fullmatch(version) is None
+        or semantic_parts >= cargo_parts
+    ):
+        raise BuildError("acceptance baseline must have a lower semantic version")
+    if not acceptance_baseline and semantic_version != cargo_version:
+        raise BuildError(
+            f"package semantic version does not match Cargo semantic version {cargo_version}"
+        )
+    if architecture not in ARCHITECTURES:
+        raise BuildError("package architecture is unsupported")
+    if BUILD_DIGEST.fullmatch(build_digest) is None:
+        raise BuildError("build digest is invalid")
+    if not 0 <= epoch <= MAX_EPOCH:
+        raise BuildError("SOURCE_DATE_EPOCH is outside the supported range")
+    if private_key is not None:
+        check_release_key(private_key)
+    spec = ARCHITECTURES[architecture]
+    binary_root = (
+        binaries_dir.resolve()
+        if binaries_dir
+        else compile_binaries(epoch, architecture, build_digest, semantic_version)
+    )
+    binaries = {
+        name: read_release_binary(
+            binary_root / name,
+            machine=int(spec["machine"]),
+            build_digest=build_digest if name == "vonk-agent" else None,
+            semantic_version=semantic_version if name == "vonk-agent" else None,
+        )
+        for name in BINARIES
+    }
+    oras_license = read_release_data(binary_root / "oras.LICENSE", 1024 * 1024)
+    binary_digest = hashlib.sha256(binaries["vonk-agent"]).hexdigest()
+    if build_digest == f"sha256:{binary_digest}":
+        raise BuildError("build digest must be distinct from binary digest")
+    output = output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    debian_architecture = str(spec["debian"])
+    binaries[EGRESS_BINARY] = read_release_binary(
+        binary_root / EGRESS_BINARY,
+        machine=int(spec["machine"]),
+        require_static=True,
+    )
+    binaries[RUNTIME_PROBE_BINARY] = read_release_binary(
+        binary_root / RUNTIME_PROBE_BINARY,
+        machine=int(spec["machine"]),
+        require_static=True,
+    )
+    package_name = f"{PACKAGE}_{version}_{debian_architecture}.deb"
+
+    with tempfile.TemporaryDirectory(prefix="vonk-agent-deb-") as temporary:
+        stage = Path(temporary) / "root"
+        stage.mkdir()
+        install_file(
+            stage,
+            "usr/lib/vonk-forge/vonk-agent",
+            binaries["vonk-agent"],
+            0o555,
+        )
+        install_file(
+            stage,
+            "usr/lib/vonk-forge/vonk-monitor",
+            binaries["vonk-monitor"],
+            0o555,
+        )
+        install_file(
+            stage,
+            "usr/lib/vonk-forge/vonk-agent-helper",
+            binaries["vonk-agent-helper"],
+            0o555,
+        )
+        install_file(
+            stage,
+            "usr/lib/vonk-forge/vonk-build-egress",
+            binaries[EGRESS_BINARY],
+            0o555,
+        )
+        install_file(
+            stage,
+            "usr/lib/vonk-forge/vonk-runtime-probe",
+            binaries[RUNTIME_PROBE_BINARY],
+            0o555,
+        )
+        install_file(stage, "usr/lib/vonk-forge/oras", binaries["oras"], 0o555)
+        install_file(
+            stage,
+            "usr/share/doc/vonk-forge-agent/oras-LICENSE",
+            oras_license,
+            0o644,
+        )
+        install_file(
+            stage,
+            "etc/vonk-forge-agent/containers-storage.conf",
+            source("packaging/config/containers-storage.conf"),
+            0o644,
+        )
+        firewall_helper = source("packaging/bin/vonk-forge-docker-firewall")
+        install_file(
+            stage,
+            "usr/lib/vonk-forge/vonk-forge-docker-firewall",
+            firewall_helper,
+            0o555,
+        )
+        for name in (
+            "vonk-forge-agent.service",
+            "vonk-forge-monitor.service",
+            "vonk-forge-docker-firewall.service",
+            "vonk-forge-package-helper.service",
+            "vonk-forge-package-helper.socket",
+            "vonk-forge-package-rollback.service",
+        ):
+            install_file(
+                stage,
+                f"lib/systemd/system/{name}",
+                source(f"packaging/systemd/{name}"),
+                0o644,
+            )
+        evidence_binaries = {
+            **binaries,
+            "vonk-forge-docker-firewall": firewall_helper,
+        }
+        documents = evidence(
+            version,
+            epoch,
+            architecture,
+            build_digest,
+            evidence_binaries,
+        )
+        for name, raw in documents.items():
+            install_file(stage, f"usr/share/doc/{PACKAGE}/{name}", raw, 0o644)
+
+        control = (
+            source("packaging/debian/control")
+            .replace(b"@VERSION@", version.encode())
+            .replace(b"@ARCHITECTURE@", debian_architecture.encode())
+        )
+        install_file(stage, "DEBIAN/control", control, 0o644)
+        install_file(
+            stage, "DEBIAN/conffiles", source("packaging/debian/conffiles"), 0o644
+        )
+        install_file(stage, "DEBIAN/prerm", source("packaging/debian/prerm"), 0o755)
+        install_file(stage, "DEBIAN/postrm", source("packaging/debian/postrm"), 0o755)
+        install_file(
+            stage, "DEBIAN/postinst", source("packaging/debian/postinst"), 0o755
+        )
+        package = finish_package(
+            stage, Path(temporary), output, package_name, epoch, private_key
+        )
+        for name, raw in documents.items():
+            atomic_output(
+                output / f"{PACKAGE}_{version}_{debian_architecture}.{name}", raw
+            )
+    return package
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="build-agent-deb")
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--architecture", choices=sorted(ARCHITECTURES), required=True)
+    parser.add_argument("--build-digest", required=True)
+    # Without a key the build writes the unsealed package (no trust material);
+    # scripts/agent/seal-agent-deb adds it at publication. With a key it does both.
+    keying = parser.add_mutually_exclusive_group(required=True)
+    keying.add_argument("--release-private-key", type=Path)
+    keying.add_argument("--unsealed", action="store_true")
+    parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--binaries-dir", type=Path)
+    parser.add_argument("--acceptance-baseline", action="store_true")
+    parser.add_argument(
+        "--source-date-epoch",
+        type=int,
+        default=int(os.environ.get("SOURCE_DATE_EPOCH", "0")),
+    )
+    arguments = parser.parse_args()
+    try:
+        package = build(
+            arguments.version,
+            None if arguments.unsealed else arguments.release_private_key.absolute(),
+            arguments.output_dir,
+            arguments.binaries_dir,
+            arguments.source_date_epoch,
+            arguments.architecture,
+            arguments.build_digest,
+            acceptance_baseline=arguments.acceptance_baseline,
+        )
+    except (BuildError, OSError, ValueError) as error:
+        print(f"build-agent-deb: {error}", file=sys.stderr)
+        return 2
+    print(package)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

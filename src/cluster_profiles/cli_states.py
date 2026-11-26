@@ -2,7 +2,7 @@
 
 The CLI ships on its own and does not import the Controller's contract package, so
 the words come from ``cli_states_generated``, generated from the contract by
-``scripts/generate-python-vocabulary``; this module only composes them.
+``scripts/dev/generate-python-vocabulary``; this module only composes them.
 """
 
 from __future__ import annotations

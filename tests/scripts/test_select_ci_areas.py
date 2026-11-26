@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from scripts.protocol_wheel import protocol_wheel_name
+from scripts.release.protocol_wheel import protocol_wheel_name
 from tools.touched_tests import select
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _module():
     loader = importlib.machinery.SourceFileLoader(
-        "select_ci_areas", str(ROOT / "scripts/select-ci-areas")
+        "select_ci_areas", str(ROOT / "scripts/ci/select-ci-areas")
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
@@ -71,7 +71,7 @@ def test_missing_diff_is_conservative(event: str) -> None:
         "uv.lock",
         "packaging/systemd/vonk-forge-agent.service",
         "rust/deleted.rs",
-        "scripts/select-ci-areas",
+        "scripts/ci/select-ci-areas",
         ".github/workflows/installer-publication.yml",
         "new-runtime/input.conf",
         "inventory/wheels/protocol.whl",
@@ -92,7 +92,7 @@ def test_transitive_or_unknown_inputs_run_all_integrations(
         "control/src/vonk_control/runtime_init.py",
         "control/src/vonk_control/runtime/asset_contract.py",
         "control/src/vonk_control/api_preexec.py",
-        "scripts/render-dev-compose",
+        "scripts/release/render-dev-compose",
     ],
 )
 def test_runtime_asset_producers_select_their_compose_consumers(
@@ -134,9 +134,9 @@ def test_deleted_rust_file_selects_rust_family() -> None:
     [
         "tests/acceptance/recipe-library-revision.txt",
         "scripts/tests/run_agent_wire_contracts.py",
-        "scripts/export-agent-wire-schema",
-        "scripts/export-installer-release-schema",
-        "scripts/generate-agent-wire",
+        "scripts/dev/export-agent-wire-schema",
+        "scripts/dev/export-installer-release-schema",
+        "scripts/dev/generate-agent-wire",
         "rust/crates/vonk-agent/examples/consumer_corpus_probe.rs",
         "rust/crates/vonk-agent-protocol/src/integer.rs",
         "control/tests/cross_language_consumer_corpus.py",
@@ -159,7 +159,7 @@ def test_launch_contract_inputs_select_controller_and_wire_checks(path: str) -> 
         "deploy/compose/compose.yaml",
         "install/nas",
         "nas_setup/src/vonk_nas_setup/cli.py",
-        "scripts/build-nas-compose-bundle",
+        "scripts/release/build-nas-compose-bundle",
         "tests/acceptance/runtime.py",
     ],
 )
@@ -174,7 +174,7 @@ def test_installer_compose_control_and_acceptance_select_the_nas_install(
     [
         "rust/crates/vonk-agent/src/main.rs",
         "packaging/systemd/vonk-forge-agent.service",
-        "scripts/test-agent-package-native-lifecycle",
+        "scripts/agent/test-agent-package-native-lifecycle",
     ],
 )
 def test_agent_and_packaging_select_the_native_package_lifecycle(path: str) -> None:
@@ -232,7 +232,7 @@ def test_upgrade_sensitive_prs_select_candidate_acceptance(paths: list[str]) -> 
 
 
 def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
-    gate = runpy.run_path(str(ROOT / "scripts/verify-ci-gate"))
+    gate = runpy.run_path(str(ROOT / "scripts/ci/verify-ci-gate"))
     selected = {
         "rust": "true", "repository": "true", "control": "true", "web": "true",
         "generated": "true", "compose": "true", "nas-install": "true",
@@ -265,9 +265,9 @@ def test_contract_guard_inputs_select_the_controller_suite(path: str) -> None:
 
 def test_merge_queue_commit_selects_from_its_diff_like_a_pull_request() -> None:
     module = _module()
-    assert module.select(["scripts/select-ci-areas"], "merge_group") == module.select(
-        ["scripts/select-ci-areas"], "pull_request"
-    )
+    assert module.select(
+        ["scripts/ci/select-ci-areas"], "merge_group"
+    ) == module.select(["scripts/ci/select-ci-areas"], "pull_request")
     assert module.select([], "merge_group") == dict.fromkeys(module.AREAS, True)
     assert module.lane_selected(["tests/acceptance/x.py"], "merge_group") is True
 
@@ -423,7 +423,7 @@ def test_changed_nas_module_selects_its_real_python_consumers() -> None:
         "install/spark/install.sh",
         "deploy/compose/compose.yaml",
         "agent_protocol/src/vonk_agent_protocol/__init__.py",
-        "scripts/install-release-publication",
+        "scripts/release/install-release-publication",
         ".github/actions/python-env/action.yml",
         ".github/workflows/installer-candidate.yml",
         ".github/workflows/spark-upgrade-acceptance.yml",
@@ -472,7 +472,7 @@ def test_selector_folds_the_scope_into_lane_and_carry(tmp_path, head, accepts) -
     result = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "scripts/select-ci-areas"),
+            str(ROOT / "scripts/ci/select-ci-areas"),
             "--event",
             "pull_request",
             "--event-payload",

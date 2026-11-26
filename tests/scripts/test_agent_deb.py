@@ -19,8 +19,8 @@ import pytest
 pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
 
 ROOT = Path(__file__).resolve().parents[2]
-BUILD = ROOT / "scripts/build-agent-deb"
-VERIFY = ROOT / "scripts/verify-agent-deb"
+BUILD = ROOT / "scripts/agent/build-agent-deb"
+VERIFY = ROOT / "scripts/agent/verify-agent-deb"
 POSTRM = ROOT / "packaging/debian/postrm"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
 PACKAGE_BINARIES = (
@@ -258,7 +258,7 @@ def _unsealed_build(output: Path, binaries: Path) -> subprocess.CompletedProcess
 def _seal(unsealed: Path, key: Path, output: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
-            ROOT / "scripts/seal-agent-deb",
+            ROOT / "scripts/agent/seal-agent-deb",
             "--unsealed",
             unsealed,
             "--release-private-key",
@@ -354,7 +354,7 @@ def test_main_recovers_exactly_the_packages_a_pull_request_accepted(
         == 0
     )
     result = subprocess.run(
-        [ROOT / "scripts/reuse-agent-packages", pr, tmp_path / "unsealed"],
+        [ROOT / "scripts/agent/reuse-agent-packages", pr, tmp_path / "unsealed"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -400,7 +400,7 @@ def test_main_recovers_exactly_the_packages_a_pull_request_accepted(
         pr / "package" / "vonk-forge-agent_0.1.1_arm64.deb"
     )
     refused = subprocess.run(
-        [ROOT / "scripts/reuse-agent-packages", pr, tmp_path / "refused"],
+        [ROOT / "scripts/agent/reuse-agent-packages", pr, tmp_path / "refused"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -411,7 +411,13 @@ def test_main_recovers_exactly_the_packages_a_pull_request_accepted(
 
 def _unseal(sealed: Path, output: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [ROOT / "scripts/seal-agent-deb", "--sealed", sealed, "--output-dir", output],
+        [
+            ROOT / "scripts/agent/seal-agent-deb",
+            "--sealed",
+            sealed,
+            "--output-dir",
+            output,
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,

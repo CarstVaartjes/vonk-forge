@@ -22,7 +22,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import RecipeDefinition
 
-from scripts.development_slice_client import Client
+from scripts.fleet.development_slice_client import Client
 from tests.acceptance import artifact_job_canary as job
 from tests.acceptance.controller_contract import ControllerContract
 from tests.spark_lifecycle_runner_support import _module
