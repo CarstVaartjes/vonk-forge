@@ -92,6 +92,11 @@ class GatewayExternalDeployment(Base):
         default=ExternalPublicationState.PENDING.value,
         server_default=ExternalPublicationState.PENDING.value,
     )
+    #: Consecutive failed starts of the desired content; an edit, an enable or an
+    #: acknowledged generation resets it.
+    start_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     #: Why the deployment is not serving (set with ``blocked``, kept while it is
     #: withdrawn because of it).
     reason: Mapped[str | None] = mapped_column(String(32))
@@ -116,6 +121,8 @@ class GatewayCredentialBinding(Base):
     """
 
     __tablename__ = "gateway_credential_bindings"
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    __mapper_args__: ClassVar = {"version_id_col": version}
     __table_args__ = (
         CheckConstraint(
             "revision >= 1", name="ck_gateway_credential_bindings_revision"

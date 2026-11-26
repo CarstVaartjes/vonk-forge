@@ -16,18 +16,23 @@ The proof asserts what that client sees and what the gateway does:
   resolved secret;
 * a 307 redirect from the partner to "elsewhere" leaves "elsewhere" with no request
   that carries a credential;
-* after the external entries are removed from the file and the gateway reloads it,
+* after a generation without the external entries is published and the supervisor
+  reloads the gateway,
   the next call to the alias fails and the partner received nothing more.
 
-It has to run against the built image (the batch CI job); the removal step reloads
-the file the way the supervisor does, by restarting the process.
+It runs against the built image (the batch CI job) through the real entrypoint and
+supervisor, as Compose starts them: the secrets are staged files that only the
+supervisor reads and exports into the LiteLLM child, ``credentials.json`` names them
+without a value, and removal is a published generation the supervisor loads.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
+import shutil
 import ssl
 import subprocess
 import sys
@@ -46,12 +51,15 @@ from litellm_model_info_proof import (
     MASTER_KEY,
     PORT,
     POSTGRES_IMAGE,
+    ROOT,
     call,
     check,
     sdk,
     wait_healthy,
 )
 
+from vonk_agent_protocol.route_activation import SupervisorPhase
+from vonk_agent_protocol.state_machines import GatewayRouteState
 from vonk_control.gateway.external_contract import (
     ExternalDeploymentSpec,
     ExternalDestination,
@@ -65,6 +73,8 @@ from vonk_control.gateway.litellm import (
     render_external_entry,
 )
 from vonk_control.gateway.route_bundle_contract import RouteAcceptedModelPolicy
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 
 SECRET = "partner-secret-value"
 PARTNER_HOST = "partner.test.example"
@@ -373,6 +383,74 @@ def prove(key: str, elsewhere_port: int, remove: Callable[[], None]) -> None:
     )
 
 
+def publish(routes: Path, config: bytes, label: str) -> None:
+    """Publish one generation as the Controller does, for the real supervisor to load."""
+    publisher = AtomicRecipeRoutePublisher(AtomicRouteBundlePublisher(routes))
+    publisher._activate(  # the proof publishes the exact bundle the Controller writes
+        hashlib.sha256(label.encode()).hexdigest(),
+        config,
+        endpoints={},
+        state=GatewayRouteState.PUBLISHED,
+        required=SupervisorPhase.READY,
+    )
+    # The supervisor runs as another user: it reads the bundle, never writes it.
+    subprocess.run(["chmod", "-R", "a+rX", str(routes)], check=True)
+
+
+def wait_acknowledged(supervisor: Path, generation: int) -> None:
+    """Wait for the supervisor to say a healthy child serves this generation."""
+    deadline = time.monotonic() + 240
+    while time.monotonic() < deadline:
+        with contextlib.suppress(OSError, ValueError):
+            document = json.loads((supervisor / "ack.json").read_text())
+            if document.get("generation") == generation and "phase" not in document:
+                return
+        time.sleep(2)
+    raise SystemExit(f"the supervisor never acknowledged generation {generation}")
+
+
+def stage_custody(work: Path) -> tuple[Path, Path, Path, Path]:
+    """What runtime-init stages: the kit, the staged secrets and the shared state."""
+    kit = work / "kit" / "litellm"
+    kit.mkdir(parents=True)
+    for name in ("entrypoint.sh", "config_supervisor.py", "bootstrap-config.json"):
+        shutil.copyfile(ROOT / "deploy/compose/litellm" / name, kit / name)
+    secrets = work / "secrets"
+    credentials = secrets / "gateway-credentials"
+    credentials.mkdir(parents=True)
+    files = {
+        secrets / "litellm-master-key": MASTER_KEY,
+        secrets / "litellm-upstream-key": "stub-upstream-key",
+        secrets / "litellm-database-url": (
+            f"postgresql://postgres:{DB_PASSWORD}@127.0.0.1:{DB_PORT}/litellm"
+        ),
+        credentials / "PARTNER": SECRET,
+        credentials / "VERTEX_SA": '{"type": "service_account"}',
+    }
+    for path, value in files.items():
+        path.write_text(value + "\n")
+    supervisor = work / "supervisor"
+    supervisor.mkdir()
+    supervisor.chmod(0o777)
+    routes = work / "routes"
+    subprocess.run(["chmod", "-R", "a+rX", str(work / "kit"), str(secrets)], check=True)
+    return kit, secrets, supervisor, routes
+
+
+def prove_custody(supervisor: Path) -> None:
+    """The supervisor exported the staged secrets and told the Controller only their names."""
+    deadline = time.monotonic() + 60
+    path = supervisor / "credentials.json"
+    while not path.is_file():
+        check(time.monotonic() < deadline, "the supervisor wrote no credentials.json")
+        time.sleep(1)
+    text = path.read_text()
+    document = json.loads(text)
+    check(document["names"] == ["PARTNER", "VERTEX_SA"], f"names are {document}")
+    check(isinstance(document["child_pid"], int), "no child pid")
+    check(SECRET not in text and "service_account" not in text, "a value is in it")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", required=True)
@@ -382,9 +460,12 @@ def main() -> None:
 
     ca_pem, tls = make_authority(arguments.work)
     local, partner, elsewhere = serve(Local), serve(Partner, tls), serve(Elsewhere, tls)
-    config = arguments.work / "litellm.json"
-    config.write_bytes(render(local.server_address[1], partner.server_address[1]))
-    config.chmod(0o644)
+    kit, secrets, supervisor, routes = stage_custody(arguments.work)
+    publish(
+        routes,
+        render(local.server_address[1], partner.server_address[1]),
+        "with-externals",
+    )
     container, database = "vonk-external-proof", "vonk-external-proof-db"
     for name in (container, database):
         subprocess.run(["docker", "rm", "-f", name], check=False, capture_output=True)
@@ -405,6 +486,8 @@ def main() -> None:
         ],
         check=True,
     )
+    # The real entrypoint and supervisor, as Compose runs them: the secrets reach
+    # the child only through the supervisor, from the staged custody directory.
     subprocess.run(
         [
             "docker",
@@ -419,45 +502,55 @@ def main() -> None:
             "--add-host",
             f"{ELSEWHERE_HOST}:127.0.0.1",
             "--env",
-            f"LITELLM_MASTER_KEY={MASTER_KEY}",
+            "HOME=/root",
             "--env",
-            "LITELLM_UPSTREAM_KEY=stub-upstream-key",
+            "XDG_CACHE_HOME=/root/.cache",
             "--env",
-            f"VONK_CREDENTIAL_PARTNER={SECRET}",
+            "PRISMA_QUERY_ENGINE_BINARY=/opt/vonk-litellm/prisma/query-engine",
             "--env",
-            'VONK_CREDENTIAL_VERTEX_SA={"type": "service_account"}',
+            "LITELLM_UI_PATH=/tmp/litellm-ui",
+            "--env",
+            "STORE_MODEL_IN_DB=False",
+            "--env",
+            "LITELLM_MASTER_KEY_FILE=/run/vonk-normalized-secrets/litellm-master-key",
+            "--env",
+            "LITELLM_UPSTREAM_KEY_FILE=/run/vonk-normalized-secrets/litellm-upstream-key",
+            "--env",
+            "LITELLM_DATABASE_URL_FILE=/run/vonk-normalized-secrets/litellm-database-url",
             "--env",
             "SSL_CERT_FILE=/proof/ca.pem",
-            "--env",
-            f"LITELLM_DATABASE_URL=postgresql://postgres:{DB_PASSWORD}@127.0.0.1:{DB_PORT}/litellm",
+            "--tmpfs",
+            "/tmp",
+            "--tmpfs",
+            "/root:exec,mode=0700,uid=10002,gid=10001",
             "--volume",
-            f"{config}:/proof/litellm.json:ro",
+            f"{kit}:/run/vonk-runtime-assets/litellm:ro",
+            "--volume",
+            f"{secrets}:/run/vonk-normalized-secrets:ro",
+            "--volume",
+            f"{routes}:/routes:ro",
+            "--volume",
+            f"{supervisor}:/supervisor:rw",
             "--volume",
             f"{ca_pem}:/proof/ca.pem:ro",
             "--entrypoint",
-            "litellm",
+            "/bin/sh",
             arguments.image,
-            "--config",
-            "/proof/litellm.json",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(PORT),
+            "/run/vonk-runtime-assets/litellm/entrypoint.sh",
         ],
         check=True,
     )
 
     def remove() -> None:
-        # What a published withdrawal does to the gateway: it reloads a file
-        # without the external entries.
-        config.write_bytes(render(local.server_address[1], None))
-        subprocess.run(
-            ["docker", "restart", container], check=True, capture_output=True
-        )
-        wait_healthy(container)
+        # What a published withdrawal does: a generation without the external
+        # entries, which the supervisor loads by restarting the child.
+        publish(routes, render(local.server_address[1], None), "without-externals")
+        wait_acknowledged(supervisor, 2)
 
     try:
         wait_healthy(container)
+        wait_acknowledged(supervisor, 1)
+        prove_custody(supervisor)
         prove(client_key(arguments.work), elsewhere.server_address[1], remove)
     except BaseException:
         subprocess.run(["docker", "logs", "--tail", "200", container], check=False)

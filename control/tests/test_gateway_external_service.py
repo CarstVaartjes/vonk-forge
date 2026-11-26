@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine, insert, update
 from sqlalchemy.orm import sessionmaker
 
 from vonk_control.auth import Actor
@@ -16,6 +17,10 @@ from vonk_control.gateway.external_api import install_external_model_routes
 from vonk_control.gateway.external_service import ExternalModelService
 from vonk_control.gateway.litellm_surface import load_surface
 from vonk_control.model_primitives import Base
+from vonk_control.models.gateway import (
+    GatewayCredentialBinding,
+    GatewayExternalDeployment,
+)
 from vonk_control.operator_acceptance.resolution import (
     RECEIPT_HEADER,
     ControllerAPIRoute,
@@ -28,6 +33,12 @@ ELSEWHERE = "https://elsewhere.example"
 
 
 def _client(tmp_path: Path, role: str = "administrator") -> TestClient:
+    return _client_and_engine(tmp_path, role)[0]
+
+
+def _client_and_engine(
+    tmp_path: Path, role: str = "administrator"
+) -> tuple[TestClient, Engine]:
     engine = create_engine(f"sqlite:///{tmp_path / 'external.sqlite'}")
     Base.metadata.create_all(engine)
     service = ExternalModelService(
@@ -42,7 +53,7 @@ def _client(tmp_path: Path, role: str = "administrator") -> TestClient:
         app, actor_dependency=Depends(lambda: Actor("test", role)), service=service
     )
     OperatorReceiptResolver(external_models=service).bind(app)
-    return TestClient(app)
+    return TestClient(app), engine
 
 
 def _entry(**changes: object) -> dict[str, object]:
@@ -95,8 +106,14 @@ def test_a_model_is_accepted_exactly_as_reviewed_and_replays_by_request_id(
     _approve(client, PARTNER)
     review, accepted = _put(client, _entry(), None)
     assert review["problems"] == []
-    assert review["effects"] == ["gateway-restart", "open-key-access"]
+    assert review["effects"] == [
+        "gateway-restart",
+        "open-key-access",
+        "local-models-dark-on-failed-start",
+    ]
     assert review["grace_seconds"] == 30
+    # Three tries of one content, each waiting out the 165 s acknowledgement.
+    assert review["failed_start_dark_seconds"] == 3 * 165
     assert accepted.status_code == 200, accepted.text
     assert RECEIPT_HEADER in accepted.headers
     request_id = accepted.json()["request_id"]
@@ -193,4 +210,101 @@ def test_only_an_administrator_reads_or_changes_external_models(
             "/api/gateway/models/validate", json={"entry": _entry()}
         ).status_code
         == 403
+    )
+
+
+def test_a_removal_that_is_already_complete_replays_as_accepted(tmp_path: Path) -> None:
+    client, engine = _client_and_engine(tmp_path)
+    _approve(client, PARTNER)
+    _put(client, _entry(), None)
+    request = {"action": "remove", "expected_revision": 1}
+    review = client.post("/api/gateway/models/partner-large/preview", json=request)
+    assert review.status_code == 200, review.text
+    body = {
+        **request,
+        "request_id": str(uuid4()),
+        "effect_digest": review.json()["effect_digest"],
+    }
+    first = client.post("/api/gateway/models/partner-large/accept", json=body)
+    assert first.status_code == 200, first.text
+    # The publication has not run, so the row still exists: the same id replays.
+    # Delete it as the confirmed withdrawal does, then replay a lost response.
+    with sessionmaker(engine).begin() as session:
+        for row in session.query(GatewayExternalDeployment):
+            session.delete(row)
+    again = client.post("/api/gateway/models/partner-large/accept", json=body)
+    assert again.status_code == 200, again.text
+    assert again.json().get("revision") is None
+    other = {**body, "request_id": str(uuid4())}
+    assert (
+        client.post("/api/gateway/models/partner-large/accept", json=other).status_code
+        == 200
+    )
+
+
+def _binding_accept(client: TestClient, destinations, revision) -> int:
+    request = {"action": "put", "destinations": destinations}
+    review = client.post(
+        "/api/gateway/credentials/PARTNER/preview",
+        json={**request, "expected_revision": revision},
+    )
+    assert review.status_code == 200, review.text
+    return client.post(
+        "/api/gateway/credentials/PARTNER/accept",
+        json={
+            "request_id": str(uuid4()),
+            **request,
+            "expected_revision": revision,
+            "effect_digest": review.json()["effect_digest"],
+        },
+    ).status_code
+
+
+def test_a_binding_changed_by_another_accept_is_a_conflict_not_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Break caught: two accepts of one binding both wrote (the second overwrote the
+    # first), or the loser met an unmapped database error.
+    client = _client(tmp_path)
+    write = ExternalModelService._write_binding
+    table = GatewayCredentialBinding
+    stamp = datetime(2026, 11, 26, tzinfo=UTC)
+
+    def another_create(session, row, request, review, **kwargs):
+        revision = write(session, row, request, review, **kwargs)
+        session.execute(
+            insert(table).values(
+                name=review.name,
+                version=1,
+                revision=1,
+                destinations=[],
+                request_id="other",
+                actor="other",
+                created_at=stamp,
+                updated_at=stamp,
+            )
+        )
+        return revision
+
+    def another_update(session, row, request, review, **kwargs):
+        # Another accept committed first: the row the ORM holds is one version behind.
+        session.execute(
+            update(table)
+            .where(table.name == review.name)
+            .values(version=table.version + 1)
+            .execution_options(synchronize_session=False)
+        )
+        return write(session, row, request, review, **kwargs)
+
+    monkeypatch.setattr(
+        ExternalModelService, "_write_binding", staticmethod(another_create)
+    )
+    assert _binding_accept(client, [{"origin": PARTNER}], None) == 409
+    monkeypatch.setattr(ExternalModelService, "_write_binding", staticmethod(write))
+    _approve(client, PARTNER)
+    monkeypatch.setattr(
+        ExternalModelService, "_write_binding", staticmethod(another_update)
+    )
+    assert (
+        _binding_accept(client, [{"origin": PARTNER}, {"origin": ELSEWHERE}], 1) == 409
     )

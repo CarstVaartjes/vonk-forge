@@ -39,6 +39,8 @@ class ExternalEvent(StrEnum):
     WITHDRAW = "withdraw"
     DRAINED = "drained"
     ENABLE = "enable"
+    #: A stored word the machine never had: plan again from the operator's intent.
+    REPLAN = "replan"
 
 
 _PENDING = ExternalPublicationState.PENDING
@@ -64,6 +66,7 @@ EDGES: Final[
     _BLOCKED: {
         ExternalEvent.REVISION_ACCEPTED: _PENDING,
         ExternalEvent.RETRY_DUE: _PENDING,
+        ExternalEvent.ENABLE: _PENDING,
         ExternalEvent.WITHDRAW: _WITHDRAWING,
     },
     _WITHDRAWING: {
@@ -85,6 +88,10 @@ _CLEARS_REASON: Final = frozenset(
         ExternalEvent.RETRY_DUE,
         ExternalEvent.ENABLE,
     }
+)
+#: Events after which the desired content starts again: its failed starts are forgotten.
+_FORGETS_FAILURES: Final = frozenset(
+    {ExternalEvent.ACKED, ExternalEvent.REVISION_ACCEPTED, ExternalEvent.ENABLE}
 )
 
 
@@ -115,6 +122,8 @@ def apply_event(
     row.state = state.value
     if event in _CLEARS_REASON:
         row.reason = None
+    if event in _FORGETS_FAILURES:
+        row.start_failures = 0
     if reason is not None:
         row.reason = reason.value
     if (row.state, row.reason) != before:
@@ -133,8 +142,7 @@ def settle(
     """
 
     if adopt_machine_state(ExternalPublicationState, row.state) is None:
-        row.state = _PENDING.value
-        row.updated_at = now
+        apply_event(row, ExternalEvent.REPLAN, now=now)
     if not row.enabled or row.removal_requested:
         return apply_event(row, ExternalEvent.WITHDRAW, now=now)
     if row.state == _WITHDRAWN.value:

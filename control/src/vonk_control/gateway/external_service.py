@@ -23,7 +23,10 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError
-from vonk_agent_protocol.route_activation import ROUTE_SHUTDOWN_SECONDS
+from vonk_agent_protocol.route_activation import (
+    ROUTE_ACK_TIMEOUT_SECONDS,
+    ROUTE_SHUTDOWN_SECONDS,
+)
 from vonk_agent_protocol.state_machines import (
     ExternalPublicationState,
 )
@@ -62,7 +65,11 @@ from vonk_control.gateway.external_contract import (
     ExternalEntryProblem,
     ExternalModelInput,
 )
-from vonk_control.gateway.external_publication import CredentialNames, read_bindings
+from vonk_control.gateway.external_publication import (
+    START_FAILURE_LIMIT,
+    CredentialNames,
+    read_bindings,
+)
 from vonk_control.gateway.external_states import (
     ExternalEvent,
     apply_event,
@@ -183,6 +190,11 @@ class ExternalModelService:
             row = _row(session, alias)
             if row is not None and row.request_id == request.request_id:
                 return _accepted(row, request.action)  # a lost response, asked again
+            if row is None and request.action == ExternalModelAction.REMOVE:
+                # Already gone (the withdrawal was confirmed): the removal holds.
+                return ExternalModelAccepted(
+                    alias=alias, request_id=request.request_id, action=request.action
+                )
             change = self._change(
                 session, alias, request.action, request.entry, request.expected_revision
             )
@@ -288,6 +300,7 @@ class ExternalModelService:
             credential_bindings=bindings,
             effects=_effects(action),
             grace_seconds=ROUTE_SHUTDOWN_SECONDS,
+            failed_start_dark_seconds=_dark_seconds(action),
             expected_revision=expected_revision,
             effect_digest="0" * 64,
         )
@@ -344,6 +357,7 @@ class ExternalModelService:
             row.enabled = True
             row.removal_requested = False
             apply_event(row, ExternalEvent.ENABLE, now=now)
+            schedule_wait(row, None)  # a parked wait ends with the operator's action
         else:
             row.enabled = False
             row.removal_requested = action == ExternalModelAction.REMOVE
@@ -390,6 +404,10 @@ class ExternalModelService:
                     action=request.action,
                     revision=row.revision,
                 )
+            if row is None and request.action == ExternalBindingAction.REMOVE:
+                return ExternalBindingAccepted(
+                    name=name, request_id=request.request_id, action=request.action
+                )
             review = self._binding_review(
                 session,
                 name,
@@ -401,37 +419,60 @@ class ExternalModelService:
                 raise ExternalChangeConflict(
                     "The change differs from the review that was read."
                 )
-            if request.action == ExternalBindingAction.REMOVE:
-                if row is not None:
-                    session.delete(row)
-                return ExternalBindingAccepted(
-                    name=name, request_id=request.request_id, action=request.action
-                )
-            destinations = request.destinations or []
-            if row is None:
-                row = GatewayCredentialBinding(
-                    name=name,
-                    revision=1,
-                    destinations=destinations,
-                    request_id=request.request_id,
-                    actor=actor,
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(row)
-            else:
-                if review.added or review.removed:
-                    row.revision += 1
-                    row.destinations = destinations
-                row.request_id = request.request_id
-                row.actor = actor
-                row.updated_at = now
+            try:
+                with admitting(), session.begin_nested():
+                    revision = self._write_binding(
+                        session, row, request, review, actor=actor, now=now
+                    )
+                    session.flush()
+            except ConstraintReplan, StaleDataError:
+                # Another accept changed or created the binding first: read it again.
+                raise ExternalChangeConflict(
+                    "The binding changed while the change was accepted; review it again."
+                ) from None
             return ExternalBindingAccepted(
                 name=name,
                 request_id=request.request_id,
                 action=request.action,
-                revision=row.revision,
+                revision=revision,
             )
+
+    @staticmethod
+    def _write_binding(
+        session: Session,
+        row: GatewayCredentialBinding | None,
+        request: ExternalBindingAcceptRequest,
+        review: ExternalBindingReview,
+        *,
+        actor: str,
+        now: datetime,
+    ) -> int | None:
+        """The one write of a binding: guarded by its version and, when new, its name."""
+
+        if request.action == ExternalBindingAction.REMOVE:
+            if row is not None:
+                session.delete(row)
+            return None
+        destinations = request.destinations or []
+        if row is None:
+            row = GatewayCredentialBinding(
+                name=review.name,
+                revision=1,
+                destinations=destinations,
+                request_id=request.request_id,
+                actor=actor,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(row)
+            return 1
+        if review.added or review.removed:
+            row.revision += 1
+            row.destinations = destinations
+        row.request_id = request.request_id
+        row.actor = actor
+        row.updated_at = now
+        return row.revision
 
     def binding_receipt(self, name: str, request_id: str) -> ExternalBindingView:
         with self.sessions() as session:
@@ -503,8 +544,20 @@ class ExternalModelService:
 
 def _effects(action: ExternalModelAction) -> list[ExternalEffect]:
     if action in {ExternalModelAction.PUT, ExternalModelAction.ENABLE}:
-        return [ExternalEffect.GATEWAY_RESTART, ExternalEffect.OPEN_KEY_ACCESS]
+        return [
+            ExternalEffect.GATEWAY_RESTART,
+            ExternalEffect.OPEN_KEY_ACCESS,
+            ExternalEffect.LOCAL_MODELS_DARK_ON_FAILED_START,
+        ]
     return [ExternalEffect.GATEWAY_RESTART]
+
+
+def _dark_seconds(action: ExternalModelAction) -> int:
+    """The longest a failing start of this change keeps local models down."""
+
+    if action in {ExternalModelAction.PUT, ExternalModelAction.ENABLE}:
+        return START_FAILURE_LIMIT * ROUTE_ACK_TIMEOUT_SECONDS
+    return 0
 
 
 def _row(session: Session, alias: str) -> GatewayExternalDeployment | None:

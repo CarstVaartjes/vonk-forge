@@ -27,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName, WaitReason
 from vonk_agent_protocol.state_machines import (
     ExternalBlockReason,
     ExternalPublicationState,
@@ -50,7 +50,12 @@ from vonk_control.models.gateway import (
     GatewayExternalDeployment,
 )
 from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY, ROUTE_RECOVERY, schedule
-from vonk_control.waits.persisted import schedule_wait
+from vonk_control.waits.persisted import park_wait, schedule_wait
+
+#: The owner's identical-exit rule: after this many failed starts of the same entry
+#: content the deployment stays blocked with evidence and stops retrying; an edit
+#: (a content change) or an enable starts again.  Every try restarts the gateway.
+START_FAILURE_LIMIT = 3
 
 #: A start that failed is looked at again at the shared policy's cap: every try
 #: restarts the gateway, so it settles at the slowest step at once.
@@ -152,6 +157,18 @@ def _block(
     """Block a deployment and say when it is looked at again (a wait, never forever)."""
 
     apply_event(row, ExternalEvent.BLOCK, reason=reason, now=now)
+    if _start_failures_spent(row, reason):
+        park_wait(
+            row,
+            reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
+            detail=(
+                f"The gateway did not start with this entry {START_FAILURE_LIMIT} "
+                "times; edit it or enable it to try again."
+            ),
+            now=now,
+            operator_action=OperatorActionName.RESUME,
+        )
+        return
     if reason == ExternalBlockReason.START_FAILED:
         due = DISTRIBUTED_RECOVERY.next_attempt(
             row.id, _START_FAILED_ATTEMPTS, now, ongoing_intent=True
@@ -208,7 +225,9 @@ def plan_externals(
             continue
         if state == ExternalPublicationState.WITHDRAWN:
             continue
-        waiting = row.next_action_at is not None and now < _aware(row.next_action_at)
+        waiting = (
+            row.next_action_at is not None and now < _aware(row.next_action_at)
+        ) or _parked(row)
         if state == ExternalPublicationState.BLOCKED and not waiting:
             apply_event(row, ExternalEvent.RETRY_DUE, now=now)
             schedule_wait(row, None)
@@ -222,6 +241,26 @@ def plan_externals(
         if isinstance(kept, ServedExternal):
             served.append(kept)
     return ExternalPlan(tuple(served), frozenset(withdrawing))
+
+
+def _start_failures_spent(
+    row: GatewayExternalDeployment, reason: ExternalBlockReason | str | None
+) -> bool:
+    """The owner's identical-exit rule: this content has failed to start often enough.
+
+    The one place the bound is read, so the block and the parked check agree.
+    """
+
+    return (
+        reason == ExternalBlockReason.START_FAILED
+        and row.start_failures >= START_FAILURE_LIMIT
+    )
+
+
+def _parked(row: GatewayExternalDeployment) -> bool:
+    """Whether the deployment gave up on its content and waits for an edit or an enable."""
+
+    return _start_failures_spent(row, row.reason)
 
 
 def _keep(
@@ -318,4 +357,5 @@ def block_introduced(session: Session, plan: ExternalPlan, *, now: datetime) -> 
     for item in plan.introduced:
         row = session.get(GatewayExternalDeployment, item.deployment_id)
         if row is not None and _still_desired(row, item):
+            row.start_failures += 1
             _block(row, ExternalBlockReason.START_FAILED, now=now)

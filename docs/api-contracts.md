@@ -41,7 +41,8 @@ an identical committed definition without increasing its revision.
 External models and their credential bindings are administrator-only routes under
 `/api/gateway/models` and `/api/gateway/credentials`. A change is previewed (the
 review names the destination and what changed from it, the bindings, the effects
-and the 30 second grace for in-flight streams, and carries an `effect_digest`),
+(including that a failing start leaves local models down for at most
+`failed_start_dark_seconds`) and the 30 second grace for in-flight streams, and carries an `effect_digest`),
 then accepted with exactly that digest, the `request_id` and the revision the
 operator read; a changed digest or revision is refused (409) and the same
 `request_id` returns the original acceptance. `validate` sends no traffic and returns

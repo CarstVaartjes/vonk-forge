@@ -898,10 +898,7 @@ models at startup.
   pass adds or changes an entry, so a failing external entry can never fail a
   local route's own publication. The entries' identity is part of the candidate
   digest, and is absent with no external model, so a gateway without them keeps its
-  digest. An entry whose generation is not acknowledged within the supervisor's
-  timeout blocks exactly the entries that generation introduced (`start-failed`,
-  looked at again after five minutes) and the same pass publishes the local routes
-  without them. A removed entry never comes back, because no generation is built
+  digest. A generation that introduced entries and is not acknowledged within the supervisor's timeout blocks exactly those entries (`start-failed`) and `start_failures` counts it; the next pass, about five seconds later, publishes the local routes without them. The local models are down until then, and a failing entry is tried again after about five minutes, at most three times per content (the owner's identical-exit rule): the third failure leaves it blocked with evidence naming the action that resumes it (edit the entry, or enable it) and no due time, and an edit or an enable starts the count again. The review discloses the bound, `failed_start_dark_seconds`. A removed entry never comes back, because no generation is built
   from the previous bundle; a deployment leaves SQL (and frees its name) only after
   the generation without it is acknowledged. Every gateway generation restarts
   LiteLLM, so adding, changing or removing an external model cuts in-flight streams

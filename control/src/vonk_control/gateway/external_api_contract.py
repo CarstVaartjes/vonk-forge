@@ -45,6 +45,9 @@ class ExternalEffect(WireEnum):
     GATEWAY_RESTART = "gateway-restart"
     #: Every key without a model list can call the alias once it is published.
     OPEN_KEY_ACCESS = "open-key-access"
+    #: A start that fails leaves the local models down until the gateway gives up
+    #: on the generation (``failed_start_dark_seconds``, at most).
+    LOCAL_MODELS_DARK_ON_FAILED_START = "local-models-dark-on-failed-start"
 
 
 class ExternalModelView(StrictModel):
@@ -98,6 +101,10 @@ class ExternalModelReview(StrictModel):
     credential_bindings: list[BindingName] = Field(default_factory=list)
     effects: list[ExternalEffect]
     grace_seconds: int = Field(ge=0)
+    #: The longest local models can be down because this change's entry fails to
+    #: start: every failed try waits for the acknowledgement, and an entry is tried
+    #: at most ``START_FAILURE_LIMIT`` times per content.
+    failed_start_dark_seconds: int = Field(ge=0)
     expected_revision: int | None = Field(default=None, ge=1)
     effect_digest: Digest
 
@@ -114,8 +121,9 @@ class ExternalModelAccepted(StrictModel):
     alias: EndpointAlias
     request_id: UuidId
     action: ExternalModelAction
-    revision: int = Field(ge=1)
-    state: ExternalPublicationState
+    #: ``None`` for a removal that is already complete: nothing is left to number.
+    revision: int | None = Field(default=None, ge=1)
+    state: ExternalPublicationState | None = None
 
 
 class ExternalBindingAction(WireEnum):

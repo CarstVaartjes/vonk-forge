@@ -235,6 +235,7 @@ CONSTRAINTS: Mapping[str, Conflict] = MappingProxyType(
         "recipe_library_sync_runs_active_slot_key": Conflict.REPLAN,
         "uq_fleet_profiles_number": Conflict.REPLAN,
         "gateway_external_deployments_alias_key": Conflict.REPLAN,
+        "gateway_credential_bindings_pkey": Conflict.REPLAN,
         "agent_certificate_rotations_pkey": Conflict.REPLAN,
         # Request identities.
         "jobs_request_id_key": Conflict.REPLAY,

@@ -346,27 +346,7 @@ def maintain(self) -> bool:
     )
     if isinstance(step, bool):
         return step
-    try:
-        self._execute(step)
-    except _ActivatedRecipeRouteError as error:
-        if not step.settles_failure:
-            raise
-        # The generation did not start with the external entries it introduced.
-        # They are blocked now, so the same pass publishes the local routes without
-        # them instead of leaving the gateway to wait for the next pass.
-        log_event(
-            _LOGGER,
-            "recipe.route.external_blocked",
-            service="control-routes",
-            reason=str(error),
-        )
-        served = self.served_model_info()
-        retry = self.decide_publication(
-            lambda session: self._maintenance_step_in_session(session, served)
-        )
-        if isinstance(retry, bool):
-            return retry
-        self._execute(retry)
+    self._execute(step)
     return True
 
 
@@ -616,12 +596,22 @@ def _maintain_empty_routes(
         return False
     owner = session.get(RoutePublicationOwner, 1)
     publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-    if candidate.externals.withdrawing or (
-        owner is not None
-        and owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
-        and publication is not None
-        and publication.state == RoutePublicationState.COMPLETED
-        and publication.generation == owner.owner_generation
+    live = self._publisher.active_marker_digest()
+    # A generation that was written and never recorded (its entries did not start)
+    # is live: nothing served may stay on the gateway beyond the recorded one.
+    unrecorded = live is not None and (
+        publication is None or live != publication.activation_marker_digest
+    )
+    if (
+        candidate.externals.withdrawing
+        or unrecorded
+        or (
+            owner is not None
+            and owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
+            and publication is not None
+            and publication.state == RoutePublicationState.COMPLETED
+            and publication.generation == owner.owner_generation
+        )
     ):
         # The live bundle still lists models although nothing is served: a
         # lifecycle path withdrew the last route only in the database, or the

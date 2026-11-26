@@ -11,7 +11,11 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    ErrorCategory,
+    OperatorActionName,
+    WaitReason,
+)
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.route_activation import ActivationMarker, SupervisorPhase
@@ -27,8 +31,8 @@ from vonk_control.gateway.external_contract import (
     ExternalModelInput,
 )
 from vonk_control.gateway.external_states import (
-    EDGES,
     ExternalEvent,
+    apply_event,
     next_state,
     settle,
 )
@@ -47,6 +51,7 @@ from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.recipe_routes.shared import RecipeRouteNotReady
+from vonk_control.waits.contract import WaitEvidence
 from vonk_control.waits.persisted import read_wait
 
 from .recipe_operations_support import setup_services
@@ -153,12 +158,19 @@ def _supervisor_fake(monkeypatch, root: Path):
     return acknowledge
 
 
-def _service(tmp_path: Path, monkeypatch, clock) -> RecipeRouteService:
-    engine = create_engine(f"sqlite:///{tmp_path / 'externals.sqlite'}")
+def _service(
+    tmp_path: Path,
+    monkeypatch,
+    clock,
+    engine=None,
+    ack=None,
+) -> RecipeRouteService:
+    if engine is None:
+        engine = create_engine(f"sqlite:///{tmp_path / 'externals.sqlite'}")
     Base.metadata.create_all(engine)
     root = tmp_path / "live"
     runtime = AtomicRouteBundlePublisher(
-        root, await_supervisor_ack=_supervisor_fake(monkeypatch, root)
+        root, await_supervisor_ack=ack or _supervisor_fake(monkeypatch, root)
     )
     return RecipeRouteService(
         sessionmaker(engine, expire_on_commit=False),
@@ -210,11 +222,16 @@ def test_an_external_model_publishes_with_no_local_route_and_leaves_with_its_rem
     assert service.maintain() is False
 
 
-def test_a_malformed_external_entry_blocks_while_the_local_route_stays_published(
+def _generations(root: Path) -> int:
+    return len(list((root / "generations").iterdir()))
+
+
+def test_a_failed_start_blocks_the_entry_and_the_next_pass_publishes_without_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Break caught: a LiteLLM child that never starts with one bad external entry
-    # left every local route dark until the next pass.
+    # The failed generation is live, and dark, until the next pass republishes
+    # without the entry; the review discloses that (the other pass is the API
+    # tick about five seconds later in production).
     clock = MutableClock(NOW)
     base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
     service = atomic_service(base, tmp_path / "live", clock)
@@ -225,26 +242,90 @@ def test_a_malformed_external_entry_blocks_while_the_local_route_stays_published
     service.publish_run(run_id)
     assert _live_models(tmp_path / "live") == ["qwen"]
     # An entry the pinned LiteLLM no longer accepts (admitted before a pin change).
-    bad = ExternalDeploymentSpec(
-        alias="odd-model",
-        litellm_params={"model": "bad/odd"},
-        destination=ExternalDestination(origins=["provider:bad"]),
-    )
-    _seed(service.sessions, bad)
+    _seed(service.sessions, _bad_spec())
 
-    assert service.maintain() is True
-
-    assert _live_models(tmp_path / "live") == ["qwen"]
+    assert service.maintain() is False  # the generation was not acknowledged
+    assert "odd-model" in _live_models(tmp_path / "live")  # live, and dark
     row = _row(service, "odd-model")
     assert row is not None
     assert row.state == ExternalPublicationState.BLOCKED.value
     assert row.reason == ExternalBlockReason.START_FAILED.value
+    assert row.start_failures == 1
     with service.sessions() as session:
         owned = session.get(GatewayExternalDeployment, row.id)
         assert owned is not None
         wait = read_wait(owned)
     assert wait is not None
     assert wait.next_check > clock.now
+
+    clock.now += timedelta(
+        seconds=120
+    )  # past the owner's own backoff, before the retry
+    assert service.maintain() is True
+    assert _live_models(tmp_path / "live") == ["qwen"]
+
+
+def _bad_spec() -> ExternalDeploymentSpec:
+    return ExternalDeploymentSpec(
+        alias="odd-model",
+        litellm_params={"model": "bad/odd"},
+        destination=ExternalDestination(origins=["provider:bad"]),
+    )
+
+
+def test_three_failed_starts_stop_the_retries_until_an_edit_or_an_enable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The owner's identical-exit rule: three failed starts of the same content leave
+    # the entry blocked with evidence naming the resume action; a content change or
+    # an enable writes exactly one more generation.
+    clock = MutableClock(NOW)
+    service = _service(tmp_path, monkeypatch, clock)
+    _seed(service.sessions, _bad_spec())
+    root = tmp_path / "live"
+
+    for _failure in range(3):
+        clock.now += timedelta(minutes=6)  # the retry of a blocked entry is due
+        service.maintain()  # introduces the entry; the generation fails
+        clock.now += timedelta(seconds=90)
+        service.maintain()  # publishes without it
+    row = _row(service, "odd-model")
+    assert row is not None
+    assert row.start_failures == 3
+    assert row.state == ExternalPublicationState.BLOCKED.value
+    assert row.next_action_at is None
+    with service.sessions() as session:
+        owned = session.get(GatewayExternalDeployment, row.id)
+        assert owned is not None
+        assert isinstance(owned.wait_evidence, WaitEvidence)
+        assert owned.wait_evidence.operator_action == OperatorActionName.RESUME
+    parked = _generations(root)
+    clock.now += timedelta(hours=1)
+    assert service.maintain() is False  # no fourth try
+    assert _generations(root) == parked
+
+    # An enable starts the entry again: exactly one generation, which fails once.
+    with service.sessions.begin() as session:
+        stored = session.get(GatewayExternalDeployment, row.id)
+        assert stored is not None
+        apply_event(stored, ExternalEvent.ENABLE, now=clock.now)
+    service.maintain()
+    assert _generations(root) == parked + 1
+    again = _row(service, "odd-model")
+    assert again is not None
+    assert again.start_failures == 1
+    assert again.state == ExternalPublicationState.BLOCKED.value
+
+    # So does an edit (a content change): the failures are forgotten.
+    with service.sessions.begin() as session:
+        stored = session.get(GatewayExternalDeployment, row.id)
+        assert stored is not None
+        stored.desired_revision += 1
+        stored.desired_spec = _bad_spec().model_copy(
+            update={"litellm_params": {"model": "bad/odd2"}}
+        )
+        apply_event(stored, ExternalEvent.REVISION_ACCEPTED, now=clock.now)
+        assert stored.start_failures == 0
 
 
 def test_a_refusal_before_the_generation_is_written_blames_no_entry(
@@ -359,13 +440,36 @@ def test_narrowing_a_binding_withdraws_a_deployment_and_widening_changes_nothing
     assert row.reason == ExternalBlockReason.DESTINATION_NOT_APPROVED.value
 
 
-def test_every_state_and_event_follows_its_declared_edge_and_an_unknown_word_self_heals() -> (
-    None
-):
-    for state in ExternalPublicationState:
-        for event in ExternalEvent:
-            expected = EDGES[state].get(event, state)
-            assert next_state(state.value, event) == expected
+def test_the_declared_edges_and_an_unknown_word_that_self_heals() -> None:
+    pending, published = (
+        ExternalPublicationState.PENDING,
+        ExternalPublicationState.PUBLISHED,
+    )
+    blocked, withdrawing = (
+        ExternalPublicationState.BLOCKED,
+        ExternalPublicationState.WITHDRAWING,
+    )
+    withdrawn = ExternalPublicationState.WITHDRAWN
+    edges = [
+        (pending, ExternalEvent.ACKED, published),
+        (pending, ExternalEvent.BLOCK, blocked),
+        (published, ExternalEvent.REVISION_ACCEPTED, pending),
+        (blocked, ExternalEvent.RETRY_DUE, pending),
+        (blocked, ExternalEvent.REVISION_ACCEPTED, pending),
+        (blocked, ExternalEvent.ENABLE, pending),
+        (withdrawn, ExternalEvent.ENABLE, pending),
+        (withdrawing, ExternalEvent.DRAINED, withdrawn),
+        (pending, ExternalEvent.WITHDRAW, withdrawing),
+        (published, ExternalEvent.WITHDRAW, withdrawing),
+        (blocked, ExternalEvent.WITHDRAW, withdrawing),
+        # An event with no edge from the state changes nothing.
+        (published, ExternalEvent.RETRY_DUE, published),
+        (withdrawing, ExternalEvent.ENABLE, withdrawing),
+        (withdrawn, ExternalEvent.ACKED, withdrawn),
+        (published, ExternalEvent.REPLAN, published),
+    ]
+    for state, event, expected in edges:
+        assert next_state(state.value, event) == expected, (state, event)
     # A stored word the machine never had re-plans from intent instead of blocking.
     assert (
         next_state("retired-word", ExternalEvent.ACKED)

@@ -93,6 +93,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "External models publish with no local route, block with a typed reason and a wait when the generation does not start while the local route stays published, withdraw when a binding is narrowed, and follow their declared state edges; no whole-tree scan.",
     ),
     (
+        "control/tests/test_gateway_external_postgres.py",
+        "Real PostgreSQL crash points of external model publication: after the accept, after the publish before the ack, after the ack before the record; no repeated effect, nothing lost, a removed entry stays gone.",
+    ),
+    (
         "control/tests/test_gateway_external_service.py",
         "An external model or credential binding is accepted exactly as reviewed, replays by request id, keeps its own alias on an edit and is administrator-only; no whole-tree scan.",
     ),
