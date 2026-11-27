@@ -215,7 +215,7 @@ def _memory(node: object) -> str:
 
 
 def _run_state_word(healthy: object, run_state: object) -> str:
-    """One workload's state in a word, as the Controller web Fleet page says it.
+    """One workload's state in a word, as the Controller web Overview says it.
 
     Health only qualifies a run that is running; any other run state is shown as is.
     """
@@ -559,7 +559,7 @@ def _free_memory_text(online: Sequence[object]) -> str:
 
 
 def _fleet_status_line(payload: object) -> str:
-    """The Fleet in one line, in the words the Controller web Fleet page uses."""
+    """The Fleet in one line, in the words the Controller web Overview uses."""
     document = _object(payload, "Fleet")
     nodes = _records(document, "nodes")
     if not nodes:

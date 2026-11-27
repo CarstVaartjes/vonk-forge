@@ -231,7 +231,7 @@ def _refusal_detail(error: BaseException) -> str:
     """Name one availability refusal, bounded and redacted.
 
     Every failure outside the four special cases used to answer with the same
-    sentence, so the documented ``recipe download`` prepare-cache recovery step
+    sentence, so ``recipe download`` (preparing the cache ahead of a load)
     left an operator with nothing to inspect and no durable operation record to
     read.  The typed error already carries a stable code and an operator-facing
     message; render both and never echo a stored document, a token, or an
