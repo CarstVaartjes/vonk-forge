@@ -375,7 +375,7 @@ fn configured_upgrade(paths: &InstallPaths) {
     fs::write(&paths.ca, ca).unwrap();
     fs::write(
         &paths.firewall_config,
-        "VONK_NAS_MANAGEMENT_IP=192.168.1.231\nVONK_NODE_MANAGEMENT_IP=192.168.1.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n",
+        "VONK_NAS_MANAGEMENT_IP=10.0.0.231\nVONK_NODE_MANAGEMENT_IP=10.0.0.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n",
     )
     .unwrap();
     fs::write(&paths.helper_authority, format!("{}\n", "11".repeat(32))).unwrap();
@@ -429,8 +429,8 @@ fn run_fresh_handoff_process(root: &Path) {
         values: [
             "https://enroll.example.test/".to_owned(),
             fingerprint.clone(),
-            "192.168.1.231".to_owned(),
-            "192.168.1.211".to_owned(),
+            "10.0.0.231".to_owned(),
+            "10.0.0.211".to_owned(),
             "192.168.100.10".to_owned(),
             "192.168.100.11".to_owned(),
         ]
@@ -1005,8 +1005,8 @@ fn real_sudo_pty_foreground_auth_then_recover_without_reinstall() {
             values: [
                 "https://enroll.example.test/".to_owned(),
                 fingerprint,
-                "192.168.1.231".to_owned(),
-                "192.168.1.211".to_owned(),
+                "10.0.0.231".to_owned(),
+                "10.0.0.211".to_owned(),
                 "192.168.100.10".to_owned(),
                 "192.168.100.11".to_owned(),
             ]

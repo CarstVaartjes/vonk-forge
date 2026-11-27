@@ -446,7 +446,7 @@ def _blocker_codes(plan) -> list[str]:
 
 
 def test_a_shortfall_nothing_vonk_holds_can_clear_is_tried() -> None:
-    # Production 2026-10-16: spark-3542 held no Vonk claim, 125_650_657_280
+    # Production 2026-10-16: spark-bbbb held no Vonk claim, 125_650_657_280
     # bytes free; the aday777 recipe's measured peak left less than the platform
     # floor, and its load backed off 40 times on a capacity wait no claim, stop
     # or run could ever clear. The peak is derived from the floor constant.
@@ -484,7 +484,7 @@ def test_a_shortfall_nothing_vonk_holds_can_clear_is_tried() -> None:
 
 
 def test_a_host_shortfall_inside_its_recent_noise_stays_a_wait() -> None:
-    # spark-3542's idle free moved by about 0.5e9 within the hour (125.17e9 to
+    # spark-bbbb's idle free moved by about 0.5e9 within the hour (125.17e9 to
     # 125.67e9). A peak whose floor-inclusive demand sits between the current and
     # the best sample fits the best one; one low sample must not end that load as
     # never fitting.

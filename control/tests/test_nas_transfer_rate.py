@@ -32,7 +32,7 @@ from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items
 NOW = datetime(2026, 10, 17, 20, 0, tzinfo=UTC)
 FAST = "spk_" + "2818" * 8
 SLOW = "spk_" + "9a86" * 8
-NAMES = {FAST: "spark-3542", SLOW: "spark-2297"}
+NAMES = {FAST: "spark-bbbb", SLOW: "spark-aaaa"}
 GB = 10**9
 
 
@@ -146,9 +146,9 @@ def test_production_shape_names_the_slow_spark_and_both_rates() -> None:
     assert set(notices) == {SLOW}
     notice = notices[SLOW]
     assert notice.detail.startswith("Copies from the NAS at 3.6 MB/s vs 74.1 MB/s")
-    assert "on spark-3542" in notice.detail
+    assert "on spark-bbbb" in notice.detail
     assert "25.8 GB in 7089 s" in notice.detail
-    assert "spark-3542" in notice.recommendation
+    assert "spark-bbbb" in notice.recommendation
 
 
 def test_comparable_sparks_raise_nothing() -> None:

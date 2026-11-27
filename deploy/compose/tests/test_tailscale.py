@@ -587,7 +587,7 @@ def test_unapproved_advertisement_does_not_claim_service_host_readiness(
         "#!/bin/sh\n"
         'case "$*" in\n'
         "  *\"status --json\"*) printf '%s\\n' "
-        '\'{"BackendState":"Running","Self":{"AdvertisedServices":["svc:vonk-forge"],"CapMap":{"service-host":[{}],"services/vonk-forge":[{}]},"PrimaryRoutes":["100.70.230.202/32"]}}\' ;;\n'
+        '\'{"BackendState":"Running","Self":{"AdvertisedServices":["svc:vonk-forge"],"CapMap":{"service-host":[{}],"services/vonk-forge":[{}]},"PrimaryRoutes":["100.64.0.10/32"]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -627,7 +627,7 @@ def test_service_host_mapping_without_primary_routes_is_healthy(
         "  *\"serve get-config --all\"*) printf '%s\\n' "
         f"'{DEFAULT_MAP_JSON}' ;;\n"
         "  *\"status --json\"*) printf '%s\\n' "
-        '\'{"BackendState":"Running","Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.70.230.202"]}]},"PrimaryRoutes":[]}}\' ;;\n'
+        '\'{"BackendState":"Running","Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.64.0.10"]}]},"PrimaryRoutes":[]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -677,7 +677,7 @@ def test_pending_advertisement_is_acceptance_only(
         "  *\"serve get-config --all\"*) printf '%s\\n' "
         f"'{_UNADVERTISED_MAP_JSON}' ;;\n"
         "  *\"status --json\"*) printf '%s\\n' "
-        '\'{"BackendState":"Running","Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.70.230.202"]}]},"PrimaryRoutes":["100.70.230.202/32"]}}\' ;;\n'
+        '\'{"BackendState":"Running","Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.64.0.10"]}]},"PrimaryRoutes":["100.64.0.10/32"]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -785,8 +785,8 @@ def test_configurator_re_advertises_pending_service_host(
         f"repaired = pathlib.Path({os.fspath(repaired)!r})\n"
         "args = [value for value in sys.argv[1:] if not value.startswith('--socket=')]\n"
         "if args == ['status', '--json']:\n"
-        "    mappings = {'svc:vonk-forge': ['100.70.230.202']} if repaired.exists() else {}\n"
-        "    routes = ['100.70.230.202/32'] if repaired.exists() else []\n"
+        "    mappings = {'svc:vonk-forge': ['100.64.0.10']} if repaired.exists() else {}\n"
+        "    routes = ['100.64.0.10/32'] if repaired.exists() else []\n"
         "    print(json.dumps({'BackendState': 'Running', 'Self': {'CapMap': {'service-host': [mappings]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'status', '--json']:\n"
         "    print(json.dumps({'Services': {'svc:vonk-forge': {'TCP': {'443': {'HTTPS': True}}}}}, separators=(',', ':')))\n"
@@ -837,8 +837,8 @@ def test_configurator_replaces_exact_map_for_stale_primary_route(
         f"repaired = pathlib.Path({os.fspath(repaired)!r})\n"
         "args = [value for value in sys.argv[1:] if not value.startswith('--socket=')]\n"
         "if args == ['status', '--json']:\n"
-        "    routes = ['100.70.230.202/32'] if repaired.exists() else []\n"
-        "    print(json.dumps({'BackendState': 'Running', 'Self': {'CapMap': {'service-host': [{'svc:vonk-forge': ['100.70.230.202']}]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
+        "    routes = ['100.64.0.10/32'] if repaired.exists() else []\n"
+        "    print(json.dumps({'BackendState': 'Running', 'Self': {'CapMap': {'service-host': [{'svc:vonk-forge': ['100.64.0.10']}]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'status', '--json']:\n"
         "    print(json.dumps({'Services': {'svc:vonk-forge': {'TCP': {'443': {'HTTPS': True}}}}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'get-config', '--all']:\n"

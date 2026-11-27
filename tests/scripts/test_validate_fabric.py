@@ -721,8 +721,8 @@ def test_native_nccl_launch_uses_restricted_fabric_transport(validate_module):
     assert "ForwardAgent=no" in command
     assert "NET/Socket" not in command
     assert "StrictHostKeyChecking=no" not in command
-    assert "192.168.1.211" not in command
-    assert "192.168.1.212" not in command
+    assert "192.0.2.211" not in command
+    assert "192.0.2.212" not in command
 
 
 def test_native_prerequisite_checks_each_openmpi_package(validate_module):

@@ -86,7 +86,7 @@ def _routes(sessions, root: Path, gate: _Gate) -> RecipeRouteService:
         publisher=AtomicRecipeRoutePublisher(
             AtomicRouteBundlePublisher(root, await_supervisor_ack=gate)
         ),
-        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+        management_policy=ManagementAddressPolicy.parse("192.0.2.0/24"),
         clock=lambda: NOW,
         maximum_age_seconds=120,
     )

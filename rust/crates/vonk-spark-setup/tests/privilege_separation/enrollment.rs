@@ -116,7 +116,7 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
     prompt.values.drain(0..3);
     let prepared = prepare_setup(
         &request(temporary.path())
-            .with_controller_address(Some("192.168.1.231"))
+            .with_controller_address(Some("10.0.0.231"))
             .unwrap()
             .with_enrollment_values(
                 Some("https://enroll.example.test"),
@@ -134,9 +134,11 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
         .iter()
         .filter(|command| command.program == std::path::Path::new("/usr/bin/curl"))
     {
-        assert!(command.args.windows(2).any(|arguments| {
-            arguments == ["--resolve", "enroll.example.test:443:192.168.1.231"]
-        }));
+        assert!(
+            command.args.windows(2).any(|arguments| {
+                arguments == ["--resolve", "enroll.example.test:443:10.0.0.231"]
+            })
+        );
     }
     assert!(
         prepare_runner.commands[0]
@@ -199,7 +201,7 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
     assert!(install_paths.ca.is_file());
     assert_eq!(
         fs::read_to_string(&install_paths.firewall_config).unwrap(),
-        "VONK_NAS_MANAGEMENT_IP=192.168.1.231\nVONK_NODE_MANAGEMENT_IP=192.168.1.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n"
+        "VONK_NAS_MANAGEMENT_IP=10.0.0.231\nVONK_NODE_MANAGEMENT_IP=10.0.0.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n"
     );
     assert_eq!(
         fs::metadata(&install_paths.firewall_config)
@@ -218,7 +220,7 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
     assert!(agent_config.contains("fabric_bandwidth_mbps = 200000\n"));
     assert_eq!(
         fs::read_to_string(&install_paths.hosts).unwrap(),
-        "127.0.0.1 localhost\n# BEGIN VONK FORGE MANAGED HOSTS\n192.168.1.231 control.example.test enroll.example.test controller.example.test\n# END VONK FORGE MANAGED HOSTS\n"
+        "127.0.0.1 localhost\n# BEGIN VONK FORGE MANAGED HOSTS\n10.0.0.231 control.example.test enroll.example.test controller.example.test\n# END VONK FORGE MANAGED HOSTS\n"
     );
     assert_eq!(
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),

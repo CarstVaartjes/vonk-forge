@@ -361,10 +361,10 @@ function seriesResponse(metric: string, range: string, node: string | null) {
  */
 export async function serveOverviewFleet(page: Page) {
   const nodes = [
-    spark(1, "spark-3542", { loaded: [run(0)] }, {}),
+    spark(1, "spark-bbbb", { loaded: [run(0)] }, {}),
     spark(
       2,
-      "spark-2297",
+      "spark-aaaa",
       { loaded: [run(1)] },
       { gpu_utilization_percent: 95, gpu_power_watts: 39 },
     ),
@@ -392,7 +392,7 @@ export async function serveOverviewFleet(page: Page) {
       {
         name: "AgentBehind",
         severity: "warning",
-        summary: "spark-3542 is one agent release behind (4.7.1).",
+        summary: "spark-bbbb is one agent release behind (4.7.1).",
         labels: {},
         active_at: new Date().toISOString(),
       },

@@ -129,7 +129,7 @@ def _load(tmp_path: Path, *, executor=None, artifacts=None):
             RecipeRouteService(
                 sessions,
                 publisher=ConcurrentPublisher(),
-                management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+                management_policy=ManagementAddressPolicy.parse("192.0.2.0/24"),
                 clock=lifecycle._clock,
             ),
             clock=lifecycle._clock,

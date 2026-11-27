@@ -311,8 +311,8 @@ def test_installer_writes_the_selected_services_without_profiles(
     assert _build(_render(tmp_path), payload).returncode == 0
     template = NasInstallTemplate.model_validate_json(payload.read_text("utf-8"))
     answers = {
-        "lab": "lab\n192.168.1.5\n\n\n",
-        "secure-remote": "secure-remote\n192.168.1.5\nvonk-forge.example.ts.net\n"
+        "lab": "lab\n192.0.2.5\n\n\n",
+        "secure-remote": "secure-remote\n192.0.2.5\nvonk-forge.example.ts.net\n"
         "id\nsecret\n\n\n",
     }[mode]
     bundle = prepare(
@@ -340,13 +340,13 @@ def test_installer_writes_the_selected_services_without_profiles(
     ("first", "selection", "present", "absent"),
     [
         (
-            "secure-remote\n192.168.1.5\nvonk-forge.example.ts.net\nid\nsecret\n\n\n",
+            "secure-remote\n192.0.2.5\nvonk-forge.example.ts.net\nid\nsecret\n\n\n",
             "secure-remote",
             {"tailscale-gateway", "tailscale-configurator"},
             set(),
         ),
         (
-            "lab\n192.168.1.5\n\n\n",
+            "lab\n192.0.2.5\n\n\n",
             "",
             {"postgres"},
             {"tailscale-gateway", "tailscale-configurator"},
@@ -390,7 +390,7 @@ def test_upgrade_of_a_hermes_enabled_install_asks_nothing(tmp_path: Path) -> Non
         nas,
         PromptIo(
             io.StringIO(
-                "secure-remote\n192.168.1.5\nvonk-forge.example.ts.net\nid\nsecret\n\n\n"
+                "secure-remote\n192.0.2.5\nvonk-forge.example.ts.net\nid\nsecret\n\n\n"
             )
         ),
     ).root

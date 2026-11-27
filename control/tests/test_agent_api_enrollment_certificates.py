@@ -461,7 +461,7 @@ def test_invalid_failed_results_preserve_the_attempt_and_valid_completion_allows
     )
 
 
-# The failure envelope spark-3542's agent retained for the artifact
+# The failure envelope spark-bbbb's agent retained for the artifact
 # distribution whose report the Controller refused.  ``failure_kind`` is a
 # declared string enum and the diagnostics list sits on its declared bound.
 INCIDENT_DISTRIBUTION_FAILURE = {
@@ -528,7 +528,7 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
     ``failure_kind`` is a string enum in the published wire schema, and the
     agent sends the member value.  A body model that resolves an enum only from
     an enum instance rejects that value, so every replay of a genuine failure
-    was answered 422 -- which is what left spark-3542's agent looping until
+    was answered 422 -- which is what left spark-bbbb's agent looping until
     systemd exhausted its restart limit -- and the retained evidence was never
     consumed.  Replay the retained envelope through the real ingress and require
     both acceptance and the preserved receipt.

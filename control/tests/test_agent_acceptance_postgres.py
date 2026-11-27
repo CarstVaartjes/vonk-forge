@@ -584,7 +584,7 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
         clock=lambda: OPERATIONS_NOW,
         presence=AgentPresenceService(
             sessions,
-            ManagementAddressPolicy.parse("192.168.1.0/24"),
+            ManagementAddressPolicy.parse("192.0.2.0/24"),
             clock=lambda: OPERATIONS_NOW,
         ),
         artifact_root=tmp_path / "agent-artifacts",
@@ -603,7 +603,7 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
 
     headers = agent_headers(node_id, "serial-0") | {
         "x-vonk-agent-fingerprint": "fingerprint-0",
-        "x-vonk-agent-source": "192.168.1.211",
+        "x-vonk-agent-source": "192.0.2.211",
         "X-Vonk-Artifact-Name": "result.png",
         "Content-Type": "image/png",
     }

@@ -270,7 +270,7 @@ def test_a_spark_whose_clock_lags_accepts_a_fresh_grant(
 ) -> None:
     """Catches a fresh grant refused as not yet valid by a lagging Spark.
 
-    spark-2297 refused Controller-signed grants within a second of their issue
+    spark-aaaa refused Controller-signed grants within a second of their issue
     (2026-10-16 18:32:53Z Stop, 18:44:52Z preflight, 18:49:21Z image pull:
     ``helper_grant_unauthorized``), and each retry was granted.
     """

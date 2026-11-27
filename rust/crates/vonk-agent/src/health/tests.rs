@@ -11,8 +11,8 @@ use std::{
 #[test]
 fn readiness_uses_the_exact_published_address() {
     assert_eq!(
-        readiness_endpoint("192.168.1.211".parse().unwrap(), 8101, "/v1/models"),
-        "http://192.168.1.211:8101/v1/models"
+        readiness_endpoint("10.0.0.211".parse().unwrap(), 8101, "/v1/models"),
+        "http://10.0.0.211:8101/v1/models"
     );
     assert_eq!(
         readiness_endpoint("fd00::10".parse().unwrap(), 8101, "/health"),

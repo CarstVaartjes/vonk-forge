@@ -2,10 +2,10 @@
 
 Production (2026-10-16, Controller aed44b796, the hardware sweep):
 
-* spark-3542 held no Vonk claim with 125.65 GB free; the aday777 recipe's
+* spark-bbbb held no Vonk claim with 125.65 GB free; the aday777 recipe's
   measured 122.0 GB peak plus the 6 GB floor could not fit, and its load backed
   off 40 times on ``insufficient_capacity``, a wait nothing could clear.
-* spark-2297: one load started FLUX (36 GB) and Gemma (103.4 GB) on the same
+* spark-aaaa: one load started FLUX (36 GB) and Gemma (103.4 GB) on the same
   Spark. Each fitted alone at review; after FLUX started, Gemma waited 57 times
   on the memory its own sibling held (``insufficient_reservation_budget``).
 
@@ -26,7 +26,7 @@ from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.sparks import Memory
 from .lifecycle_simulation.world import SOLO, SOLO_B, World, build_world
 
-#: spark-3542: 128 GB, 125 GB free when idle.
+#: spark-bbbb: 128 GB, 125 GB free when idle.
 _SPARK = Memory(total=12_800, idle_free=12_500, held_percent=90)
 _NEVER_FITS = RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY
 

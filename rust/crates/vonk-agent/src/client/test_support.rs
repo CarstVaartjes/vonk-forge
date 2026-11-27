@@ -664,7 +664,7 @@ pub(super) fn rejection_problem(issues: &Value) -> Vec<u8> {
     .into_bytes()
 }
 
-/// The failed distribution envelope spark-3542's agent retained.
+/// The failed distribution envelope spark-bbbb's agent retained.
 pub(super) fn retained_result() -> AgentResult {
     let document = json!({
         "fence": "35a57c2a-0b03-4101-8f89-6b3806570c50",

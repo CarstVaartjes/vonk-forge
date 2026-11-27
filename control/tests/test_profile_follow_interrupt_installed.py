@@ -75,7 +75,7 @@ def _add_disjoint_profile_node(
             session,
             node_id,
             contact_certificate_serial=certificate_serial,
-            management_address="192.168.1.212",
+            management_address="192.0.2.212",
             management_observed_at=NOW,
         )
         revision = session.scalar(

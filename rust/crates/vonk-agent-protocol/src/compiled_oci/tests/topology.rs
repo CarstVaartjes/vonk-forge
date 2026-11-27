@@ -60,7 +60,7 @@ fn native_ranks_keep_host_addresses_without_docker_port_translation() {
         value["runtime"]["placement"]["master_address"] = json!("192.168.100.10");
         value["runtime"]["placement"]["master_port"] = json!(29500);
         value["runtime"]["placement"]["endpoint_address"] = if rank == 0 {
-            json!("192.168.1.211")
+            json!("10.0.0.211")
         } else {
             json!(null)
         };
@@ -114,7 +114,7 @@ fn dual_rank(rank: u64, peers: Value) -> CompiledExecutionPlan {
     placement["master_address"] = json!("192.168.100.10");
     placement["master_port"] = json!(29500);
     placement["endpoint_address"] = if rank == 0 {
-        json!("192.168.1.211")
+        json!("10.0.0.211")
     } else {
         json!(null)
     };
@@ -179,14 +179,14 @@ fn a_dual_plan_stored_before_peer_addresses_existed_still_validates() {
 #[test]
 fn signed_endpoint_selects_bridge_and_exact_cdi_device() {
     let mut value = fixture();
-    value["runtime"]["placement"]["endpoint_address"] = json!("192.168.1.211");
+    value["runtime"]["placement"]["endpoint_address"] = json!("10.0.0.211");
     value["security"]["network_mode"] = json!("bridge");
     value["security"]["gpu"] = json!(true);
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     let invocation = project(&plan, &paths()).unwrap();
     assert_eq!(invocation.security.network_mode, OciNetworkMode::Bridge);
     assert_eq!(invocation.security.devices, vec!["nvidia.com/gpu=all"]);
-    assert_eq!(invocation.publishes, vec!["192.168.1.211:8000:8000"]);
+    assert_eq!(invocation.publishes, vec!["10.0.0.211:8000:8000"]);
     assert!(
         invocation
             .environment

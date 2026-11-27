@@ -582,7 +582,7 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
             session,
             second,
             contact_certificate_serial="serial-b",
-            management_address="192.168.1.212",
+            management_address="192.0.2.212",
             management_observed_at=NOW,
         )
         revision = session.scalar(

@@ -1184,7 +1184,7 @@ fn controller_denial_results_are_the_shared_vector_the_ingress_keeps_whole() {
 
 #[test]
 fn a_stop_the_helper_refused_before_any_effect_is_definite() {
-    // spark-2297, 2026-10-16 18:32:53Z: the helper refused the Stop's grant
+    // spark-aaaa, 2026-10-16 18:32:53Z: the helper refused the Stop's grant
     // and the Stop was reported as an unconfirmed effect.
     for code in [
         HelperErrorCode::GrantInvalid,

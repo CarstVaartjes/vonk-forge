@@ -114,7 +114,7 @@ fn a_plain_tail_hides_the_cause_it_replaces() {
     assert!(tail.text.contains("drafter checkpoint is incompatible"));
 }
 
-/// The live shape of the LTX job that aborted on spark-2297 (2026-11-05):
+/// The live shape of the LTX job that aborted on spark-aaaa (2026-11-05):
 /// the pipeline's own log, `PyTorch`'s native abort report, its C++ stack,
 /// then the job adapter's traceback for the child that died, whose
 /// closing line echoes the whole command.
@@ -728,7 +728,7 @@ fn triton_worker() -> String {
     stream
 }
 
-const TRITON_NCCL_AFTER: &str = "NCCL version 2.30.7+cuda13.0\n\n[2026-10-25 09:45:47] spark-3542:512:754 [0] misc/strongstream.cc:424 (ncclStrongStreamSynchronize) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n\n[2026-10-25 09:45:47] spark-3542:512:754 [0] init.cc:2742 (commDestroySync) NCCL WARN commDestroySync: comm 0x3f51d530 rank 0 sync hostStream error 1\n\n[2026-10-25 09:45:47] spark-3542:512:754 [0] allocator.cc:132 (ncclMemFree) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n\n[2026-10-25 09:45:48] spark-3542:512:594 [0] include/alloc.h:166 (ncclCudaHostFree) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n(EngineCore pid=403) ERROR 10-25 09:45:51 [multiproc_executor.py:295] Worker proc VllmWorker-0 died unexpectedly (exit code: None), shutting down executor.\n";
+const TRITON_NCCL_AFTER: &str = "NCCL version 2.30.7+cuda13.0\n\n[2026-10-25 09:45:47] spark-bbbb:512:754 [0] misc/strongstream.cc:424 (ncclStrongStreamSynchronize) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n\n[2026-10-25 09:45:47] spark-bbbb:512:754 [0] init.cc:2742 (commDestroySync) NCCL WARN commDestroySync: comm 0x3f51d530 rank 0 sync hostStream error 1\n\n[2026-10-25 09:45:47] spark-bbbb:512:754 [0] allocator.cc:132 (ncclMemFree) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n\n[2026-10-25 09:45:48] spark-bbbb:512:594 [0] include/alloc.h:166 (ncclCudaHostFree) NCCL WARN Cuda failure 'an illegal memory access was encountered'\n(EngineCore pid=403) ERROR 10-25 09:45:51 [multiproc_executor.py:295] Worker proc VllmWorker-0 died unexpectedly (exit code: None), shutting down executor.\n";
 
 #[test]
 fn a_summary_that_asks_to_check_the_trace_above_yields_to_the_worker() {

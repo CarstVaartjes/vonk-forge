@@ -1,6 +1,6 @@
 """A failed job's detail carries the evidence its agent sent.
 
-Hardware 2026-10-16, spark-3542, Step1X geometry job 52e7648b: the job exited
+Hardware 2026-10-16, spark-bbbb, Step1X geometry job 52e7648b: the job exited
 0, its output delivery was not confirmed, and the agent reported an unknown
 carrying the receipt and its cause. The Controller kept only the bare receipt,
 so the job failed as ``observation-unavailable`` with no exit code and no

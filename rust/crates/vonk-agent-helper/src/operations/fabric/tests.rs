@@ -67,7 +67,7 @@ fn signed_endpoint_placement_is_not_vetoed_by_stale_firewall_observation() {
             image..image,
             [
                 "--publish".to_owned(),
-                format!("192.168.1.211:{host_port}:8000"),
+                format!("10.0.0.211:{host_port}:8000"),
                 "--device".to_owned(),
                 "nvidia.com/gpu=all".to_owned(),
                 "--env".to_owned(),
@@ -451,7 +451,7 @@ fn native_fabric_requires_complete_bounded_shape_without_publications() {
         );
     }
     for forbidden in [
-        ["--publish", "192.168.1.211:8000:8000"],
+        ["--publish", "10.0.0.211:8000:8000"],
         ["--ipc", "host"],
         ["--env", "NCCL_SOCKET_IFNAME=wlP9s9"],
     ] {

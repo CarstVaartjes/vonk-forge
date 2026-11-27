@@ -67,7 +67,7 @@ def test_cli_upgrade_uses_no_terminal_and_preserves_private_answers(
 ) -> None:
     """Catch piping stdin being treated as secret input or upgrade requiring a TTY."""
     answers = tmp_path / "answers"
-    answers.write_text("lab\n192.168.1.5\nprivate-hf-token\n")
+    answers.write_text("lab\n192.0.2.5\nprivate-hf-token\n")
     answers.chmod(0o600)
     fresh = invoke(template, tmp_path, "--answers-file", str(answers))
     assert fresh.returncode == 0, fresh.stderr
