@@ -64,21 +64,29 @@ the tagged commit.
 
 ## Tag and approvals
 
-Only the owner signs and pushes the tag. The tag must be signed with the allowed release signer: principal
-`cvaartjes@visualfabriq.com` in `.github/release-allowed-signers`. A plain
-`git tag -s` signs with the machine's default key, which is not that signer and
-fails the release's signature check. The release key lives in the 1Password SSH
-agent, so no key file is needed; 1Password asks for approval when it signs.
-`/Applications/1Password.app/Contents/MacOS/op-ssh-sign` is the signing program
-(present on this Mac; elsewhere 1Password places it in the `MacOS` folder of its
-app bundle).
+Only the owner signs and pushes the tag. The tag must be signed with the
+allowed release signer: principal `release@vonkforge.ai` in
+`.github/release-allowed-signers`. A plain `git tag -s` signs with the
+machine's default key, which is not that signer and fails the release's
+signature check.
+
+The principal is a label in that file: `verify-tag` finds it from the signing
+key and does not compare it with the tagger email. The tag object is public,
+though, and its tagger line shows `user.name` and `user.email`, so the command
+sets both to the project identity instead of a personal address.
+
+The release key lives in an SSH agent that signs through a signing program, so
+no key file is needed: set `SSH_SIGNING_PROGRAM` to that program before the
+command below. The maintainer's setup is in
+[Release signing](../maintainers/release-signing.md).
 
 From the root of an up-to-date main checkout (the signers file path is relative). `<sha>` is the full 40-character sha:
 
 ```sh
 git checkout main && git pull --ff-only origin main
-git -c gpg.format=ssh \
-  -c gpg.ssh.program=/Applications/1Password.app/Contents/MacOS/op-ssh-sign \
+git -c user.name="Vonk Forge release" -c user.email=release@vonkforge.ai \
+  -c gpg.format=ssh \
+  -c gpg.ssh.program="$SSH_SIGNING_PROGRAM" \
   -c user.signingkey="key::ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB8F2mAFzxnRmpCedoSC+acezPYg35X6sVUg8CP2IlgV" \
   tag -s vX.Y.Z <sha> -m "vX.Y.Z"
 git -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag vX.Y.Z \
@@ -86,7 +94,7 @@ git -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag vX.
 ```
 
 The `key::` value is the public key in `.github/release-allowed-signers` (check
-it still matches before signing); 1Password asks for approval when signing.
+it still matches before signing).
 `verify-tag` reads that file from the working tree, so run it on the up-to-date
 main checkout; it must print `Good "git" signature` for that principal, and the
 push only runs when it does. To retry, delete the local tag with

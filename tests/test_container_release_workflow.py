@@ -955,7 +955,7 @@ def test_release_signer_allowlist_contains_only_public_ssh_authority() -> None:
     assert text.endswith("\n")
     assert "\n" in text
     assert "\n" not in text.partition("\n")[2]
-    assert "cvaartjes@visualfabriq.com ssh-ed25519 " in text
+    assert "release@vonkforge.ai ssh-ed25519 " in text
     assert "PRIVATE" not in text
 
 
