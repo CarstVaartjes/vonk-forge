@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -42,3 +43,36 @@ def test_the_packaged_tree_is_reported_and_never_decides_provenance(
     assert observed.source_tree == expected
     assert observed.source_sha == "a" * 40
     assert observed.worker_contract_sha256 == "d" * 64
+
+
+@pytest.mark.parametrize(
+    ("identity", "expected"),
+    [
+        (
+            {"dependencies_exclude_newer": "2026-11-26T22:21:19Z"},
+            "2026-11-26T22:21:19Z",
+        ),
+        # The stamp writer writes null outside a release build: unstamped.
+        ({"dependencies_exclude_newer": None}, None),
+        ({}, None),
+    ],
+)
+def test_the_dependency_cutoff_is_read_from_the_wheel_stamp(
+    tmp_path: Path, identity: dict[str, object], expected: str | None
+) -> None:
+    wheel = tmp_path / "cli.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("cluster_profiles/build-identity.json", json.dumps(identity))
+    with zipfile.ZipFile(wheel) as archive:
+        assert runtime_identity.dependency_cutoff(archive) == expected
+
+
+def test_a_malformed_dependency_cutoff_is_a_broken_release(tmp_path: Path) -> None:
+    wheel = tmp_path / "cli.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "cluster_profiles/build-identity.json",
+            json.dumps({"dependencies_exclude_newer": "2026-11-26"}),
+        )
+    with zipfile.ZipFile(wheel) as archive, pytest.raises(ValueError):
+        runtime_identity.dependency_cutoff(archive)

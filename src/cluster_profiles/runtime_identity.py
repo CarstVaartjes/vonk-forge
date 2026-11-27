@@ -69,15 +69,18 @@ def verified_wheel_identity(
 def dependency_cutoff(archive: ZipFile) -> str | None:
     """The `uv --exclude-newer` time a verified wheel's build stamped, if any.
 
-    An unstamped build has none; a malformed stamp is a broken release.
+    An unstamped build (no key, or the stamp writer's null outside a release)
+    has none; a malformed stamp is a broken release.
     """
     try:
         value = json.loads(archive.read("cluster_profiles/build-identity.json"))
     except KeyError:
         return None
-    if not isinstance(value, dict) or "dependencies_exclude_newer" not in value:
+    cutoff = (
+        value.get("dependencies_exclude_newer") if isinstance(value, dict) else None
+    )
+    if cutoff is None:
         return None
-    cutoff = value["dependencies_exclude_newer"]
     if not isinstance(cutoff, str) or _CUTOFF.fullmatch(cutoff) is None:
         raise ValueError("the stamped dependency cutoff is malformed")
     return cutoff
