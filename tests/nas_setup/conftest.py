@@ -35,6 +35,4 @@ def template() -> NasInstallTemplate:
 
 @pytest.fixture
 def installed(tmp_path: Path, template: NasInstallTemplate) -> Path:
-    return prepare(
-        template, tmp_path, PromptIo(io.StringIO("lab\n192.168.1.5\n\n"))
-    ).root
+    return prepare(template, tmp_path, PromptIo(io.StringIO("lab\n192.0.2.5\n\n"))).root

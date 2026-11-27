@@ -4635,3 +4635,19 @@ def test_a_shared_id_pattern_is_imported_not_respelled(source):
         {1},
         modes=("shared-id-patterns",),
     )
+
+
+# Built from parts so this file's own added lines stay clean.
+_LAN = "192.168." + "1.50"
+_HOST = "spark-" + "35" + "42"
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["control/tests/test_x.py", "docs/runbooks/x.md", "rust/crates/a/src/tests.rs"],
+)
+def test_a_real_site_address_or_hostname_on_an_added_line_is_refused(path):
+    source = f'ADDRESS = "{_LAN}"\nHOST = "{_HOST}"\nOK = "192.0.2.10 spark-aaaa"\n'
+    found = check_source(path, source, {1, 2, 3}, modes=("site-identifiers",))
+    assert [line.split(":")[1] for line in found] == ["1", "2"]
+    assert not check_source(path, source, {3}, modes=("site-identifiers",))

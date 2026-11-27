@@ -362,7 +362,7 @@ def setup_services(
                 session,
                 node_id,
                 contact_certificate_serial=serial,
-                management_address=f"192.168.1.{211 + index}",
+                management_address=f"192.0.2.{211 + index}",
                 management_observed_at=NOW,
             )
     inventory = InventoryRepository(sessions, clock=lambda: NOW)
@@ -891,7 +891,7 @@ def bind_route_publications(
     routes = RecipeRouteService(
         sessions,
         publisher=publisher,
-        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+        management_policy=ManagementAddressPolicy.parse("192.0.2.0/24"),
         clock=lambda: NOW,
         maximum_age_seconds=120,
     )

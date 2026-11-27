@@ -232,7 +232,7 @@ def test_the_same_image_loads_through_every_gate_whatever_its_provenance(
             session,
             plan.nodes[0].node_id,
             contact_certificate_serial="revision-reuse-preflight",
-            management_address="192.168.1.211",
+            management_address="192.0.2.211",
             management_observed_at=now,
         )
     run_plan = service.preview_run(installed.id, "qwen")

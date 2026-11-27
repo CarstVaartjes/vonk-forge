@@ -102,7 +102,7 @@ fn every_rank_of_a_multi_rank_job_validates_but_only_jobs_are_exempt_from_the_ow
 
 #[test]
 fn runtime_publications_require_an_explicit_routable_bind_address() {
-    assert!(parse_publication("192.168.1.211:8101:8000").is_some());
+    assert!(parse_publication("10.0.0.211:8101:8000").is_some());
     assert!(parse_publication("192.168.100.10:29500:29500").is_some());
 
     for value in [
@@ -113,8 +113,8 @@ fn runtime_publications_require_an_explicit_routable_bind_address() {
         "[::]:8101:8000",
         "[fe80::1]:8101:8000",
         "[fd00::10]:8101:8000",
-        "192.168.1.211:80:8000",
-        "192.168.1.211:8101:80",
+        "10.0.0.211:80:8000",
+        "10.0.0.211:8101:80",
     ] {
         assert!(parse_publication(value).is_none(), "{value}");
     }
@@ -211,7 +211,7 @@ fn runtime_accepts_signed_bridge_endpoint_and_exact_cdi_gpu() {
         image..image,
         [
             "--publish".to_owned(),
-            "192.168.1.211:8101:8000".to_owned(),
+            "10.0.0.211:8101:8000".to_owned(),
             "--device".to_owned(),
             "nvidia.com/gpu=all".to_owned(),
             "--env".to_owned(),

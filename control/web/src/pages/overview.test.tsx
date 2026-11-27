@@ -35,7 +35,7 @@ const grant: EnrollmentGrantResponse = {
   controller_endpoint: "https://controller.example.test",
   enrollment_endpoint: "https://enroll.example.test",
   ca_fingerprint: "a".repeat(64),
-  controller_address: "192.168.1.231",
+  controller_address: "192.0.2.231",
   service_hostnames: [],
   installer_url: "https://install.vonkforge.ai/spark",
 };
@@ -83,7 +83,7 @@ test("Fleet creates a one-use grant and shows the exact Spark command, token, an
       "Run this command on the Spark. The installer will ask for the one-use pairing token.",
     ),
   ).toBeVisible();
-  const command = `curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS='192.168.1.231' VONK_ENROLLMENT_URL='https://enroll.example.test' VONK_CONTROLLER_CA_SHA256='${"a".repeat(64)}' sh -s -- --enroll`;
+  const command = `curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS='192.0.2.231' VONK_ENROLLMENT_URL='https://enroll.example.test' VONK_CONTROLLER_CA_SHA256='${"a".repeat(64)}' sh -s -- --enroll`;
   expect(screen.getByText(command)).toBeVisible();
   expect(screen.getByLabelText("One-use pairing token")).toHaveValue(grant.token);
   expect(

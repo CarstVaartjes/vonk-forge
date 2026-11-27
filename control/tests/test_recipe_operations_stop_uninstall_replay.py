@@ -777,7 +777,7 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
             == expected_floor
         )
         child_placement = _placement(child.payload)
-        assert child_placement["endpoint_address"] == "192.168.1.211"
+        assert child_placement["endpoint_address"] == "192.0.2.211"
         assert child_placement["world_size"] == 1
         assert child_placement["master_address"] is None
         RecipeStartPayload.model_validate(child.payload)

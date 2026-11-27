@@ -1,6 +1,6 @@
 """A Spark keeps taking a load's work while a build compiles beside it.
 
-Incident 2026-10-26: a 2.5 h source build held spark-2297's only claim lane.
+Incident 2026-10-26: a 2.5 h source build held spark-aaaa's only claim lane.
 The dual load's 1 s probe, an uninstall and a transfer queued behind it for
 hours. The owner decided that builds run off the claim lane: the agent keeps
 claiming while one compiles, and the Controller must hand that work out.

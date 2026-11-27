@@ -13,13 +13,15 @@ contains neither Git nor OpenSSH. The Node and Python build bases are separately
 digest-pinned in the lock. Refreshing a pin is a manual, reviewed edit; follow
 [Refresh the pinned container images](../image-pin-refresh.md).
 
-## Future image releases
+## Image releases
 
-No images are currently being published. The repository variable
-`VONK_CONTAINER_RELEASES_ENABLED` remains unset/default-off until the whole
-repository is release-ready. Setting it to `true` is a deliberate maintainer
-enablement action. Once enabled, only an exact stable SemVer version-tag push
-(`vX.Y.Z`) can publish the three packages; branches, pull requests, malformed
+A `main` Release whose image inputs changed publishes the three packages as
+`:dev-sha-<sha>`; after acceptance, promotion moves their `:dev` alias. A signed
+stable SemVer version-tag push (`vX.Y.Z`) publishes `:vX.Y.Z` and, after
+acceptance, moves `:latest`. The repository variables
+`VONK_CONTAINER_RELEASES_ENABLED` and `VONK_PLATFORM_RELEASES_ENABLED` gate only
+that stable path; `scripts/release/stable-preflight` reports whether they are
+set. Branches, pull requests, malformed
 tags, and Dependabot cannot publish.
 
 For each package's initial publication, a maintainer must open its GitHub
@@ -31,11 +33,13 @@ release assets `vonk-forge-images.env` and
 three version-and-digest assignments as one release set. See the authoritative
 [NAS pull-only Compose deployment guide](../../deploy/compose/README.md).
 
-The workflow may update each package's `latest` tag after a successful stable
-version release, but `latest` is informational only and never a production
-image input. Production consumes the digest-pinned Compose and package assets
-from one immutable GitHub Release. Docker does not update running containers
-merely because a tag moves.
+Promotion moves each package's `latest` tag after an accepted stable release,
+and the installed production Compose file uses those floating `:latest` Vonk
+images (development uses `:dev`); upstream service images stay pinned by
+version and digest. `docker-compose.pinned.yml` and the image records in the
+GitHub Release are publication evidence, not the installed configuration.
+Docker does not update running containers merely because a tag moves; a
+redeploy pulls the new images.
 
 Dependabot checks Docker build inputs, Docker Compose files, and GitHub Actions
 weekly and opens ordinary reviewed pull requests. It does not auto-merge, tag,
@@ -96,8 +100,8 @@ The lock owns the version; the verifier derives the release, the wheel path and
 the uv source from it and checks the committed wheel bytes, `uv.lock` and the
 Dockerfile against the recorded digest, offline. A lock with any other key, such
 as a source `revision`, fails. A recipes contract major is deployed
-consumer-first: pin the release here, deploy, then move the recipes
-`platform_ref`.
+consumer-first: pin the release here and release forge; recipes CI then
+validates with that channel's recipe-tools bundle, and nothing moves in recipes.
 
 The merge captain's routine: at every forge batch cut, run
 `scripts/dev/refresh-public-contracts --latest --acceptance-latest` on the batch
@@ -133,10 +137,12 @@ docker buildx build --platform linux/amd64 --load \
   --tag vonk-forge-litellm:release-dry-run .
 ```
 
-After future deliberate enablement, the tag-triggered GitHub Actions workflow
-is the only publication procedure. It builds all three targets, verifies their
-inputs, emits SBOM and provenance, resolves all three digests, and creates the
-checksum-protected three-reference release asset. It never treats one or two
+The `Release` workflow (`installer-publication.yml`) is the only publication
+procedure, for `main` (dev) and signed `v*` tags (stable). On a signed tag its
+`stable-release.yml` jobs (called through `ci.yml`) build all three targets,
+verify their inputs, emit SBOM and provenance, resolve all three digests, and
+attach the checksum-protected three-reference release asset
+(`vonk-forge-images.env`) to the GitHub Release. It never treats one or two
 images as a releasable publication. LiteLLM base signatures are checked in CI (not at
 publication) with the checked-in key copied from immutable upstream commit
 `e82a3c646908ba0a6ee0beddc4310d7a6cac4065` (the vendor's 2026-10-23 key rotation;
@@ -146,8 +152,11 @@ locked digest, never a mutable tag. Store scan/signature attestations with the r
 
 ## Recipe workloads
 
-Recipe images and model artifacts are not published by this repository. The
-Controller builds or imports them from the exact recipe library revision and
-verifies them before any Spark uses them; see the
-[recipe operations runbook](model-switching.md). There is no separate workload
-artifact publisher or workload signing root.
+Recipe images and model artifacts are not published by this repository.
+Recipes CI builds each recipe image and pushes it to
+`ghcr.io/<owner>/vonk-forge-recipe-<recipe>`; the signed recipe index pins its
+manifest digest, and the Controller imports that digest, verifying it once at
+ingress, before any Spark uses it. A Spark build is the fallback only when the
+index pins no image ([image transfer and cache](../image-transfer-cache.md)).
+Model files are downloaded from their origin into the Controller cache and
+verified there; see the [recipe operations runbook](model-switching.md).

@@ -166,8 +166,8 @@ def _build(
 def _firewall_config(
     tmp_path: Path, replacement: tuple[str, str] | None = None
 ) -> Path:
-    text = """VONK_NAS_MANAGEMENT_IP=192.168.1.231
-VONK_NODE_MANAGEMENT_IP=192.168.1.211
+    text = """VONK_NAS_MANAGEMENT_IP=192.0.2.231
+VONK_NODE_MANAGEMENT_IP=192.0.2.211
 VONK_NODE_FABRIC_IP=192.168.100.10
 VONK_PEER_FABRIC_IP=192.168.100.11
 VONK_ENDPOINT_HOST_PORTS=8000,8101
@@ -1014,7 +1014,7 @@ def test_docker_firewall_requires_explicit_host_endpoint_authority(
 @pytest.mark.parametrize(
     ("old", "new", "message"),
     [
-        ("192.168.1.211", "192.168.001.211", "invalid IPv4"),
+        ("192.0.2.211", "192.0.002.211", "invalid IPv4"),
         ("8000,8101", "8000,8000", "must be unique"),
         ("VONK_RENDEZVOUS_PORT=29500", "VONK_RENDEZVOUS_PORT=8000", "must differ"),
         (

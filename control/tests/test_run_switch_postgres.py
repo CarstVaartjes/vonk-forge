@@ -772,7 +772,7 @@ def test_production_result_handler_only_schedules_worker(
         Settings(
             database_url=migrated_engine.url.render_as_string(hide_password=False),
             deployment_mode="test",
-            management_cidrs="192.168.1.0/24",
+            management_cidrs="192.0.2.0/24",
             secrets_root=secrets,
             state_path=tmp_path / "state",
             agent_artifact_root=tmp_path / "artifacts",
@@ -812,7 +812,7 @@ def test_production_result_handler_only_schedules_worker(
             headers={
                 **agent_headers(nodes[0], "serial-0"),
                 "x-vonk-agent-fingerprint": "fingerprint-0",
-                "x-vonk-agent-source": "192.168.1.211",
+                "x-vonk-agent-source": "192.0.2.211",
             },
             json={
                 "fence": claim.fence,

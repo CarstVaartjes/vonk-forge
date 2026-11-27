@@ -80,4 +80,5 @@ BLOCKS: tuple[Callable[[CheckContext], None], ...] = (
     general.check_fixture_closures,
     general.check_clocks,
     general.check_shared_id_patterns,
+    general.check_site_identifiers,
 )

@@ -450,7 +450,7 @@ def test_multinode_start_is_bound_to_authenticated_fabric_rendezvous(
         assert {child["world_size"] for child in children} == {2}
         assert [child["endpoint_address"] for child in children] == [
             None,
-            "192.168.1.211",
+            "192.0.2.211",
         ]
 
 
@@ -487,7 +487,7 @@ def test_multinode_worker_endpoint_is_never_published_on_management_lan(
             for phase in _job_phases(job.payload)
             for entry in phase
         }
-    assert children[nodes[0]]["endpoint_address"] == "192.168.1.211"
+    assert children[nodes[0]]["endpoint_address"] == "192.0.2.211"
     assert children[nodes[1]]["endpoint_address"] is None
     assert children[nodes[1]]["local_address"] == "192.168.100.3"
 

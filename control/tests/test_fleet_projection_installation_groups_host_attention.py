@@ -837,7 +837,7 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower(
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    # spark-3542: 48.8 GB in 553 s; spark-2297: 25.8 GB in 7089 s (2026-10-17).
+    # spark-bbbb: 48.8 GB in 553 s; spark-aaaa: 25.8 GB in 7089 s (2026-10-17).
     transfers = {NODE_A: (48_755_056_484, 553.3), NODE_B: (25_800_000_000, 7089.0)}
     with sessions.begin() as session:
         session.add(
@@ -855,7 +855,7 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower(
                 updated_at=NOW,
             )
         )
-        for node_id, name in ((NODE_A, "spark-3542"), (NODE_B, "spark-2297")):
+        for node_id, name in ((NODE_A, "spark-bbbb"), (NODE_B, "spark-aaaa")):
             session.add(
                 AgentNode(
                     node_id=node_id,
@@ -933,7 +933,7 @@ def test_fleet_names_the_spark_that_copies_from_the_nas_far_slower(
     assert slow(NODE_A) == []
     (detail,) = slow(NODE_B)
     assert detail.startswith("Copies from the NAS at 3.6 MB/s vs 88.1 MB/s")
-    assert "on spark-3542" in detail
+    assert "on spark-bbbb" in detail
     if with_link:
         assert (
             "Wi-Fi signal -78 dBm, on 2.4 GHz, TX 866.7 Mbit/s, RX 6.5 Mbit/s" in detail
@@ -1176,11 +1176,11 @@ def _host_node(
 
 
 def test_a_spark_off_its_headless_settings_needs_attention() -> None:
-    # spark-3542: the desktop runs and starts again at every boot.
+    # spark-bbbb: the desktop runs and starts again at every boot.
     assert _host_codes(
         {"display_manager_active": True, "graphical_default_target": True}
     ) == ["host.desktop-running", "host.desktop-at-boot"]
-    # spark-2297: the desktop failed to start, but would be tried at boot.
+    # spark-aaaa: the desktop failed to start, but would be tried at boot.
     assert _host_codes(
         {"display_manager_active": False, "graphical_default_target": True}
     ) == ["host.desktop-at-boot"]

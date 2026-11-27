@@ -591,7 +591,7 @@ def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleName
         agent_runtime_enabled=True,
         agent_controller_origin="https://agents.example.test:8443",
         agent_enrollment_origin="https://enroll.example.test:8443",
-        nas_lan_ip="192.168.1.231",
+        nas_lan_ip="192.0.2.231",
         agent_service_hostnames=(
             "control.example.test",
             "enroll.example.test",

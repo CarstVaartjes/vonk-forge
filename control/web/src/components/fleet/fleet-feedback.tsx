@@ -4,7 +4,7 @@ import { ObservationNotice } from "../ui/observation-notice";
 import { SkeletonRows } from "../ui/skeleton";
 import { StatusPill } from "../ui/status-pill";
 
-/** What the fleet pages say while the Fleet loads, fails, or is showing its last known state. */
+/** What the Overview, Spark and Workloads pages say while the fleet loads, fails, or shows its last known state. */
 export function FleetFeedback({ fleet }: { fleet: ReturnType<typeof useFleetStream> }) {
   return (
     <>

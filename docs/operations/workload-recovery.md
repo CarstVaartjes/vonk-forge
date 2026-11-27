@@ -134,7 +134,8 @@ and workload-intent ordinal. It can create a linked application receipt after a
 pre-effect cache loss, without raising that intent above a newer request. An
 explicit operator retry retains its cancellation-fencing behavior.
 
-Missing exact bytes expose a Prepare cache dependency and a next check. Restoring
+Missing exact bytes are prepared again by the load, which reports the
+preparation as its dependency and next check. Restoring
 the same bytes permits recovery; a rebuild with a different image or archive
 digest requires an explicit new load. Recovery checks the binding again before
 dispatching the child operation. The authorized preparation path can reuse an

@@ -869,8 +869,8 @@ def test_profile_read_ignores_a_resolver_that_substitutes_an_older_revision() ->
 
 def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> None:
     # The other half of the reported defect: when the selected head is not in
-    # the local cache, the profile keeps that exact revision and names the
-    # prepare-cache blocker rather than silently binding an older cached one.
+    # the local cache, the profile keeps that exact revision and warns that the
+    # load prepares it, rather than silently binding an older cached one.
     sessions = _sessions()
     _seed(sessions)
     newer_revision_id = "00000000-0000-4000-8000-000000000022"

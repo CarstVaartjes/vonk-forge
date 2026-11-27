@@ -409,7 +409,6 @@ cache paths with the task name. Run from the active task worktree:
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 export UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache
-scripts/build-control-wheel
 scripts/dev/sync-cli-dependencies
 
 # Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.

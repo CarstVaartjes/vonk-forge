@@ -591,7 +591,7 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     routes = RecipeRouteService(
         sessions,
         publisher=AtomicRecipeRoutePublisher(runtime),
-        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+        management_policy=ManagementAddressPolicy.parse("192.0.2.0/24"),
         clock=lambda: NOW,
         maximum_age_seconds=120,
     )

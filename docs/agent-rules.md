@@ -51,7 +51,7 @@ after the agent is stopped): a hook that runs a new program adds it there.
 
 After every completed workload stop that left no GPU compute process running, the agent reads `SecPageTables` (`memory_readings.rs`, `HostSettings.memory_fragmentation`); the Controller alone derives the `host.memory-fragmented` reboot advice (`fleet_projection/memory_fragmentation.py`). The agent also reports per-RDMA-device traffic deltas, the negotiated rate and the window's link and transport error deltas (`fabric_traffic.rs`, `HostSettings.fabric_devices`) and the Controller derives `network.rails-underused` (`fleet_projection/fabric_rails.py`) and `network.fabric-down`, `network.fabric-rate-low` and `network.fabric-errors` (`fleet_projection/fabric_health.py`). See [Spark host checks](operations/spark-host-checks.md#memory-fragmentation-advice-reboot-recommended) and the [fabric runbook](runbooks/fabric.md#rail-observation-network-using-n-of-m-rails), [fabric health](runbooks/fabric.md#fabric-health-port-down-rate-low-errors).
 
-The Fleet words (vitals, what a Spark serves, the status line, attention items, GPU throttle reasons, host checks) are derived from the same Controller data by the web Fleet page and `vonkctl fleet`. Wording is not tested: no test compares printed or rendered text, and the two clients may word things differently. A secret or terminal control in output, counts, ordering and the `--json` document stay tested. Every vonkctl test decides on
+The Fleet words (vitals, what a Spark serves, the status line, attention items, GPU throttle reasons, host checks) are derived from the same Controller data by the web Overview and Spark pages and `vonkctl fleet`. Wording is not tested: no test compares printed or rendered text, and the two clients may word things differently. A secret or terminal control in output, counts, ordering and the `--json` document stay tested. Every vonkctl test decides on
 data: the exit status, the requests sent, a typed result or the `--json` document
 (the `vonkctl_json` fixture). Decisions are tested as data through view functions.
 A renderer decision (empty versus unreadable, which state or command applies)
@@ -266,12 +266,8 @@ Run a subset with `uv sync --inexact --package X` (what `check_environment`
 member's dependencies or version run `uv lock`; CI runs `uv lock --check` in the
 lint job, the only place the lock is compared with the pyprojects.
 
-Every change lands through an integration PR (same-repository `integration/*`
-head, or the `release-acceptance` label); `full` in `scripts/ci/select-ci-areas`
-owns that rule. A member PR runs only the quick tier (`Ruff` with the added-line guards, web
-typecheck/Biome, and Rust fmt/clippy when Rust changed; no full suite) and a
-gate that reports `CI gate (member PR)`, never the required `CI gate`, so it cannot merge
-itself. Check member work locally (targeted tests, fast guards); the integration
+Every change lands through an integration PR; [Testing and CI](testing-and-ci.md)
+owns what makes one and what a member PR runs. Check member work locally (targeted tests, fast guards); the integration
 PR proves it. A member PR is done when its review has passed.
 A Dependabot PR runs nothing at all (every root job skips its author,
 `tests/test_dependabot_updates.py`); fold it into an integration PR.
@@ -426,15 +422,19 @@ does not mean maintaining schema-1/schema-2 runtime paths.
 ## Profile cache contract
 
 The local NAS/Controller cache is the authoritative availability surface for
-Fleet profile authoring and apply admission. Profile choices must resolve from
-that cache to an exact model and recipe-image identity; a public catalog entry
-or a Spark-local copy is not sufficient. Persisted profiles still belong to
-the current PostgreSQL authority and schema-2 contracts, but their choices and
-readiness are cache-backed.
+Fleet profile loads. Profile choices resolve to an exact model and recipe-image
+identity of the synced catalog; a Spark-local copy is never sufficient.
+Persisted profiles still belong to the current PostgreSQL authority and
+schema-2 contracts, and their readiness is cache-backed.
 
-Missing model or recipe-image assets are actionable blockers. Preview and
-authoring must name the missing asset and expose the current prepare-cache
-action; do not silently admit a profile and defer the problem to a Spark.
+Saving never checks the cache; the profile read shows each asset's cache
+state. A load prepares missing model or recipe-image
+assets in the NAS cache by itself: the review lists each preparation step (the
+model download and the image build, each skipped when cached), progress reports
+it, an unfinished preparation is named as what the load waits on, and an
+exhausted one fails the load with that reason (`ENDING_BLOCKER_CODES`).
+Do not make a load depend on a separate prepare step, and do not leave a
+missing asset for a target Spark to discover.
 The local NAS cache is trusted under its managed-storage contract, and so are
 the Spark copies made from it, so do not promise costly repeated full hashing
 as part of ordinary profile reads, admission, Spark installs or profile loads.
@@ -503,7 +503,8 @@ coordinator updates the canonical checkout while it is idle; agents must not
 switch it to feature branches or use it as an integration workspace.
 
 All repository edits, including documentation, agent instructions, lead-agent
-and subagent work, use an isolated `codex/` branch/worktree based on freshly
+and subagent work, use an isolated task branch/worktree (for example
+`agent/<task>`) based on freshly
 fetched `origin/main`. Create it before the first edit; read-only inspection
 does not require another worktree.
 Dependent work may use an explicitly coordinated integration base. Each tree
@@ -555,7 +556,7 @@ trees once they are clean and inactive.
 ## Schema implementation, merge, and deployment
 
 Necessary schema implementation is allowed within the authorized task scope.
-Inspect the actual schema effect of changes to `control/src/vonk_control/models.py`
+Inspect the actual schema effect of changes to `control/src/vonk_control/models/`
 and `control/migrations/`; a file edit alone is not proof of a schema change.
 Reuse an existing canonical fact when appropriate, without hiding new state in
 untyped JSON to avoid a justified schema change.

@@ -92,6 +92,7 @@ MODES = (
     "set-first-requester",
     "printed-output",
     "shared-id-patterns",
+    "site-identifiers",
     "maintainershim",
 )
 

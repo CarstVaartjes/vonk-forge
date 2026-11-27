@@ -344,7 +344,7 @@ fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
 }
 
 /// The production 2026-10-31 12:20Z reading that killed a `MiniMax` H3 job on
-/// spark-3542: reclaim absorbing the load into 64 GiB of free swap.
+/// spark-bbbb: reclaim absorbing the load into 64 GiB of free swap.
 fn minimax_h3_reading() -> Host {
     Host {
         available: 11 * GIB + 512 * 1024 * 1024,
@@ -977,7 +977,7 @@ fn a_load_at_the_usable_swap_bound_is_never_killed_and_one_byte_past_is() {
     }
 }
 
-/// The Inkling dspark load's readings at the 2026-10-29 kill (spark-3542, NVRM
+/// The Inkling dspark load's readings at the 2026-10-29 kill (spark-bbbb, NVRM
 /// line present throughout): `MemAvailable` 6420 -> 1006 MiB, `MemFree` 976 MiB,
 /// 64 GiB swap with 63.1 GiB free, swap-out 148195 pages/s, swap-in 12,
 /// refault 711, loading. `swap_out_per_s` is the only knob the tests vary.
@@ -1031,7 +1031,7 @@ fn r5_kills_on_low_memfree_when_swap_is_not_absorbing_the_load() {
 }
 
 /// The `DeepSeek` V4.1 Flash EXL3 Mia dual load killed at 18:49:40Z on 2026-11-02
-/// (spark-3542, NVRM line present): `MemFree` 0.96 GiB, `MemAvailable` 17.4 GiB,
+/// (spark-bbbb, NVRM line present): `MemFree` 0.96 GiB, `MemAvailable` 17.4 GiB,
 /// 3.7 GiB swap used, swap-out 0/s, PSI full avg10 33%. Page-cache reclaim.
 fn dsv41_mia_dual_readings() -> Host {
     Host {

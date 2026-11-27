@@ -23,7 +23,7 @@ reference and will fail if only the lock changes.
 | Lock key | Upstream | Files that carry the reference |
 | --- | --- | --- |
 | `images.caddy` | `caddy` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
-| `images.postgres` | `postgres` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `.github/workflows/ci.yml` (integration `docker pull`) |
+| `images.postgres` | `postgres` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `tests/test_fresh_nas_acceptance.py`, `control/src/vonk_control/db/connections.py` (comment) |
 | `images.prometheus` | `prom/prometheus` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
 | `images.tailscale` | `tailscale/tailscale` | `deploy/compose/images.lock.json`, `deploy/compose/tailscale/compose.yaml`, `deploy/compose/tests/test_tailscale.py` |
 | `build_bases.litellm` | `ghcr.io/berriai/litellm` | `deploy/compose/images.lock.json`, `deploy/compose/litellm/Dockerfile` (both `FROM` lines) |
@@ -61,7 +61,8 @@ These are deliberately not in `images.lock.json` and the checker does not scan
 them, but a refresh that touches their upstream must update them too:
 
 - `docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0`
-  — the QEMU emulation image in `.github/workflows/ci.yml`; a CI tool input,
+  — the QEMU emulation image in `.github/workflows/dev-images.yml` and
+  `.github/workflows/release-acceptance.yml`; a CI tool input,
   not a deployment or build base.
 - `deploy/compose/tests/test.env` is a test fixture; its Vonk image values are
   obvious fakes.
@@ -201,7 +202,7 @@ Bumping `build_bases.litellm` changes only the upstream
 The result is published as `ghcr.io/carstvaartjes/vonk-forge-litellm`. Publishing that patched image is a
 separate release flow from bumping an upstream pin: it builds the patched
 Dockerfile targets from an exact release commit, resolves and verifies the
-digests of all four release artifacts together, signs the LiteLLM image against
+digests of all three release images together, signs the LiteLLM image against
 the checked-in key `deploy/compose/trust/litellm-cosign.pub` from an exact
 upstream commit, and exposes the resulting digest-pinned references to
 operators. Never treat a new upstream `litellm` tag as a

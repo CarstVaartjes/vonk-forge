@@ -348,8 +348,8 @@ fn fresh_answers(ca: &[u8]) -> FreshAnswers {
         values: [
             "https://enroll.example.test/".to_owned(),
             ca_fingerprint(ca),
-            "192.168.1.231".to_owned(),
-            "192.168.1.211".to_owned(),
+            "10.0.0.231".to_owned(),
+            "10.0.0.211".to_owned(),
             "192.168.100.10".to_owned(),
             "192.168.100.11".to_owned(),
         ]
@@ -562,7 +562,7 @@ fn runner_with_private_controller_bootstrap(ca: &[u8]) -> RecordingRunner {
         "ca_fingerprint": ca_fingerprint(ca),
         "ca_pem": String::from_utf8(ca.to_vec()).unwrap(),
         "host_helper_authority_public_key": "11".repeat(32),
-        "controller_address": "192.168.1.231",
+        "controller_address": "10.0.0.231",
         "service_hostnames": [
             "control.example.test",
             "enroll.example.test",
@@ -595,7 +595,7 @@ fn configured_install(paths: &InstallPaths, ca: &[u8], state: &str) {
     fs::write(&paths.ca, ca).unwrap();
     fs::write(
         &paths.firewall_config,
-        "VONK_NAS_MANAGEMENT_IP=192.168.1.231\nVONK_NODE_MANAGEMENT_IP=192.168.1.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n",
+        "VONK_NAS_MANAGEMENT_IP=10.0.0.231\nVONK_NODE_MANAGEMENT_IP=10.0.0.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n",
     )
     .unwrap();
     fs::write(&paths.helper_authority, format!("{}\n", "11".repeat(32))).unwrap();

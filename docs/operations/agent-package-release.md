@@ -7,8 +7,9 @@ generation through its own required build and acceptance gates.
 One release contains the canonical Compose payload, all digest-pinned runtime
 images, one portable Python NAS setup wheel, the native Linux ARM64 Spark setup
 executable, and matching Debian packages. Publication assembles these only from
-successful build and acceptance receipts, verifies the complete signed release manifest, and advances the
-channel pointer atomically last.
+successful build and acceptance receipts, verifies the complete signed release manifest, and then
+promotes the image aliases, the signed installer pointer and, last, the
+recipe-tools pointer. Promotion is not atomic; a rerun reconciles it.
 
 Operators never configure an APT repository, activate a slot, or invoke a
 package helper manually. Both first install and later upgrade use the stable
@@ -349,7 +350,7 @@ it manages the Python 3.15 runtime. Upgrade switch, private answers,
 Lab mode, local secrets and PKI retain the same command workflow.
 
 Release JSON is signed, and one signed, expiring `current.manifest` atomically
-advances both `/nas` and `/spark` for a channel. Stable publication rejects an older semantic version.
+advances `/nas`, `/spark` and `/vonkctl` for a channel. Stable publication rejects an older semantic version.
 
 Installer trust starts once, at the TLS-served channel script: publication
 renders the channel's public key into it, and it verifies `current.manifest` and

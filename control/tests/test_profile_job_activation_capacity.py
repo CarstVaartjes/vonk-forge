@@ -1,7 +1,7 @@
 """A load's memory promise is its own run's capacity, never a competitor of it.
 
 Production (2026-10-15, Controller 0747a7f30, the hardware sweep): loading the
-hunyuan3d-omni job recipe (declared 64 GB) on spark-3542 (about 125 GB free)
+hunyuan3d-omni job recipe (declared 64 GB) on spark-bbbb (about 125 GB free)
 retried its start until ``run-switch.final-verification-timeout``. The job
 activation's admission charged the load's own 64 GB promise on top of the
 64 GB it was promised for ("The demand fits once these claims are released:
@@ -26,7 +26,7 @@ from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.sparks import Memory
 from .lifecycle_simulation.world import SOLO, build_world
 
-#: spark-3542: 128 GB, about 125 GB free when idle.
+#: spark-bbbb: 128 GB, about 125 GB free when idle.
 _SPARK = Memory(total=12_800, idle_free=12_500)
 #: hunyuan3d-omni's declared peak: fits the Spark once, not twice.
 _PEAK = 6_400

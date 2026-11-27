@@ -477,7 +477,7 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
         "host_helper_authority_public_key": "11" * 32,
         "controller_endpoint": "https://agents.example.test:8443",
         "enrollment_endpoint": "https://enroll.example.test:8443",
-        "controller_address": "192.168.1.231",
+        "controller_address": "192.0.2.231",
         "service_hostnames": [
             "control.example.test",
             "enroll.example.test",

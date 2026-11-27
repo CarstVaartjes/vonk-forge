@@ -228,7 +228,7 @@ def _worker_process(config: dict[str, Any], crash: str) -> None:
     routes = RecipeRouteService(
         sessions,
         publisher=ConcurrentPublisher(),
-        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+        management_policy=ManagementAddressPolicy.parse("192.0.2.0/24"),
         clock=lambda: now[0],
     )
     lifecycle = RecipeOperationService(

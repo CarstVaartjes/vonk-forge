@@ -2,8 +2,9 @@
 
 The [global recipe repository](https://github.com/CarstVaartjes/vonk-forge-recipes)
 owns two authored contracts: **Model** and **Recipe**. Their Pydantic definitions
-and published schemas govern every consumer. The Controller follows its latest
-`main` and records the exact commit and document digests it consumes.
+and published schemas govern every consumer. The Controller syncs the newest
+signed release of its contract major and records the exact source commit and
+document digests it consumes.
 
 ## Model: what the AI can do
 
@@ -25,14 +26,14 @@ settings, container image or build instructions, required writable paths,
 resources, Spark topology and serving checks. One model can have several Recipes
 from the same or different creators, with different engines or Spark counts.
 
-Preparing a Recipe is an explicit operation that makes its exact Model files
-and recipe image available and verified in the Controller/NAS cache. Profile
-choices may reference only complete cached assets. Run or apply first checks
-that cache gate; missing assets block the operation and offer **Prepare cache**.
-Once the gate succeeds, the Controller distributes the exact assets to the
-selected Sparks in parallel, skips verified local copies, safely replaces
-conflicting workloads, and reports per-Spark progress and readiness. Run and
-apply do not silently prepare missing assets or fetch from upstream.
+Preparing a Recipe makes its exact Model files and recipe image available and
+verified in the Controller/NAS cache. A load, and `vonkctl run`, prepares what
+it needs by itself: the review lists the model download and the image build,
+each skipped when already cached, and progress reports them.
+`vonkctl recipe download` prepares the cache ahead of time. Once the cache
+holds the assets, the Controller distributes them to the selected Sparks in
+parallel, skips verified local copies, safely replaces conflicting workloads,
+and reports per-Spark progress and readiness.
 
 ## Local state and updates
 
@@ -43,8 +44,8 @@ Spark-local copies are derived execution caches and do not authorize profiles
 or pin NAS objects. There is no manual import or local recipe-authoring
 workflow.
 
-A changed global definition has a new digest. An explicit cache preparation can
-prepare that revision while a running workload keeps its original Model, Recipe
+A changed global definition has a new digest. The next load, or
+`vonkctl recipe download`, prepares that revision while a running workload keeps its original Model, Recipe
 and image receipts. Only an explicit Run or Switch changes the running
 configuration. Model files and images stay reusable until an explicit
 cache-cleanup operation removes them; NAS garbage collection removes only

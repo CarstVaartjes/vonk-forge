@@ -596,7 +596,7 @@ def _agents_reached_the_controller(service, at: datetime) -> None:
                     )
                     session.flush()
                 contact_row(presence).contact_certificate_serial = serial
-                contact_row(presence).management_address = "192.168.1.10"
+                contact_row(presence).management_address = "192.0.2.10"
             contact_row(presence).management_observed_at = at
 
 

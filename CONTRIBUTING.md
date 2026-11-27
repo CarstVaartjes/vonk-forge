@@ -38,20 +38,17 @@ acceptance lanes.
 
 ## Added-line guards
 
-`scripts/dev/check-added-lines` uses the merge base with `origin/main`; CI supplies
-the PR base. Only new syntax on added lines fails, with no debt or category
+`scripts/dev/check-added-lines` runs no git: it reads a patch file or stdin, so
+pipe the diff in (`git diff origin/main...HEAD | scripts/dev/check-added-lines`);
+CI supplies the PR base. Only new syntax on added lines fails, with no debt or category
 ledger and no before/after count report. Keep behavior tests and generated
 contract checks. See [principle guards](docs/principle-guards.md).
 
 ## CI and pre-merge release acceptance
 
-Every change lands through an integration PR (`integration/*` or the
-`release-acceptance` label), which runs the complete suites, candidate
-acceptance and the path-filtered proof workflows. A member PR runs no CI jobs
-and reports `CI gate (member PR)` instead of the required `CI gate`, so it
-cannot merge itself. [Testing and CI](docs/testing-and-ci.md) lists what runs
+Every change lands through an integration PR. A member PR runs only the
+quick tier. [Testing and CI](docs/testing-and-ci.md) lists what runs
 where (`full` in `scripts/ci/select-ci-areas`).
-Merge queues also accept their combined candidate before admission.
 Integration selection uses the conservative dependency closure documented in
 `scripts/ci/select-ci-areas`; unfamiliar inputs select every integration. The
 Controller suites include their real PostgreSQL tests on every full run.
