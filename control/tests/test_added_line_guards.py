@@ -4638,7 +4638,7 @@ def test_a_shared_id_pattern_is_imported_not_respelled(source):
 
 
 # Built from parts so this file's own added lines stay clean.
-_LAN = "192.168." + "1.231"
+_LAN = "192.168." + "1.50"
 _HOST = "spark-" + "35" + "42"
 
 
