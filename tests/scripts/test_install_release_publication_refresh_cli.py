@@ -19,6 +19,7 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from tests.scripts.install_release_publication_support import (
+    DEPENDENCIES_EXCLUDE_NEWER,
     ROOT,
     SCRIPT,
     _assemble,
@@ -175,13 +176,20 @@ def test_public_cli_endpoint_verifies_the_signed_wheel_before_uv_install(
     curl.chmod(0o755)
     receipt = tmp_path / "uv-receipt"
     uv = commands / "uv"
-    uv.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" > "$VONK_TEST_UV_RECEIPT"\n')
+    # `uv run … python -` runs the wheel's identity check on this interpreter.
+    uv.write_text(
+        '#!/bin/sh\nif [ "$1" = run ]; then\n'
+        '  while [ "$1" != python ]; do shift; done; shift\n'
+        '  exec "$VONK_TEST_PYTHON" "$@"\nfi\n'
+        'printf \'%s\\n\' "$*" > "$VONK_TEST_UV_RECEIPT"\n'
+    )
     uv.chmod(0o755)
     environment = {
         **os.environ,
         "PATH": f"{commands}:{os.environ['PATH']}",
         "VONK_INSTALL_BASE_URL": "https://install.example.test",
         "VONK_TEST_PUBLIC": str(destination),
+        "VONK_TEST_PYTHON": sys.executable,
         "VONK_TEST_UV_RECEIPT": str(receipt),
         "HOME": str(tmp_path / "home"),
         "XDG_CONFIG_HOME": str(tmp_path / "home/.config"),
@@ -199,6 +207,8 @@ def test_public_cli_endpoint_verifies_the_signed_wheel_before_uv_install(
     assert result.returncode == 0, result.stderr
     assert "vonkctl 1.2.3 is installed" in result.stdout
     assert "tool install --force" in receipt.read_text()
+    # Dependencies resolve as of the release's stamped cutoff.
+    assert f"--exclude-newer {DEPENDENCIES_EXCLUDE_NEWER} " in receipt.read_text()
     receipt.unlink()
     cli_artifact = next(destination.glob("artifacts/stable/releases/*/cli/*.whl"))
     cli_artifact.write_bytes(cli_artifact.read_bytes() + b"tampered")

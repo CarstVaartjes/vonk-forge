@@ -21,6 +21,10 @@ def contract_fingerprint(document: object) -> str:
     ).hexdigest()
 
 
+#: An RFC 3339 UTC second, the form `uv --exclude-newer` takes.
+_CUTOFF = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+
+
 @dataclass(frozen=True)
 class RuntimeBuildIdentity:
     source_sha: str | None
@@ -60,6 +64,23 @@ def verified_wheel_identity(
     if not isinstance(source, str) or re.fullmatch(r"[0-9a-f]{40}", source) is None:
         source = None
     return RuntimeBuildIdentity(source, control, worker)
+
+
+def dependency_cutoff(archive: ZipFile) -> str | None:
+    """The `uv --exclude-newer` time a verified wheel's build stamped, if any.
+
+    An unstamped build has none; a malformed stamp is a broken release.
+    """
+    try:
+        value = json.loads(archive.read("cluster_profiles/build-identity.json"))
+    except KeyError:
+        return None
+    if not isinstance(value, dict) or "dependencies_exclude_newer" not in value:
+        return None
+    cutoff = value["dependencies_exclude_newer"]
+    if not isinstance(cutoff, str) or _CUTOFF.fullmatch(cutoff) is None:
+        raise ValueError("the stamped dependency cutoff is malformed")
+    return cutoff
 
 
 def _hex(value: object, length: int) -> str | None:

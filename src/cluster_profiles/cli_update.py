@@ -43,6 +43,7 @@ from cluster_profiles.generated_control.models.cli_update_contract import (
     CliUpdateContract,
 )
 from cluster_profiles.runtime_identity import (
+    dependency_cutoff,
     installed_content_identity,
     verified_wheel_identity,
     wheel_content_identity,
@@ -368,6 +369,7 @@ def run_update(
                     source_sha=cast(str, target_source),
                     version=cast(str, release["version"]),
                 )
+                cutoff = dependency_cutoff(archive)
             break
         except (KeyError, ValueError, zipfile.BadZipFile) as error:
             if attempt == 2:
@@ -476,6 +478,8 @@ def run_update(
             "--force",
             "--python",
             _wheel_python_floor(wheel),
+            # Dependencies as they were when the release was built.
+            *(("--exclude-newer", cutoff) if cutoff is not None else ()),
             str(wheel_path),
         ]
         for attempt in range(3):

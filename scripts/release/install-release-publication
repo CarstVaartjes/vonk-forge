@@ -353,6 +353,7 @@ def _render_bootstrap(
     packages: dict[str, Path] | None,
     *,
     output_name: str | None = None,
+    exclude_newer: str | None = None,
 ) -> bytes:
     output = work / f"rendered-{output_name or kind}"
     command = [
@@ -369,6 +370,8 @@ def _render_bootstrap(
         command.extend(("--artifact", f"{platform}={path}"))
     if payload is not None:
         command.extend(("--payload", str(payload)))
+    if exclude_newer is not None:
+        command.extend(("--exclude-newer", exclude_newer))
     if packages is not None:
         for platform, path in sorted(packages.items()):
             command.extend(("--package", f"{platform}={path}"))
@@ -655,6 +658,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
         from cluster_profiles.runtime_identity import (  # noqa: PLC0415 -- serves a stdlib-only lane; the project import must stay call-time
             contract_fingerprint,
+            dependency_cutoff,
             verified_wheel_identity,
         )
 
@@ -662,6 +666,10 @@ def assemble(arguments: argparse.Namespace) -> str:
             build_identity = verified_wheel_identity(
                 archive, source_sha=source_sha, version=version
             )
+            # One cutoff for both installers: the CLI build stamped it.
+            exclude_newer = dependency_cutoff(archive)
+        if exclude_newer is None:
+            raise PublicationError("CLI wheel has no dependency cutoff")
         # Fingerprints need canonical projections, not checkout artifacts.
         wire = runpy.run_path(str(ROOT / "scripts/dev/export-agent-wire-schema"))[
             "export_schema"
@@ -881,6 +889,7 @@ def assemble(arguments: argparse.Namespace) -> str:
             {"wheel": arguments.nas_setup_wheel},
             arguments.nas_payload,
             None,
+            exclude_newer=exclude_newer,
         )
         spark_bootstrap = _render_bootstrap(
             temporary, "spark", base_url, spark, None, packages
