@@ -47,7 +47,8 @@ def _route_for_path(adapted: dict, *, port: int, path: str) -> dict:
 
 def _assert_litellm_route_proxies_directly(route: dict) -> None:
     # No request-time lease gate: a stalled Controller must not darken inference.
-    assert _reverse_proxy_dials(route) == ["litellm:4000"]
+    # The large-body key check asks LiteLLM itself, never the Controller.
+    assert set(_reverse_proxy_dials(route)) == {"litellm:4000"}
 
 
 def test_every_browser_litellm_route_proxies_without_a_lease_gate() -> None:
@@ -196,7 +197,10 @@ def test_native_decision_path_rewrites_before_the_authenticated_gateway() -> Non
         inference = _route_for_path(adapted, port=port, path="/v1/*")
         routes = _routes_with_handlers([inference])
         decision = next(
-            route for route in routes if "/v1/systemone" in _path_patterns(route)
+            route
+            for route in routes
+            if "/v1/systemone" in _path_patterns(route)
+            and route["handle"][0]["handler"] == "rewrite"
         )
         assert decision["handle"] == [{"handler": "rewrite", "uri": "/vllm/systemone"}]
         _assert_litellm_route_proxies_directly(inference)
