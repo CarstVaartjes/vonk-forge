@@ -13,7 +13,7 @@ from vonk_control.auth import Actor
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import LoginSession, User
 from vonk_control.security.browser_auth import (
-    BootstrapResult,
+    BootstrapOutcome,
     BrowserAuthenticationError,
     BrowserAuthenticationThrottledError,
     BrowserAuthService,
@@ -215,14 +215,12 @@ def test_login_cleanup_removes_only_a_bounded_batch_of_expired_sessions(
 def test_bootstrap_administrator_creates_once_and_verifies_on_restart(
     sessions: sessionmaker[Session],
 ) -> None:
-    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == BootstrapResult(
-        "created"
+    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == (
+        BootstrapOutcome.CREATED
     )
-    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == BootstrapResult(
-        "unchanged"
+    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == (
+        BootstrapOutcome.UNCHANGED
     )
-    with pytest.raises(BrowserAuthenticationError):
-        bootstrap_administrator(sessions, "different administrator password")
 
     with sessions() as db:
         user = db.scalar(select(User))
@@ -234,6 +232,40 @@ def test_bootstrap_administrator_creates_once_and_verifies_on_restart(
     service = browser_auth(sessions, Clock(), opaque(33), opaque(34))
     issued = service.login("admin", ADMIN_PASSWORD)
     assert service.resolve(issued.token).actor == Actor("admin", "administrator")
+
+
+def test_a_changed_staged_password_replaces_the_old_and_revokes_sessions(
+    sessions: sessionmaker[Session],
+) -> None:
+    """Catches the crash-loop on a mismatch and a reset that leaves old logins."""
+    bootstrap_administrator(sessions, ADMIN_PASSWORD)
+    service = browser_auth(sessions, Clock(), opaque(35), opaque(36))
+    issued = service.login("admin", ADMIN_PASSWORD)
+
+    assert bootstrap_administrator(sessions, "a new staged password") == (
+        BootstrapOutcome.REWRITTEN
+    )
+
+    with pytest.raises(BrowserAuthenticationError):
+        service.resolve(issued.token)
+    with pytest.raises(BrowserAuthenticationError):
+        service.login("admin", ADMIN_PASSWORD)
+    fresh = browser_auth(sessions, Clock(), opaque(37), opaque(38))
+    assert fresh.login("admin", "a new staged password").identity.actor == Actor(
+        "admin", "administrator"
+    )
+
+
+def test_a_short_staged_password_keeps_the_stored_one(
+    sessions: sessionmaker[Session],
+) -> None:
+    """Catches a hand-edited short password being adopted or ending startup."""
+    bootstrap_administrator(sessions, ADMIN_PASSWORD)
+
+    assert bootstrap_administrator(sessions, "x" * 11) == BootstrapOutcome.REFUSED
+
+    service = browser_auth(sessions, Clock(), opaque(39), opaque(40))
+    assert service.login("admin", ADMIN_PASSWORD).identity.actor.subject == "admin"
 
 
 def test_bootstrap_admin_rejects_conflicting_administrator_authority(
@@ -249,8 +281,11 @@ def test_bootstrap_admin_rejects_conflicting_administrator_authority(
                 password_verifier=hash_password(ADMIN_PASSWORD),
             )
         )
-    with pytest.raises(BrowserAuthenticationError):
-        bootstrap_administrator(sessions, ADMIN_PASSWORD)
+    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == (
+        BootstrapOutcome.REFUSED
+    )
+    with sessions() as db:
+        assert tuple(db.scalars(select(User.subject))) == ("other-admin",)
 
 
 def test_throttle_rejects_the_sixth_failed_attempt_for_one_subject(

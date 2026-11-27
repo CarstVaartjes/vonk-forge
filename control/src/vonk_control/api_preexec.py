@@ -15,7 +15,7 @@ from vonk_control.db.connections import (
     session_factory,
 )
 from vonk_control.db.startup import initialize_database
-from vonk_control.runtime_init import read_runtime_secret
+from vonk_control.runtime_init import RuntimeSecretError, read_runtime_secret
 from vonk_control.security.browser_auth import bootstrap_administrator
 from vonk_control.settings import SECRETS_ROOT, install_channel_from_env
 
@@ -60,14 +60,35 @@ def prepare_owned_state() -> None:
     initialize_administrator(database_url, password_path)
 
 
-def initialize_administrator(database_url: str, password_path: Path) -> None:
-    raw = read_runtime_secret(password_path, maximum_bytes=257)
+def _staged_admin_password(raw: bytes) -> str | None:
+    """The one-line UTF-8 password the file holds, or None when it is unusable."""
     if not raw.endswith(b"\n") or raw[:-1].find(b"\n") >= 0 or b"\0" in raw:
-        raise RuntimeError("administrator password secret is invalid")
+        return None
     try:
-        password = raw[:-1].decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise RuntimeError("administrator password secret is invalid") from error
+        return raw[:-1].decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def initialize_administrator(database_url: str, password_path: Path) -> None:
+    """Bootstrap from the staged file; an unusable file never ends startup.
+
+    The file is the administrator reset path, so a hand edit that breaks it
+    keeps the stored verifier and is logged instead of crash-looping the API.
+    A transient read fault still propagates: the bounded startup retries it.
+    """
+    try:
+        raw = read_runtime_secret(password_path, maximum_bytes=257)
+    except RuntimeSecretError:
+        raw = b""
+    password = _staged_admin_password(raw)
+    if password is None:
+        _LOGGER.error(
+            "staged administrator password is unusable (it must be one line "
+            "of UTF-8 text ending in a newline, at most 256 bytes); "
+            "the stored password is kept"
+        )
+        return
 
     def bootstrap_once() -> None:
         engine = build_engine(database_url)
