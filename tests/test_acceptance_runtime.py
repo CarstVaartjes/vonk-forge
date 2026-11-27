@@ -23,6 +23,7 @@ from tests.acceptance.runtime import (
     run_interactive,
     write_all,
 )
+from vonk_agent_protocol.installer_setup import NasStepCaControllerFiles
 
 pytestmark = pytest.mark.linux_only
 
@@ -260,7 +261,7 @@ def test_bundle_contract_is_exact_and_contains_no_secret_values_in_compose(
         assert_bundle_contract(bundle)
 
 
-def test_bundle_contract_allows_empty_optional_hugging_face_token(
+def test_bundle_contract_allows_empty_optional_secrets(
     tmp_path: Path,
 ) -> None:
     bundle = tmp_path / "vonk-forge"
@@ -278,6 +279,16 @@ def test_bundle_contract_allows_empty_optional_hugging_face_token(
     secrets.chmod(0o700)
     (secrets / "hf-token").chmod(0o600)
 
+    assert_bundle_contract(bundle)
+
+    # An install upgraded from a release before the kept root CA key holds an
+    # empty root-key member: "no root key", not a broken bundle.
+    root_key = (
+        secrets / NasStepCaControllerFiles.model_fields["root_private_key"].default
+    )
+    root_key.parent.mkdir(mode=0o700)
+    root_key.write_bytes(b"")
+    root_key.chmod(0o600)
     assert_bundle_contract(bundle)
 
     (secrets / "token").write_text("")
