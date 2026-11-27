@@ -253,7 +253,10 @@ copy (`src/cluster_profiles/schemas/control-openapi.json`) and the Python client
 are generated from the admin contract with the closed response sets vonkctl
 only shows opened to any word (`cluster_profiles.control_client.shown_words`);
 `control/openapi.json` and the TypeScript client stay exact. See
-[error reporting](error-reporting.md) for which sets stay closed. The
+[error reporting](error-reporting.md) for which sets stay closed. Every
+consumer reads a committed copy generated with `app.openapi()`; the running
+Controller does not serve `/openapi.json` (nor docs or ReDoc), and tests read
+`app.openapi()` instead of fetching it. The
 Controller reads its own `build-identity.json` from the image, which
 `tools/stamp_build_identity.py` writes; the Dockerfile's `server-identity` stage
 and the CLI wheel hook run that one writer. The CLI keeps its own stdlib

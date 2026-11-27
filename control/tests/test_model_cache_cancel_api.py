@@ -269,7 +269,9 @@ def test_cancel_route_requires_operator_and_returns_durable_intent():
 
 def test_model_operator_routes_have_one_current_namespace():
     service = Mock()
-    schema = _client(service).get("/openapi.json").json()
+    app = _client(service).app
+    assert isinstance(app, FastAPI)
+    schema = app.openapi()
     paths = schema["paths"]
     assert "/api/model/{selector}/download" in paths
     assert "/api/model/{selector}/remove" in paths

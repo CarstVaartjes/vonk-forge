@@ -102,6 +102,10 @@ def create_app(
     app = FastAPI(
         title="Vonk Forge Control",
         version="1.0",
+        # The schema is generated from app.openapi() into the committed
+        # clients; nothing reads it from a running Controller, so it is not
+        # served.
+        openapi_url=None,
         docs_url=None,
         redoc_url=None,
         responses=bounded_error_responses(422, 429, 500, 503),

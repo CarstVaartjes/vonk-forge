@@ -274,7 +274,7 @@ def test_artifact_is_named_to_the_edge_without_hashing_or_reading_the_file(
 def test_retired_agent_update_tuf_routes_are_absent(agent_system) -> None:
     client, _, _, _ = agent_system
     headers = agent_headers(NODE_A, "serial-a")
-    paths = client.get("/openapi.json").json()["paths"]
+    paths = client.app.openapi()["paths"]
 
     assert not any(path.startswith("/agent/tuf/") for path in paths)
     assert (
@@ -329,7 +329,7 @@ def test_revoked_identity_is_gated_before_invalid_json_is_parsed(agent_system) -
 def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None:
 
     client, _services, _sessions, _clock = agent_system
-    schema = client.get("/openapi.json").json()
+    schema = client.app.openapi()
     paths = schema["paths"]
     components = schema["components"]["schemas"]
 
@@ -386,7 +386,7 @@ def test_claim_requires_the_current_agent_document(agent_system, missing: str) -
 def test_enrollment_openapi_exposes_the_runtime_request_contract(agent_system) -> None:
 
     client, _services, _sessions, _clock = agent_system
-    schema = client.get("/openapi.json").json()
+    schema = client.app.openapi()
     operation = schema["paths"]["/agent/enroll"]["post"]
     request = operation["requestBody"]
     assert request["required"] is True
