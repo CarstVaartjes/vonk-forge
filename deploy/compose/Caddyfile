@@ -33,8 +33,9 @@
 	# carry base64 image/audio data URIs, and /v1/audio/transcriptions carries
 	# the raw audio file as multipart; 256 MiB (MAX_AUDIO_FILE_BYTES, the
 	# largest upload a recipe's audio_transcription api document may declare)
-	# admits both, and LiteLLM sets no body limit of its own. The owner accepts
-	# these bodies reaching LiteLLM before its key check. /v1/audio/speech is
+	# admits both, and LiteLLM sets no body limit of its own. LiteLLM reads
+	# the whole body before its key check, so litellm_large_body_gate checks
+	# the key first for any body that may exceed 1 MB. /v1/audio/speech is
 	# JSON text and stays at 1 MiB, with /v1/models. Nothing else exceeds 1 MiB.
 	@artifact_input_upload {
 		method PUT
@@ -68,6 +69,31 @@
 
 # Only Caddy handler errors enter this route. An upstream Controller 413
 # passes through with its own typed code and must never be relabeled.
+# LiteLLM v1.106.7 reads and parses the whole request body before it checks
+# the key (litellm/proxy/auth/user_api_key_auth.py, user_api_key_auth: the
+# body read precedes user_api_key_auth_builder), so an unauthenticated client
+# could make it buffer every large inference body. Before such a body is read,
+# Caddy asks LiteLLM to check the caller's own credential on a bodyless GET of
+# /v1/models: forward_auth rewrites the method to GET, which drops the body,
+# and passes every request header, so each key header LiteLLM accepts
+# (Authorization, API-Key, x-api-key, x-goog-api-key, x-litellm-api-key,
+# Ocp-Apim-Subscription-Key) is checked exactly as on the real route. Every
+# managed key holds openai_routes, which include /v1/models. A refusal is
+# LiteLLM's own answer; an unreachable LiteLLM refuses the large body only.
+# A declared Content-Length under 1,000,000 bytes (six digits) skips the
+# check: the server reads no more than that, so an unchecked body stays below
+# 1 MB. A missing or larger length, chunked bodies included, is checked.
+(litellm_large_body_gate) {
+	@unverified_large_inference {
+		method POST
+		path /v1/chat/completions /v1/completions /v1/responses /v1/messages /v1/systemone /v1/audio/transcriptions
+		not header_regexp Content-Length ^[0-9]{1,6}$
+	}
+	forward_auth @unverified_large_inference {args[0]} {
+		uri /v1/models?
+	}
+}
+
 (body_limit_errors) {
 	handle_errors 413 {
 		import edge_headers
@@ -280,10 +306,15 @@ http://:8087 {
 			respond 404
 		}
 		handle /v1/* {
-			@systemone path /v1/systemone
-			rewrite @systemone /vllm/systemone
-			import browser_proxy_headers
-			reverse_proxy litellm:4000
+			# In written order: sanitize, check the key of a large body, then
+			# rewrite and proxy.
+			route {
+				import browser_proxy_headers
+				import litellm_large_body_gate litellm:4000
+				@systemone path /v1/systemone
+				rewrite @systemone /vllm/systemone
+				reverse_proxy litellm:4000
+			}
 		}
 		@litellm_repository_authority {
 			method POST PUT PATCH DELETE

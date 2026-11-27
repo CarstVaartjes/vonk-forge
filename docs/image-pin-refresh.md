@@ -183,6 +183,13 @@ docker run --rm -i -e "VONK_LITELLM_IMAGE_DIGEST=${image##*@}" \
 CI regenerates it from the pinned image and fails on any difference, and a unit
 test fails while the surface's digest differs from `images.lock.json`.
 
+The Caddy `litellm_large_body_gate` relies on two facts of the pinned LiteLLM:
+`GET /v1/models` checks the caller's key through the same `user_api_key_auth`
+as the inference routes and is in `openai_routes`, which every managed key
+holds, and the gate passes every key header that function reads. Recheck both
+in `litellm/proxy/auth/user_api_key_auth.py` and `litellm/proxy/_types.py`
+with every bump, and keep the Caddyfile comment's version current.
+
 ## Patched release images are a different flow
 
 Bumping `build_bases.litellm` changes only the upstream
