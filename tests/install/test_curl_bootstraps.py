@@ -114,6 +114,7 @@ def _run_bootstrap(
     )
     source = source.replace("@NAS_WHEEL_SIZE@", str(len(artifact.read_bytes())))
     source = source.replace("@NAS_PAYLOAD_SHA256@", payload_digest)
+    source = source.replace("@NAS_EXCLUDE_NEWER@", "2026-11-26T22:21:19Z")
     rendered.write_text(source)
     _fake_command(
         commands,
@@ -133,6 +134,7 @@ def _run_bootstrap(
         "uv",
         '[ "$1" = run ] && [ "$2" = --isolated ] && [ "$3" = --no-project ]\n'
         f'[ "$4" = --python ] && [ "$5" = {PYTHON} ] && [ "$6" = --with ]\n'
+        '[ "$UV_EXCLUDE_NEWER" = 2026-11-26T22:21:19Z ]\n'
         'wheel=$7; [ -f "$wheel" ]; case "$wheel" in *.whl) ;; *) exit 98 ;; esac\n'
         'shift 7; [ "$1" = vonk-nas-setup ]; shift\nexec sh "$wheel" "$@"\n',
     )

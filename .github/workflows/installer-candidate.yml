@@ -206,7 +206,13 @@ jobs:
           done
 
           mkdir -p "$RUNNER_TEMP/cli-wheel"
-          VONK_BUILD_SOURCE_SHA="$SOURCE_SHA" VONK_BUILD_RELEASE_VERSION="$VERSION" uv build --wheel --out-dir "$RUNNER_TEMP/cli-wheel"
+          # Installers resolve dependencies as of the source commit time (uv
+          # --exclude-newer): a pure function of the release identity, so a
+          # rebuilt generation renders the same bootstraps.
+          dependencies_exclude_newer=$(TZ=UTC0 git show -s --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ "$SOURCE_SHA")
+          VONK_BUILD_SOURCE_SHA="$SOURCE_SHA" VONK_BUILD_RELEASE_VERSION="$VERSION" \
+            VONK_BUILD_DEPENDENCIES_EXCLUDE_NEWER="$dependencies_exclude_newer" \
+            uv build --wheel --out-dir "$RUNNER_TEMP/cli-wheel"
           mapfile -t cli_wheels < <(find "$RUNNER_TEMP/cli-wheel" -maxdepth 1 -type f -name 'vonk_cluster_profiles-*-py3-none-any.whl')
           test "${#cli_wheels[@]}" = 1
           output=$RUNNER_TEMP/installer-publication

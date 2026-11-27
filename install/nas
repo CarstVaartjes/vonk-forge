@@ -49,6 +49,13 @@ case "$expected" in *[!0-9a-f]*) fail "this installer endpoint is not published 
 payload_expected='@NAS_PAYLOAD_SHA256@'
 [ "${#payload_expected}" -eq 64 ] || fail "this installer endpoint is not published correctly"
 case "$payload_expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
+# Dependencies resolve as they were when the release was built (RFC 3339 UTC).
+exclude_newer='@NAS_EXCLUDE_NEWER@'
+case "$exclude_newer" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *) fail "this installer endpoint is not published correctly" ;;
+esac
+export UV_EXCLUDE_NEWER="$exclude_newer"
 
 sha256() {
     if command -v sha256sum >/dev/null 2>&1; then

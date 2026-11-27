@@ -11,6 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/release/render-install-bootstrap"
+CUTOFF = "2026-11-26T22:21:19Z"
 
 
 def _artifacts(tmp_path: Path, kind: str) -> dict[str, Path]:
@@ -92,7 +93,7 @@ def test_renderer_pins_every_supported_native_installer(
     for platform, artifact in artifacts.items():
         command.extend(("--artifact", f"{platform}={artifact}"))
     if kind == "nas":
-        command.extend(("--payload", str(payload)))
+        command.extend(("--payload", str(payload), "--exclude-newer", CUTOFF))
     else:
         for platform in artifacts:
             package = _package(tmp_path, platform)
@@ -109,6 +110,7 @@ def test_renderer_pins_every_supported_native_installer(
         assert hashlib.sha256(artifact.read_bytes()).hexdigest() in rendered
     if kind == "nas":
         assert hashlib.sha256(payload.read_bytes()).hexdigest() in rendered
+        assert f"exclude_newer='{CUTOFF}'" in rendered
     else:
         for platform in artifacts:
             package = tmp_path / f"agent-{platform}.deb"
@@ -177,6 +179,8 @@ def test_renderer_binds_downloads_to_one_immutable_release_base(
         "nas",
         "--payload",
         str(payload),
+        "--exclude-newer",
+        CUTOFF,
         "--base-url",
         base_url,
         "--output",
@@ -237,6 +241,8 @@ def test_renderer_refuses_invalid_nas_wheel_before_publishing_bootstrap(
             f"wheel={wheel}",
             "--payload",
             str(payload),
+            "--exclude-newer",
+            CUTOFF,
             "--output",
             str(output),
         ],
@@ -247,4 +253,33 @@ def test_renderer_refuses_invalid_nas_wheel_before_publishing_bootstrap(
         timeout=10,
     )
     assert result.returncode == 2, result.stderr
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("cutoff", [None, "2026-11-26", "2026-11-26T22:21:19+01:00"])
+def test_renderer_refuses_a_nas_bootstrap_without_a_valid_dependency_cutoff(
+    tmp_path: Path, cutoff: str | None
+) -> None:
+    artifacts = _artifacts(tmp_path, "nas")
+    payload = tmp_path / "payload.json"
+    payload.write_text('{"schema_version":2}\n')
+    output = tmp_path / "nas"
+    command = [
+        sys.executable,
+        str(SCRIPT),
+        "--kind",
+        "nas",
+        "--artifact",
+        f"wheel={artifacts['wheel']}",
+        "--payload",
+        str(payload),
+        "--output",
+        str(output),
+    ]
+    if cutoff is not None:
+        command.extend(("--exclude-newer", cutoff))
+    result = subprocess.run(
+        command, cwd=ROOT, text=True, capture_output=True, check=False
+    )
+    assert result.returncode == 2
     assert not output.exists()

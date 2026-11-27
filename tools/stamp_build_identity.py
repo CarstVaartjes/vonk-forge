@@ -52,6 +52,12 @@ def write_build_identity(*, control_openapi: Path, wire: Path, output: Path) -> 
         "release_version": _environment(
             "VONK_BUILD_RELEASE_VERSION", r"[0-9A-Za-z][0-9A-Za-z.+:~-]{0,127}"
         ),
+        # The source commit time: installers resolve the wheel's dependencies
+        # with `uv --exclude-newer` at it, the set the release was accepted with.
+        "dependencies_exclude_newer": _environment(
+            "VONK_BUILD_DEPENDENCIES_EXCLUDE_NEWER",
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+        ),
     }
     output.write_text(json.dumps(identity, sort_keys=True) + "\n")
 

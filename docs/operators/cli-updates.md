@@ -22,7 +22,8 @@ version is always an update, even when the package bytes are equal, so
 counts; on stable those lines count as content too. It reinstalls the
 verified wheel with `uv tool install --force --python <floor>`, where `<floor>` is the
 wheel's own `Requires-Python` floor (the installer uses the same form), so dependencies a release adds or raises are resolved from the
-package index; `uv` must be available. The command neither edits
+package index, with `--exclude-newer` at the release's stamped source commit
+time so they resolve as when the release was accepted; `uv` must be available. The command neither edits
 Controller credentials nor changes the chosen channel or installer signing key.
 It does not update the Controller or Sparks. A CLI installed before the Python
 3.15 release passes `--python 3.14` and cannot update across that floor: after

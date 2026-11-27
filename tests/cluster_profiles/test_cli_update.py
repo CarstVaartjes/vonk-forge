@@ -167,6 +167,7 @@ def _signed_publication(
                     "worker_contract_sha256": "d" * 64,
                     "source_sha": source_sha,
                     "release_version": "1.2.3",
+                    "dependencies_exclude_newer": "2026-11-26T22:21:19Z",
                 }
             ),
         )
@@ -336,6 +337,8 @@ def test_update_installs_only_changed_signed_wheel(
         # Installed as a uv tool, so the release's dependencies resolve and
         # the tool receipt follows the new wheel.
         assert command[1:6] == ["tool", "install", "--force", "--python", PYTHON]
+        # Dependencies resolve as of the cutoff the release's build stamped.
+        assert command[6:8] == ["--exclude-newer", "2026-11-26T22:21:19Z"]
         assert command[-1].endswith(".whl")
         return subprocess.CompletedProcess(command, 0, "", "")
 
