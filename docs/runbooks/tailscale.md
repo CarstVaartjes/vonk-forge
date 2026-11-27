@@ -178,12 +178,13 @@ NAS and GPU nodes.
 
 ## LAN boundary
 
-Reserve `10.0.0.2` for the NAS and resolve these only on the management LAN:
-
-```text
-enroll.vonk-forge.lan 10.0.0.2
-agents.vonk-forge.lan 10.0.0.2
-```
+Reserve a fixed management-LAN address for the NAS (for example `10.0.0.2`).
+The Sparks reach it as `enroll.<control hostname>` and
+`agents.<control hostname>` (for Secure remote,
+`enroll.vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net` and
+`agents.vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net`). The Spark installer maps both
+names to `VONK_CONTROLLER_ADDRESS` in a managed `/etc/hosts` block, so no LAN
+DNS record is needed.
 
 Caddy publishes TCP 8443 on all NAS interfaces, and Docker-published ports
 bypass the host INPUT firewall, so restrict 8443 with a LAN or router rule:

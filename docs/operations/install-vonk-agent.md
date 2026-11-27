@@ -1,6 +1,7 @@
 # Install or upgrade a Spark
 
-Create a one-use grant in the controller Fleet page. On the Spark, run the exact
+Choose **Enroll Spark** on the Controller's Overview page to create a one-use
+grant. On the Spark, run the exact
 command shown by the controller as the normal administrator account. A private
 NAS command looks like:
 
@@ -44,8 +45,8 @@ resolve from the Spark:
 curl -fsSL https://install.vonkforge.ai/spark | sh
 ```
 
-For routine upgrades of enrolled online Sparks, use Fleet's **Upgrade agents**
-action or `vonkctl fleet upgrade`. It previews the exact signed package and
+For routine upgrades of enrolled online Sparks, use **Upgrade agents** on the
+Overview page or `vonkctl fleet upgrade`. It previews the exact signed package and
 eligible nodes, upgrades every eligible Spark independently (each waits only
 for its own running work), and requires the new agent and privileged helper
 activation evidence from each Spark. This path
@@ -86,8 +87,9 @@ step.
 Healthy connected agents rotate their 30-day client certificate before it
 expires; operators should not normally need to re-enroll them. A package upgrade
 never mints a replacement identity on its own. If an agent missed rotation during
-an outage, or an issued staged generation expired before activation, use Fleet's
-**Re-enroll Spark** action and run its generated `--enroll` command. Package
+an outage, or an issued staged generation expired before activation, use
+**Re-enroll** on the Spark's page (Settings tab) and run its generated
+`--enroll` command. Package
 configuration remains local and recoverable even while the expired identity is
 offline; sustained readiness still fails until re-enrollment succeeds.
 

@@ -82,7 +82,7 @@ The control/runtime contract stays the same as nodes are added:
 
 | Shape | Runtime behavior | Client and control behavior |
 | --- | --- | --- |
-| **One Spark** | A single-node runtime owns its model endpoint and all local artifacts. No fabric fields are required. | The agent calls `agents.vonk-forge.lan:8443`; after health evidence, the controller publishes one accepted route. |
+| **One Spark** | A single-node runtime owns its model endpoint and all local artifacts. No fabric fields are required. | The agent calls `agents.<control hostname>:8443`; after health evidence, the controller publishes one accepted route. |
 | **Two Sparks** | A tensor-parallel gang assigns an entrypoint rank and a worker rank on the direct fabric. Only the entrypoint serves the model API. | Both certificate-bound ranks must acknowledge the same run before `mia-deepseek-v4-flash` is published. One stale or failed rank withdraws the whole route. |
 | **Many Sparks** | The planner places independent workloads and gangs across compatible nodes. A gang can use any accepted subset; other nodes remain available for other work. | Each node still pulls only its fenced operations. The controller publishes each healthy entrypoint independently; it does not broadcast Docker commands or turn IP addresses into authority. |
 
@@ -736,17 +736,18 @@ issued effects. An older executor receipt cannot cancel effects now owned by a
 newer selection: the refusal names the currently selected application to cancel.
 Repeating the entire same profile remains a fresh explicit load.
 
-Profile authoring resolves every choice through the trusted NAS/Controller
-cache. The cache projection selects the exact active recipe revision, model
-variant, model artifact set, and recipe image available for the profile. A
-public catalog result can describe a candidate, but it cannot author a profile
-choice; a Spark-local copy can satisfy execution, but it cannot authorize one.
+Profile authoring resolves every choice to the exact active head revision of
+the Controller's synced catalog, then observes that revision's model variant,
+model artifact set, and recipe image in the trusted NAS/Controller cache. A
+choice need not be cached to be saved; a Spark-local copy can satisfy
+execution, but it cannot authorize a choice.
 The managed NAS cache is trusted under its storage and identity contract, so
 ordinary profile reads and admission do not promise a costly repeated full
 hash of every asset.
 
-If the exact model or recipe image is absent, preview and admission return a
-named, actionable blocker and the prepare-cache action. Preparation reuses the
+If the exact model or recipe image is absent, the review lists its preparation
+(the model download and the image build, each skipped when already cached) and
+the load prepares it in the NAS cache before distribution. Preparation reuses the
 same exact cache identities and deduplicates shared assets; it does not turn a
 missing asset into an implicit Spark-side download. A load needs the NAS copy
 only to send model files to a Spark that lacks them: when every target Spark's

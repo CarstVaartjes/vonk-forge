@@ -19,7 +19,8 @@ curl -fsSL https://install.vonkforge.ai/dev/nas | sh
 ```
 
 The interactive command creates `vonk-forge/docker-compose.yaml`,
-`vonk-forge/.env`, and `vonk-forge/secrets/`. It does not require Docker, Git,
+`vonk-forge/.env`, `vonk-forge/secrets/`, `vonk-forge/backups/` and
+`vonk-forge/backups-offhost/`. It does not require Docker, Git,
 sudo, SSH, a NAS mount, or direct NAS access. Drag the entire directory into the
 NAS Docker application and start it as one Compose project.
 

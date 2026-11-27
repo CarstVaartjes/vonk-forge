@@ -25,13 +25,15 @@ download or use.
 
 The `vonk_forge_contracts` package in the recipe repository is the single
 source of truth for Model and Recipe documents; the Controller consumes the
-exact commit pinned in `control/pyproject.toml`. The library's release version
-is the contract version (`v2.2.0`), so new or changed models and recipes never
+attested contracts wheel of one recipes release, vendored under
+`inventory/wheels/` and recorded in `control/packaging/public-contracts.lock`
+(`scripts/dev/refresh-public-contracts` moves it). The library's release version
+is the contract version (`vMAJOR.MINOR.PATCH`), so new or changed models and recipes never
 need a vonk-forge change: the recipe repository updates the existing release
 for the current contract in place and records when its recipes last changed
 (`updated_at` in `catalog-index.json`). An additive contract change (a new
-optional field) is published as a new minor release (for example `v2.3.0`); a breaking one
-as a new major release (`v3.0.0`) that needs a coordinated vonk-forge release.
+optional field) is published as a new minor release (`vMAJOR.MINOR+1.0`); a breaking one
+as a new major release (`vMAJOR+1.0.0`) that needs a coordinated vonk-forge release.
 
 The Controller reads the signed index only through the contract's one reader,
 `vonk_forge_contracts.catalog_reader.read_catalog`, which verifies each entry's
@@ -170,10 +172,7 @@ dependency by `kind`, `publisher`, `slug`, and content digest; it never turns
 a branch, display name, or `latest` tag directly into execution authority.
 
 The Controller refreshes the managed catalog automatically every minute (an unchanged release answers 304 to a conditional request).
-Opening Library also offers
-**Update from Vonk Forge remote** for an immediate administrator-triggered
-refresh. Both paths use the same durable, idempotent operation and exact commit
-gate. The import receipt records the exact library commit and recipe path;
+The import receipt records the exact library commit and recipe path;
 re-importing the same recipe digest is idempotent. The checkout is never mounted
 into a running workload.
 
@@ -182,9 +181,11 @@ Managed synchronization only owns recipes whose source is
 review. If a managed recipe disappears remotely, its immutable local history
 and any installation remain intact. It is surfaced as withdrawn only while it
 is installed or running; synchronization never stops or uninstalls it.
-When a newer revision is imported, existing installations and runs remain bound
-to their old immutable revision and are reported as stale until the operator
-reviews an update.
+When a newer revision is imported, existing installations and runs keep their
+old immutable revision (the sync never restarts anything) and are reported as
+stale, with an update notice on the profile, until the next load: a load always
+resolves the newest revision, and one that has not started anything yet moves
+onto it.
 
 Library lists only the current accepted revision of each recipe, selected by
 the Controller's catalog head. Recipe links and counts on Models use that same
@@ -197,10 +198,12 @@ syncs again after its own upgrade, even for the same commit, and retries while
 the last run left problems. The latest durable result is available from
 `GET /api/catalog/managed-recipes/sync-status`.
 
-The recipe library's GitHub Actions workflow calls the reusable validator in
-this repository. Before publishing a production recipe-library release, pin
-the validator to an exact `vonk-forge` commit or release tag. Publication is
-GitHub Actions-only and has no access to runtime secrets.
+The recipe library's CI validates every checkout with the platform each Vonk
+Forge channel ships: each leg (dev, stable) fetches that channel's signed
+recipe-tools bundle (built by `scripts/recipes/build-recipe-tools-bundle` and
+attested by this repository's release workflow) and runs its entry point; there
+is no pinned forge commit. Publication is GitHub Actions-only and has no access
+to runtime secrets.
 
 ## Validate a checkout locally
 
