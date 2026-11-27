@@ -432,7 +432,8 @@ A choice need not be cached to be saved: saving one that is not cached adds a
 profile warning, not an error. A load prepares missing model or recipe-image
 assets in the NAS cache by itself: the review lists each preparation step (the
 model download and the image build, each skipped when cached), progress reports
-it, and a preparation that cannot finish is named as the reason the load waits.
+it, an unfinished preparation is named as what the load waits on, and an
+exhausted one fails the load with that reason (`ENDING_BLOCKER_CODES`).
 Do not reintroduce a separate prepare-cache step, and do not leave a missing
 asset for a target Spark to discover.
 The local NAS cache is trusted under its managed-storage contract, and so are

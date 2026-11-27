@@ -283,9 +283,9 @@ recipes reproducible rather than to restrict them.
   its unproven status remains visible. Missing qualification alone is not a
   reason to reject an otherwise admissible candidate.
 - The NAS/Controller cache is the authority for what a profile may place.
-  A load prepares missing assets there by itself and names a preparation that
-  cannot finish as the reason it waits; a missing asset is never left for a
-  Spark to discover.
+  A load prepares missing assets there by itself, waits on an unfinished
+  preparation by name and fails with the reason of an exhausted one; a missing
+  asset is never left for a Spark to discover.
 - Content digests are verified once, where bytes enter from outside the
   environment (upstream model download into the NAS cache, registry image
   import, upload into the Controller store). Inside our own environment (NAS

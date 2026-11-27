@@ -102,8 +102,8 @@ profile creation and updates may select an uncached choice (the profile reports
 it as a warning) but never a merely Spark-local asset. A load whose choice is
 not fully cached starts that revision's preparation itself
 (`PreparationStarter`): the review lists the model download and the image
-build, and progress names a preparation that cannot finish as the typed reason
-the load waits. Load must not choose another revision or recover the authority
+build, progress names an unfinished preparation as the typed reason the load
+waits on, and an exhausted preparation fails the load with that reason. Load must not choose another revision or recover the authority
 from a Spark copy.
 
 After the cache gate succeeds, the Controller distributes the exact digest- and

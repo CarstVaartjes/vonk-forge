@@ -431,8 +431,8 @@ The local NAS/Controller cache is the authoritative availability surface for
 Fleet profile loads: choices resolve to an exact model and recipe-image
 identity, and a choice need not be cached to be saved. A load prepares what it
 needs in that cache by itself (the review lists the model download and the
-image build, each skipped when cached) and names a preparation that cannot
-finish as the reason it waits; never leave a missing asset for a target Spark
+image build, each skipped when cached), names an unfinished preparation as
+what it waits on, and fails with the reason of an exhausted one; never leave a missing asset for a target Spark
 to discover. The managed cache is trusted, so do not promise repeated full hashing. Applying a
 ready profile binds the exact profile and plan digests, prepares assets on the
 targets in parallel, skips what is local, replaces workloads safely and reports
