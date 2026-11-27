@@ -84,10 +84,13 @@ equivalent is:
 
 ```sh
 cd vonk-forge
-sudo docker compose pull
-sudo docker compose up -d --wait --remove-orphans
-sudo docker compose ps
+docker compose pull
+docker compose up -d --wait --remove-orphans
+docker compose ps
 ```
+
+On Linux, prefix `sudo` when your user is not in the `docker` group or the
+project is root-owned.
 
 Use the same project when upgrading. `--remove-orphans` stops and removes
 containers for services removed from the new bundle while preserving named

@@ -76,6 +76,12 @@ MagicDNS and HTTPS, define the exact unsuffixed Services, apply the reviewed
 grants and auto-approvals, and create the scoped gateway OAuth client. Never
 add test-only Service names or policy to an operator tailnet.
 
+**Supported Controller hosts:** Linux with Docker Engine and Compose v2
+(amd64 or arm64), including NAS Docker applications; CI tests stock Linux
+Docker and the production fleet runs on a UGREEN NAS. A macOS Controller
+(Docker Desktop, OrbStack) and preparing the project on macOS are untested.
+The host needs port 8443 free; Docker reports a conflict at `docker compose up`.
+
 Prepare on Intel or ARM macOS or Linux with `curl`, `openssl` and
 installed `uv`. The verified NAS setup wheel runs in an isolated Python 3.15
 environment managed by `uv`; no native NAS setup compilation is required.
@@ -127,10 +133,13 @@ With a shell on that host:
 
 ```bash
 cd vonk-forge
-sudo docker compose pull
-sudo docker compose up -d --wait --remove-orphans
-sudo docker compose ps
+docker compose pull
+docker compose up -d --wait --remove-orphans
+docker compose ps
 ```
+
+On Linux, prefix `sudo` when your user is not in the `docker` group or the
+project is root-owned.
 
 In a NAS or server UI, select the same directory as one Compose project and
 start `docker-compose.yaml`. Keep `.env` and `secrets/` beside it.
@@ -163,6 +172,27 @@ and counts as configured. Compared with the default 2 GB, this releases exactly
 [UEFI guide](https://docs.nvidia.com/dgx/dgx-spark/uefi-settings.html#change-display-reserved-memory).
 How Vonk reads the reserved display memory, and what it reports, is in the
 [display reserved memory runbook](docs/runbooks/display-reserved-memory.md).
+
+#### Controller address changed
+
+Each Spark pins the Controller's LAN address in `/etc/hosts` and in
+`/etc/vonk-forge-agent/docker-firewall.conf`, and neither re-enrollment nor an
+upgrade rewrites them, so a laptop or server on DHCP loses its Sparks when the
+address changes. Reserve the address. If it changed anyway:
+
+1. Set `NAS_LAN_IP` in `vonk-forge/.env` to the new address (and
+   `VONK_MANAGEMENT_CIDRS` if the subnet changed), then redeploy with
+   `docker compose up -d --wait --remove-orphans`.
+2. On each Spark, as its administrator, replace the old address with the new
+   one on the lines between `# BEGIN VONK FORGE MANAGED HOSTS` and
+   `# END VONK FORGE MANAGED HOSTS` in `/etc/hosts` (with `sudo`).
+3. Remove the firewall configuration with
+   `sudo rm /etc/vonk-forge-agent/docker-firewall.conf`, then run the Spark
+   command again without `--enroll`, starting with
+   `curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=<new address> sh`.
+   The installer rewrites the missing configuration for the new address.
+4. In Lab mode, point the DNS or hosts entries for the control hostname at the
+   new address on your other clients too.
 
 ### Install `vonkctl`
 

@@ -250,8 +250,9 @@ install, and the scoped OAuth client. See the
 
 ### 2e. Lab mode only: LAN names and trust
 
-Remove the DNS or hosts entries for `vonk-forge.local`, `enroll.vonk-forge.local`,
-`agents.vonk-forge.local` (older installs also `registry.vonk-forge.local`), and delete the
+Remove the DNS or hosts entries for the `VONK_CONTROL_HOSTNAME` in `.env`
+(`vonk-forge.internal`, or `vonk-forge.local` on earlier installs) and its
+`enroll.` and `agents.` names (older installs also `registry.`), and delete the
 `secrets/step-ca/root-certificate` you imported into browsers and clients.
 
 ## 3. Remove `vonkctl`

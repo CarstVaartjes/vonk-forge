@@ -27,20 +27,25 @@ move the complete `vonk-forge/` directory to the controller host before you
 continue.
 
 The Spark management network defaults to the controller host's own /24. To narrow it (for
-example to the Sparks' exact addresses), edit `VONK_MANAGEMENT_CIDRS` in `.env`. Add LAN DNS records for `vonk-forge.local`, `enroll.vonk-forge.local`,
-and `agents.vonk-forge.local`, all pointing to the
+example to the Sparks' exact addresses), edit `VONK_MANAGEMENT_CIDRS` in `.env`. Add LAN DNS records for `vonk-forge.internal`, `enroll.vonk-forge.internal`,
+and `agents.vonk-forge.internal`, all pointing to the
 controller host address. On a small lab network, equivalent host-file entries can be used.
+Earlier installs keep their `vonk-forge.local` names; `VONK_CONTROL_HOSTNAME`
+in `.env` holds the name your install uses.
 
 ## Start and trust HTTPS
 
 ```sh
 cd vonk-forge
-sudo docker compose pull
-sudo docker compose up -d --wait --remove-orphans
+docker compose pull
+docker compose up -d --wait --remove-orphans
 ```
 
+On Linux, prefix `sudo` when your user is not in the `docker` group or the
+project is root-owned.
+
 Import `secrets/step-ca/root-certificate` into the trust store used by your
-browser and Spark clients. Then open `https://vonk-forge.local:8443` and sign
+browser and Spark clients. Then open `https://vonk-forge.internal:8443` and sign
 in as `admin` using the password in `secrets/admin-password`.
 
 Port 8443 is published on all NAS interfaces; Docker-published ports bypass
@@ -55,6 +60,11 @@ On the Spark, run the generated install command; it already carries the
 controller host's LAN address. The Spark must resolve the `enroll` and `agents` hostnames above
 to that same address. Import the local CA certificate on any client that needs
 to connect to the controller or Spark-facing HTTPS endpoints.
+
+The Sparks pin the controller address in `/etc/hosts` and in their Docker
+firewall configuration, so give the controller host a reserved address. If it
+changes anyway, follow
+[Controller address changed](../README.md#controller-address-changed).
 
 ## Enable secure remote access later
 

@@ -347,8 +347,10 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             "default": "secure-remote",
             "lab_value": "lab",
             "secure_remote_value": "secure-remote",
+            # .internal is reserved for private use; .local belongs to mDNS
+            # (RFC 6762). An existing install keeps the hostname in its .env.
             "lab_values": [
-                {"env": "VONK_CONTROL_HOSTNAME", "value": "vonk-forge.local"},
+                {"env": "VONK_CONTROL_HOSTNAME", "value": "vonk-forge.internal"},
             ],
         },
         # Internal credentials, keys, database URLs, and the PKI are always
