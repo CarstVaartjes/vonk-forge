@@ -225,3 +225,21 @@ def test_install_without_root_key_upgrades_without_prompt(
     members = publication.load_members(bundle / "secrets", newer)
     validate_pki_material(request, parse_environment(bundle / ".env"), members)
     assert (bundle / "docker-compose.yaml").read_text() == "services:\n  upgraded: {}\n"
+
+
+def test_deleted_root_key_is_restored_from_the_verified_snapshot(
+    tmp_path: Path, pki_project: tuple[Path, NasInstallTemplate]
+) -> None:
+    """Catch the empty root-key default overwriting the key the snapshot keeps."""
+    source, template = pki_project
+    bundle = tmp_path / "vonk-forge"
+    shutil.copytree(source, bundle)
+    request = template.step_ca_controller
+    assert request is not None
+    root_key = request.files.root_private_key
+    kept = (bundle / publication.VERIFIED / root_key).read_bytes()
+    assert kept
+    (bundle / "secrets" / root_key).unlink()
+    prepare(template, tmp_path, PromptIo(io.StringIO("")), upgrade=True)
+    assert (bundle / "secrets" / root_key).read_bytes() == kept
+    assert (bundle / publication.VERIFIED / root_key).read_bytes() == kept

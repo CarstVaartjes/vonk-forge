@@ -177,6 +177,12 @@ def upgrade_credentials(
     retained = load_members(bundle / publication.VERIFIED, payload)
     for name, value in retained.items():
         members.setdefault(name, value)
+    if payload.step_ca_controller:
+        # load_members reads an absent root key as the empty default; a key the
+        # verified generation still holds replaces it instead of being lost.
+        root_key = payload.step_ca_controller.files.root_private_key
+        if not members[root_key] and retained.get(root_key):
+            members[root_key] = retained[root_key]
     repair_stored_members(payload, members, retained)
     for item in payload.secrets:
         if item.file in members:
