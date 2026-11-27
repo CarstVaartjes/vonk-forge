@@ -16,7 +16,10 @@ from vonk_control.db.connections import (
 )
 from vonk_control.db.startup import initialize_database
 from vonk_control.runtime_init import RuntimeSecretError, read_runtime_secret
-from vonk_control.security.browser_auth import bootstrap_administrator
+from vonk_control.security.browser_auth import (
+    BootstrapOutcome,
+    bootstrap_administrator,
+)
 from vonk_control.settings import SECRETS_ROOT, install_channel_from_env
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,9 +96,16 @@ def initialize_administrator(database_url: str, password_path: Path) -> None:
     def bootstrap_once() -> None:
         engine = build_engine(database_url)
         try:
-            bootstrap_administrator(session_factory(engine), password)
+            outcome = bootstrap_administrator(session_factory(engine), password)
         finally:
             engine.dispose()
+        # Every start says what it did with the staged password; "refused"
+        # (for example a fresh install whose file is too short) is an error.
+        _LOGGER.log(
+            logging.ERROR if outcome is BootstrapOutcome.REFUSED else logging.INFO,
+            "administrator bootstrap: %s",
+            outcome.value,
+        )
 
     run_with_database_startup_retry(bootstrap_once, label="PostgreSQL")
 

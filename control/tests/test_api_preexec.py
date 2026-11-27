@@ -115,14 +115,9 @@ def test_administrator_initialization_creates_one_login_on_postgres(
 
 @pytest.mark.parametrize(
     "content",
-    [
-        b"",
-        b"missing final newline",
-        b"two\nlines\n",
-        b"nul\0byte\n",
-        b"\xff not utf-8\n",
-        b"x" * 300 + b"\n",
-    ],
+    # The three branches: a file the bounded read refuses, a file that is
+    # not one terminated line, and a line that is not UTF-8.
+    [b"", b"missing final newline", b"\xff not utf-8\n"],
 )
 def test_an_unusable_staged_password_keeps_startup_going_without_db_access(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, content: bytes

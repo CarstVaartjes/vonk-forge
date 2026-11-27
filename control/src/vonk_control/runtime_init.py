@@ -421,18 +421,25 @@ def _stage_compose_secrets_once(
     """Normalize all file-backed Compose secrets for their runtime consumers."""
     source_root = Path(source_root)
     destination_root = Path(destination_root)
-    # The non-root API bootstraps the administrator from this copy. Staged
-    # first: when it fails, a fresh install has no database URL either, so the
-    # API cannot start without its administrator. An older Compose file does
-    # not pass this secret to runtime-init.
+    # The non-root API bootstraps the administrator from this copy. An older
+    # Compose file does not pass this secret to runtime-init. The file is the
+    # operator's reset path, so a hand edit that makes it unusable (empty,
+    # oversize, not a regular file) is logged and skipped: the previous copy
+    # stays staged and every other secret is still staged.
     if (source_root / "admin-password").exists():
-        stage_private_key(
-            source_root / "admin-password",
-            destination_root / "admin-password",
-            owner_uid=10001,
-            owner_gid=10001,
-            mode=0o400,
-        )
+        try:
+            stage_private_key(
+                source_root / "admin-password",
+                destination_root / "admin-password",
+                owner_uid=10001,
+                owner_gid=10001,
+                mode=0o400,
+            )
+        except RuntimeSecretError:
+            _LOGGER.error(
+                "staged administrator password is unusable; the previous copy "
+                "is kept and the API keeps its stored password"
+            )
     stage_private_key(
         source_root / "host-runtime-grant-private-key",
         destination_root / "host-runtime-grant-private-key",
