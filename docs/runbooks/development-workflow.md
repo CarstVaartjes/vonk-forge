@@ -60,11 +60,9 @@ path stashes in an owned tree must retain and restore their exact stash identity
 
 ## Integrate related agent results
 
-Every change lands through an integration PR: a same-repository
-`integration/*` head, or a PR with the `release-acceptance` label. A member PR
-runs only the quick tier, and its gate (`CI gate (member PR)`) is never the
-required `CI gate`, so it cannot merge itself
-([what runs where](../testing-and-ci.md)). One coordinator owns an integration
+Every change lands through an integration PR; [Testing and
+CI](../testing-and-ci.md) owns what makes one and what a member PR runs. One
+coordinator owns an integration
 branch/worktree based on current remote `main`, brings in the reviewed member
 commits, resolves overlaps deliberately, regenerates shared outputs, and
 verifies the combined producer/consumer and recovery boundaries. Passing each

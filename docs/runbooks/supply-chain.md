@@ -19,8 +19,9 @@ A `main` Release whose image inputs changed publishes the three packages as
 `:dev-sha-<sha>`; after acceptance, promotion moves their `:dev` alias. A signed
 stable SemVer version-tag push (`vX.Y.Z`) publishes `:vX.Y.Z` and, after
 acceptance, moves `:latest`. The repository variables
-`VONK_CONTAINER_RELEASES_ENABLED` and `VONK_PLATFORM_RELEASES_ENABLED` are both
-`true`; they gate only that stable path. Branches, pull requests, malformed
+`VONK_CONTAINER_RELEASES_ENABLED` and `VONK_PLATFORM_RELEASES_ENABLED` gate only
+that stable path; `scripts/release/stable-preflight` reports whether they are
+set. Branches, pull requests, malformed
 tags, and Dependabot cannot publish.
 
 For each package's initial publication, a maintainer must open its GitHub
@@ -137,9 +138,11 @@ docker buildx build --platform linux/amd64 --load \
 ```
 
 The `Release` workflow (`installer-publication.yml`) is the only publication
-procedure, for `main` (dev) and signed `v*` tags (stable). It builds all three targets, verifies their
-inputs, emits SBOM and provenance, resolves all three digests, and creates the
-checksum-protected three-reference release asset. It never treats one or two
+procedure, for `main` (dev) and signed `v*` tags (stable). On a signed tag its
+`stable-release.yml` jobs (called through `ci.yml`) build all three targets,
+verify their inputs, emit SBOM and provenance, resolve all three digests, and
+attach the checksum-protected three-reference release asset
+(`vonk-forge-images.env`) to the GitHub Release. It never treats one or two
 images as a releasable publication. LiteLLM base signatures are checked in CI (not at
 publication) with the checked-in key copied from immutable upstream commit
 `e82a3c646908ba0a6ee0beddc4310d7a6cac4065` (the vendor's 2026-10-23 key rotation;
