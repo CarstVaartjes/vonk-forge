@@ -19,6 +19,13 @@ Python 3.15 environment. Then run one command as your normal user:
 curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
+Without a terminal (CI, automation), pass the prompt answers from a file:
+`curl -fsSL https://install.vonkforge.ai/nas | sh -s -- --answers-file PATH`.
+The file holds one answer per line, in the order the installer would ask,
+including hidden secret prompts; a blank line accepts a default or skips an
+optional value. It must be a regular file with no group or other permissions (`0600`) and a
+single link, otherwise the installer refuses it.
+
 Until the first stable release is published, the unqualified `/nas`, `/spark` and `/vonkctl` URLs serve the newest accepted development release; once a stable release exists they serve stable. To choose a channel explicitly, use `https://install.vonkforge.ai/dev/nas` (or `/dev/spark`, `/dev/vonkctl`).
 
 The command verifies the signed release, exact Python setup wheel and payload,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from vonk_agent_protocol.installer_setup import (
 )
 from vonk_nas_setup.cli import open_private_answers
 from vonk_nas_setup.filesystem import SetupError
+from vonk_nas_setup.prompts import PromptIo
 
 
 def invoke(
@@ -81,6 +83,19 @@ def test_cli_upgrade_uses_no_terminal_and_preserves_private_answers(
     assert (
         tmp_path / "vonk-forge/secrets/hf-token"
     ).read_text() == "private-hf-token\n"
+
+
+def test_prompt_without_terminal_fails_as_setup_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catch a headless run surfacing a raw OSError instead of the typed failure."""
+
+    def no_terminal(*_: object, **__: object) -> int:
+        raise OSError(errno.ENXIO, "No such device or address")
+
+    monkeypatch.setattr("vonk_nas_setup.prompts.os.open", no_terminal)
+    with pytest.raises(SetupError):
+        PromptIo().line("value")
 
 
 def test_cli_rejects_secret_arguments_and_conflicting_flags(

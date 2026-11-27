@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import io
+import os
 import sys
 import termios
-from pathlib import Path
 from typing import TextIO
 
 from vonk_agent_protocol.installer_setup import (
@@ -48,7 +48,14 @@ class PromptIo:
         if self.reader is None:
             # Echo control is mandatory. A terminal/provider failure cannot
             # fall back to echoing stdin on headless hosts.
-            with Path("/dev/tty").open("r+", encoding="utf-8") as terminal:
+            try:
+                descriptor = os.open("/dev/tty", os.O_RDWR)
+            except OSError:
+                raise SetupError(
+                    "no terminal is available: run the installer interactively "
+                    "or pass --answers-file PATH"
+                ) from None
+            with os.fdopen(descriptor, "r+", encoding="utf-8") as terminal:
                 if secret:
                     original = termios.tcgetattr(terminal.fileno())
                     hidden = original.copy()
