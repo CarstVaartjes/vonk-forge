@@ -31,8 +31,10 @@ The dump holds only PostgreSQL. The backup unit for a restore is the dump plus
 `token-signing-key`, `host-runtime-grant-private-key.pem` and every other file
 there. Copy `.env` and `secrets/` after every installer run, and keep that copy
 as private as the dumps. The CA journals in the dump only match the same
-intermediate: the root private key is never kept, so the intermediate cannot be
-re-signed, and losing `secrets/step-ca/` means enrolling every Spark again.
+intermediate. `secrets/step-ca/` holds the agent CA: on new installs also the
+encrypted root key (`step-ca/root-key`), with which the installer renews the
+intermediate; earlier installs have no root key. Without a backup of
+`secrets/step-ca/`, every Spark must be enrolled again.
 
 ## Backup scope
 
@@ -106,6 +108,7 @@ Start with both files and retain this override for subsequent redeployments:
 docker compose -f docker-compose.yaml -f compose.recovery.yaml up -d
 ```
 
-Restore the matching `.env`, `secrets/` and PostgreSQL state, then verify
-Controller health, login, Fleet, Library and enrollment before resuming
-workloads.
+Keep the generated authority secrets, which include the encrypted root and
+intermediate CA keys, in protected backups.
+Restore the matching secrets and PostgreSQL state, then verify Controller
+health, login, Fleet, Library and enrollment before resuming workloads.
