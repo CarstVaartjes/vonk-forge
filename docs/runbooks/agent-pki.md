@@ -12,12 +12,15 @@ The NAS installer creates and preserves these secret files:
 - `step-ca/root-certificate`
 - `step-ca/intermediate-certificate`
 - `step-ca/intermediate-key` (encrypted Ed25519 PKCS#8)
+- `step-ca/root-key` (the root key, encrypted the same way; empty on installs
+  created before it was kept)
 - `step-ca-password`
 - `controller-server-certificate` and `controller-server-key`
 - `agent-ca-provisioner-public-jwk` (the public issuer identity used in accepted certificate bindings)
 
 The names under `step-ca/` are retained to reuse the installed authority. The
-root private key is never deployed. The installer no longer generates a JWT
+root key never enters Compose or a container; only the installer reads it, to
+renew the intermediate. The installer no longer generates a JWT
 signing credential or a CA server configuration. Existing unused files may stay.
 Compose mounts the intermediate and password as secrets into the API's staging
 process and exposes private normalized copies to the API and worker. They are
@@ -55,9 +58,29 @@ issuance uses its durable exact binding; a revoked serial cannot be adopted or
 used as a renewal source. Inspect Controller API and worker logs for certificate
 capability failures and PostgreSQL availability.
 
+## Intermediate renewal
+
+The intermediate is valid for five years and the root for ten. When fewer than
+365 days remain, an installer run re-signs the same intermediate key with the
+root key: subject, key and subject key identifier stay, so every certificate it
+already issued keeps verifying. An expired intermediate heals the same way. The
+new intermediate is capped at the root's expiry, and the controller certificate
+bundle is rebuilt with it. Redeploy after the run. Agents present the
+intermediate in their chain and replace that chain at their next 30-day
+renewal, well before the old intermediate expires.
+
+Installs created before the root key was kept have an empty `step-ca/root-key`
+and cannot renew. From 365 days before the intermediate expires, the installer
+says so on every run. Plan a new PKI and re-enroll the Sparks before it
+expires. Root renewal is not automated; the root outlives the first
+intermediate by five years.
+
 ## Backup and recovery
 
-Back up `secrets/` securely and retain the offline root separately. The local
+Back up `secrets/` securely: it holds the encrypted root and intermediate keys
+and their password. A suspected compromise of `secrets/` means a new PKI and
+re-enrollment of every Spark; renewal re-signs the same key and is no
+compromise recovery. The local
 issuance journal and revocations are in the ordinary PostgreSQL backup, so no
 Badger volume archive is needed. Restore PostgreSQL and the matching authority
 secrets together; see [PostgreSQL backups](../postgres-backups.md). Verify

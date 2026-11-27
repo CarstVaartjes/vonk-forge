@@ -98,6 +98,7 @@ Start with both files and retain this override for subsequent redeployments:
 docker compose -f docker-compose.yaml -f compose.recovery.yaml up -d
 ```
 
-Keep generated authority secrets and the offline root in protected backups.
+Keep the generated authority secrets, which include the encrypted root and
+intermediate CA keys, in protected backups.
 Restore the matching secrets and PostgreSQL state, then verify Controller
 health, login, Fleet, Library and enrollment before resuming workloads.

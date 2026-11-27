@@ -120,6 +120,11 @@ class NasStepCaControllerFiles(WireModel):
     controller_server_private_key: str
     provisioner_public_jwk: str
     password: str
+    #: The root CA key, encrypted like the intermediate key and never mounted
+    #: into a container; the installer renews the intermediate with it. An
+    #: empty member is valid: installs created before it existed have none.
+    #: The default names that path for templates recorded before the member.
+    root_private_key: str = "step-ca/root-key"
 
 
 class NasStepCaControllerRequest(WireModel):

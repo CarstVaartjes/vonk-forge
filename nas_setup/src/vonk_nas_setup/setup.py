@@ -35,10 +35,12 @@ from vonk_nas_setup.filesystem import (
     write_member,
 )
 from vonk_nas_setup.pki import (
+    IntermediateRenewal,
     generate_pki,
     normalize_controller_key,
     normalize_intermediate_key,
     renew_controller_leaf,
+    renew_intermediate,
     validate_pki_material,
 )
 from vonk_nas_setup.prompts import PromptIo
@@ -201,6 +203,14 @@ def upgrade_credentials(
         )
         members.update(normalize_intermediate_key(request, members))
         members.update(normalize_controller_key(request, members))
+        if validated.intermediate_renewal is IntermediateRenewal.DUE:
+            members.update(renew_intermediate(request, environment, members))
+        elif validated.intermediate_renewal is IntermediateRenewal.NO_ROOT_KEY:
+            prompt.note(
+                "The agent intermediate CA expires within a year and this install "
+                "kept no root CA key to renew it; plan a new PKI and Spark "
+                "re-enrollment (docs/runbooks/agent-pki.md)."
+            )
         if validated.controller_needs_renewal:
             members.update(renew_controller_leaf(request, environment, members))
     if set(members) != set(secret_paths(payload)):
