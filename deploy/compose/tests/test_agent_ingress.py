@@ -1593,3 +1593,117 @@ def test_edge_body_limit_errors_are_distinct_from_proxied_controller_limits(tmp_
         subprocess.run(
             ["docker", "stop", container], check=True, capture_output=True, timeout=10
         )
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(30)
+def test_only_the_controller_pages_carry_the_controller_page_policy(tmp_path):
+    """The browser host's own routes get the SPA policy; LiteLLM's never do."""
+
+    text = DEV_CADDYFILE.read_text()
+    blocks = []
+    for name in (
+        "edge_headers",
+        "browser_edge_guards",
+        "browser_proxy_headers",
+        "controller_page_policy",
+        "browser_control_proxy",
+    ):
+        match = re.search(
+            rf"^\({name}\) \{{\n.*?^\}}\n", text, re.DOTALL | re.MULTILINE
+        )
+        assert match is not None
+        blocks.append(match.group(0))
+    browser = re.search(r"^:8080 \{\n.*?^\}\n", text, re.DOTALL | re.MULTILINE)
+    assert browser is not None
+    blocks.append(browser.group(0))
+    # Stand-ins for both upstreams; the Controller one sets its own policy,
+    # which the edge must replace rather than merge with.
+    caddyfile = tmp_path / "Caddyfile"
+    caddyfile.write_text(
+        "{\n admin off\n auto_https off\n}\n"
+        + "\n".join(blocks)
+        + ":8000 {\n header Content-Security-Policy upstream\n respond 200\n}\n"
+        + ":4000 {\n respond 200\n}\n"
+    )
+    container = f"vonk-page-policy-{uuid4().hex[:12]}"
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            container,
+            "--add-host",
+            "control-api:127.0.0.1",
+            "--add-host",
+            "litellm:127.0.0.1",
+            "-e",
+            "VONK_CONTROL_HOSTNAME=control.test.example",
+            "-p",
+            "127.0.0.1::8080",
+            "-v",
+            f"{caddyfile}:/etc/caddy/Caddyfile:ro",
+            DEV_CADDY_IMAGE,
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    try:
+        port = int(
+            subprocess.run(
+                ["docker", "port", container, "8080/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            .stdout.strip()
+            .rsplit(":", 1)[1]
+        )
+        deadline = time.monotonic() + 10
+
+        def headers(path: str) -> http.client.HTTPResponse:
+            while True:
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+                try:
+                    connection.request(
+                        "GET", path, headers={"Host": "control.test.example"}
+                    )
+                    response = connection.getresponse()
+                    response.read()
+                    assert response.status == 200
+                    return response
+                except (ConnectionError, http.client.RemoteDisconnected):
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.1)
+                finally:
+                    connection.close()
+
+        for path in ("/", "/fleet", "/api/auth/session"):
+            response = headers(path)
+            policies = response.headers.get_all("Content-Security-Policy") or []
+            assert len(policies) == 1
+            directives = {
+                part.strip().split(" ", 1)[0]: part.strip()
+                for part in policies[0].split(";")
+            }
+            assert directives["default-src"] == "default-src 'self'"
+            assert directives["frame-ancestors"] == "frame-ancestors 'none'"
+            assert directives["object-src"] == "object-src 'none'"
+            assert "'unsafe-inline'" not in policies[0]
+            assert "'unsafe-eval'" not in policies[0]
+            assert "camera=()" in response.getheader("Permissions-Policy", "")
+            assert "microphone=()" in response.getheader("Permissions-Policy", "")
+        for path in ("/v1/models", "/litellm/ui/"):
+            response = headers(path)
+            assert response.getheader("Permissions-Policy") is None
+            for policy in response.headers.get_all("Content-Security-Policy") or []:
+                assert "default-src" not in policy
+    finally:
+        subprocess.run(
+            ["docker", "stop", container], check=True, capture_output=True, timeout=10
+        )
