@@ -56,8 +56,8 @@ the tagged commit.
    It checks the release switches, the stable environments and their deployment
    policies, name parity with the dev twins, the acceptance and agent key
    fingerprints, the owner reviewer, that the four workspace version files at
-   `<sha>` (the ones the tag run checks) equal the tag (files that disagree
-   stop it with exit 2 and the versions found), that `<sha>` is on main with a
+   `<sha>` (the ones the tag run checks) agree and equal the tag (disagreeing
+   files are reported with their versions, beside every other gap), that `<sha>` is on main with a
    successful Release, the three image attestations, and the signers file. The
    reviewer is expected on
    `installer-acceptance-stable`; pass `--reviewer-environment` to name another.

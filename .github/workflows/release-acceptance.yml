@@ -68,11 +68,11 @@ jobs:
           # order it above the previous dev release for real upgrade acceptance.
           python3 - <<'PY'
           import os
+          import runpy
           import time
-          import tomllib
-          from pathlib import Path
 
-          version = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+          # The one version check of every version file a release reads.
+          version = runpy.run_path("scripts/agent/agent-package-metadata")["workspace_version"]()
           major, minor, patch = (int(part) for part in version.split("."))
           if patch:
               patch -= 1

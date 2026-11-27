@@ -24,10 +24,10 @@ def read_local(relative: str) -> str:
     return (ROOT / relative).read_text()
 
 
-def workspace_version(read: Callable[[str], str] = read_local) -> str:
-    """The one version of the four version files; ``read`` returns a file's
-    text by repository-relative path (the stable preflight reads them at a sha)."""
-    versions: list[str] = []
+def version_files(read: Callable[[str], str] = read_local) -> dict[str, str]:
+    """Each version file's version; ``read`` returns a file's text by
+    repository-relative path (the stable preflight reads them at a sha)."""
+    versions: dict[str, str] = {}
     for path, keys in VERSION_FILES:
         try:
             value: object = tomllib.loads(read(path))
@@ -39,14 +39,17 @@ def workspace_version(read: Callable[[str], str] = read_local) -> str:
             raise ValueError("workspace version is invalid") from error
         if not isinstance(value, str) or SEMVER_RE.fullmatch(value) is None:
             raise ValueError("workspace version is invalid")
-        versions.append(value)
-    if len(set(versions)) != 1:
-        found = ", ".join(
-            f"{path} {version}"
-            for (path, _), version in zip(VERSION_FILES, versions, strict=True)
-        )
+        versions[path] = value
+    return versions
+
+
+def workspace_version(read: Callable[[str], str] = read_local) -> str:
+    """The one version of the four version files."""
+    versions = version_files(read)
+    if len(set(versions.values())) != 1:
+        found = ", ".join(f"{path} {version}" for path, version in versions.items())
         raise ValueError(f"workspace version is invalid: {found}")
-    return versions[0]
+    return next(iter(versions.values()))
 
 
 def publication_sequence(release: str, value: str) -> int:

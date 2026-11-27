@@ -43,7 +43,8 @@ class Snapshot(TypedDict):
     sha: str
     variables: dict[str, str]
     environments: dict[str, EnvironmentState | None]
-    workspace_version: str
+    #: Each version file's version at the commit, by repository path.
+    version_files: dict[str, str]
     behind_by: int
     release_conclusion: str | None
     images: dict[str, ImageState]
@@ -188,11 +189,19 @@ def _reviewers(
 def _source(snapshot: Snapshot) -> list[Problem]:
     problems: list[Problem] = []
     match = _TAG_RE.fullmatch(snapshot["tag"])
-    if match is None or snapshot["workspace_version"] != match.group(1):
+    versions = snapshot["version_files"]
+    if len(set(versions.values())) != 1:
+        found = ", ".join(f"{path} {version}" for path, version in versions.items())
+        problems.append(
+            Problem(
+                "version-files", f"the version files disagree at the commit: {found}"
+            )
+        )
+    elif match is None or set(versions.values()) != {match.group(1)}:
         problems.append(
             Problem(
                 "tag",
-                f"workspace version at the commit is {snapshot['workspace_version']}, "
+                f"workspace version at the commit is {next(iter(versions.values()))}, "
                 f"the tag is {snapshot['tag']}",
             )
         )
