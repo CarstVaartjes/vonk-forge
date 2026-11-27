@@ -120,7 +120,7 @@ Confirm the checks refer to its new head and that auto-merge remains enabled
 when eligible. Do not force-push another agent's branch. If a review, permission,
 or failed check still blocks the merge, report that specific condition.
 
-## Merge independently; verify publication before deployment
+## Merge without waiting; verify publication before deployment
 
 Every merge starts a release run, but it builds images only when their inputs
 changed since an ancestor release built them. The producer input paths live in
@@ -130,7 +130,7 @@ build inputs. Do not assume a commit has
 in the registry; `git ls-remote` verifies Git refs, not registry images.
 
 Accepted publication is a deployment prerequisite, not a prerequisite for the
-next independent merge. Before deployment, verify an accepted generation whose
+next merge. Before deployment, verify an accepted generation whose
 relevant artifacts contain the intended changes. The publisher rejects
 superseded builds; several rapid merges can leave newer built images outside
 the accepted channel. A floating alias follows accepted publication. An image
@@ -138,7 +138,7 @@ existing in the registry alone is not an accepted release or deployment proof.
 
 A documentation-only merge outside all producer inputs creates no image; its
 release reuses the ancestor images. Do not classify it as a failed or
-superseding build. Independent PRs may merge while an earlier build awaits
+superseding build. Later integration PRs may merge while an earlier build awaits
 acceptance; keep its publication evidence open until verified. Follow the current
 [publication runbook](platform-release-publication.md) to reconcile an eligible
 producer/generation; never promote a guessed tag for a tip that did not build.
