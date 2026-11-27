@@ -11,6 +11,7 @@ from threading import Event
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -1038,9 +1039,10 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
         headers=_headers(tokens, "administrator"),
     )
     assert wrong_profile.status_code == 404
-    route = api.get("/openapi.json").json()["paths"][
-        path.replace(application.id, "{application_id}")
-    ]["post"]
+    app = api.app
+    assert isinstance(app, FastAPI)
+    schema = app.openapi()
+    route = schema["paths"][path.replace(application.id, "{application_id}")]["post"]
     assert route["operationId"] == "cancelProfileApplication"
     assert "requestBody" in route
 
@@ -1056,7 +1058,7 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
     assert lookup.status_code == 200, lookup.text
     assert lookup.json()["cancellation"]["request_key"] == key
     assert lookup.json()["cancellation"]["actor"] == "administrator"
-    lookup_openapi = api.get("/openapi.json").json()["paths"][
+    lookup_openapi = schema["paths"][
         "/api/profile/applications/{application_id}/cancellations/{request_key}"
     ]["get"]
     assert lookup_openapi["operationId"] == "getProfileApplicationCancellation"
