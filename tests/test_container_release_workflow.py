@@ -1219,7 +1219,7 @@ def test_latest_alias_advances_only_after_release_evidence() -> None:
         ROOT / "scripts/images/verify-production-alias-postconditions"
     ).read_text()
     gate = installer_job("promote")
-    assert "needs: [authority, candidate, release-acceptance, apt, producers]" in gate
+    assert "needs: [authority, candidate, release-acceptance, producers]" in gate
     for result in ("authority", "candidate"):
         assert f"needs.{result}.result == 'success'" in gate
     assert "needs['release-acceptance'].result == 'success'" in gate
@@ -1249,7 +1249,7 @@ def test_accepted_installer_promotion_binds_authority_and_pointer_last() -> None
         "promote", "Promote accepted images and advance installer pointer last"
     )
     assert (
-        "needs: [authority, candidate, release-acceptance, apt, producers]"
+        "needs: [authority, candidate, release-acceptance, producers]"
         in installer_workflow()
     )
     assert "environment: installer-promotion-" in promotion

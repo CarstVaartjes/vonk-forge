@@ -92,9 +92,12 @@ def test_publication_waits_for_every_producer_and_ci() -> None:
         "images",
         "setups",
     }
-    # Nothing is promoted before apt dev and the producer records settled.
+    # Nothing is promoted before the producer records settled; the unread apt
+    # repository never blocks promotion.
     promote = jobs["promote"]
-    assert {"apt", "producers"} <= set(promote["needs"])
+    assert "producers" in promote["needs"]
+    assert "apt" not in promote["needs"]
+    assert "apt" not in jobs["producers"]["needs"]
     condition = " ".join(authority["if"].split())
     assert "!cancelled()" in condition
     assert "!contains(needs.*.result, 'failure')" in condition

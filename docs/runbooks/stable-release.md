@@ -201,9 +201,10 @@ curl -fsSL https://install.vonkforge.ai/dev/nas | sh
 
 Then `.env` has `VONK_INSTALL_CHANNEL=dev`; redeploy, check `vonkctl --json
 platform` (its `api_source_tree` equals the tree of the commit you moved to;
-the channel is the one in `.env`), and run the fleet upgrade again. A Spark's apt source keeps the
-channel it was installed with; that only matters for a manual `apt upgrade`.
-Rerunning the `/spark` installer (`/dev/spark` for dev) on a Spark switches it
+the channel is the one in `.env`), and run the fleet upgrade again. Sparks
+have no apt source: the installer and the relay install a digest-verified
+agent package, so the Spark follows the Controller's channel at its next fleet
+upgrade. Rerunning the `/spark` installer (`/dev/spark` for dev) on a Spark switches it
 and needs that host's administrative rights.
 
 `vonkctl` follows `VONK_CLI_UPDATE_CHANNEL` (default `stable`; set `dev` for a
