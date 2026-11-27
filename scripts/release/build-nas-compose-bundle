@@ -369,6 +369,7 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                 "controller_server_private_key": "controller-server-key",
                 "provisioner_public_jwk": "agent-ca-provisioner-public-jwk",
                 "password": "step-ca-password",
+                "root_private_key": "step-ca/root-key",
             },
         },
     }

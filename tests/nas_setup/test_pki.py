@@ -20,11 +20,13 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from vonk_agent_protocol.installer_setup import NasStepCaControllerRequest
 from vonk_nas_setup.pki import (
+    IntermediateRenewal,
     generate_pki,
     normalize_controller_key,
     normalize_intermediate_key,
     pki_hostnames,
     renew_controller_leaf,
+    renew_intermediate,
     validate_pki_material,
 )
 
@@ -137,6 +139,151 @@ def test_generated_intermediate_loads_with_controller_crypto_and_explicit_encryp
     assert normalize_intermediate_key(request_contract, material) == {}
     with pytest.raises(ValueError):
         serialization.load_pem_private_key(encrypted, b"wrong password")
+
+
+def test_generated_root_key_is_kept_encrypted_and_matches_the_root(
+    request_contract: NasStepCaControllerRequest, material: dict[str, bytes]
+) -> None:
+    # Catches discarding the root key (no intermediate renewal ever) or storing
+    # it in cleartext next to the other secrets.
+    paths = request_contract.files
+    encrypted = material[paths.root_private_key]
+    label, _, _ = pem.unarmor(encrypted)
+    assert label == "ENCRYPTED PRIVATE KEY"
+    key = serialization.load_pem_private_key(encrypted, material[paths.password])
+    root = x509.load_pem_x509_certificate(material[paths.root_certificate])
+    assert key.public_key() == root.public_key()
+    foreign = generate_pki(request_contract, ENVIRONMENT, now=NOW)
+    with pytest.raises(ValueError, match="root private key"):
+        validate_pki_material(
+            request_contract,
+            ENVIRONMENT,
+            {
+                **material,
+                paths.root_private_key: foreign[paths.root_private_key],
+                paths.password: foreign[paths.password],
+                paths.intermediate_private_key: foreign[paths.intermediate_private_key],
+            },
+            now=NOW,
+        )
+
+
+def _agent_leaf(
+    material: dict[str, bytes],
+    password_path: str,
+    key_path: str,
+    intermediate_path: str,
+) -> x509.Certificate:
+    issuer = x509.load_pem_x509_certificate(material[intermediate_path])
+    signer = serialization.load_pem_private_key(
+        material[key_path], material[password_path]
+    )
+    assert isinstance(signer, ed25519.Ed25519PrivateKey)
+    subject = ed25519.Ed25519PrivateKey.generate()
+    return (
+        x509.CertificateBuilder()
+        .subject_name(
+            x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "spk_" + "0" * 32)])
+        )
+        .issuer_name(issuer.subject)
+        .public_key(subject.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(NOW)
+        .not_valid_after(NOW + timedelta(days=30))
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(
+                issuer.extensions.get_extension_for_class(
+                    x509.SubjectKeyIdentifier
+                ).value
+            ),
+            False,
+        )
+        .sign(signer, algorithm=None)
+    )
+
+
+@pytest.mark.parametrize(
+    ("days_remaining", "due"), [(366, False), (365, True), (-1, True)]
+)
+def test_intermediate_renewal_resigns_the_same_key_and_heals_expiry(
+    request_contract: NasStepCaControllerRequest,
+    material: dict[str, bytes],
+    days_remaining: int,
+    due: bool,
+) -> None:
+    # Catches rotating the intermediate key (every issued agent certificate
+    # would stop verifying), keeping the old intermediate in the leaf bundle,
+    # and refusing an expired intermediate the root key can heal.
+    paths = request_contract.files
+    agent = _agent_leaf(
+        material,
+        paths.password,
+        paths.intermediate_private_key,
+        paths.intermediate_certificate,
+    )
+    now = NOW + timedelta(days=1825 - days_remaining)
+    if days_remaining < 0:
+        with pytest.raises(ValueError, match="outside its validity"):
+            validate_pki_material(request_contract, ENVIRONMENT, material, now=now)
+    result = validate_pki_material(
+        request_contract, ENVIRONMENT, material, now=now, allow_expired_controller=True
+    )
+    assert (result.intermediate_renewal is IntermediateRenewal.DUE) is due
+    replacement = renew_intermediate(request_contract, ENVIRONMENT, material, now=now)
+    assert bool(replacement) is due
+    if not due:
+        return
+    candidate = {**material, **replacement}
+    candidate.update(
+        renew_controller_leaf(request_contract, ENVIRONMENT, candidate, now=now)
+    )
+    validate_pki_material(request_contract, ENVIRONMENT, candidate, now=now)
+    assert renew_intermediate(request_contract, ENVIRONMENT, candidate, now=now) == {}
+    old = x509.load_pem_x509_certificate(material[paths.intermediate_certificate])
+    new = x509.load_pem_x509_certificate(candidate[paths.intermediate_certificate])
+    assert new.public_key() == old.public_key()
+    assert new.subject == old.subject
+    assert list(new.extensions) == list(old.extensions)
+    root = x509.load_pem_x509_certificate(material[paths.root_certificate])
+    assert new.not_valid_after_utc == min(
+        now + timedelta(days=1825), root.not_valid_after_utc
+    )
+    agent.verify_directly_issued_by(new)
+    assert candidate[paths.root_certificate] == material[paths.root_certificate]
+    assert (
+        candidate[paths.intermediate_private_key]
+        == material[paths.intermediate_private_key]
+    )
+
+
+def test_install_without_root_key_validates_but_cannot_renew_the_intermediate(
+    request_contract: NasStepCaControllerRequest, material: dict[str, bytes]
+) -> None:
+    # Catches refusing installs that predate the kept root key, and inventing
+    # a renewal (or healing an expired intermediate) without one.
+    paths = request_contract.files
+    keyless = {**material, paths.root_private_key: b""}
+    near = NOW + timedelta(days=1825 - 100)
+    assert (
+        validate_pki_material(
+            request_contract,
+            ENVIRONMENT,
+            keyless,
+            now=near,
+            allow_expired_controller=True,
+        ).intermediate_renewal
+        is IntermediateRenewal.NO_ROOT_KEY
+    )
+    assert renew_intermediate(request_contract, ENVIRONMENT, keyless, now=near) == {}
+    validate_pki_material(request_contract, ENVIRONMENT, keyless, now=NOW)
+    with pytest.raises(ValueError, match="outside its validity"):
+        validate_pki_material(
+            request_contract,
+            ENVIRONMENT,
+            keyless,
+            now=NOW + timedelta(days=1826),
+            allow_expired_controller=True,
+        )
 
 
 @pytest.mark.parametrize(

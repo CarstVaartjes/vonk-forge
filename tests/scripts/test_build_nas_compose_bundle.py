@@ -158,7 +158,10 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         secret["file"].removeprefix("./secrets/")
         for secret in compose["secrets"].values()
     }
-    assert compose_secret_files == installer_secret_files
+    # The root CA key stays on the host: no container may mount it.
+    root_key = payload["step_ca_controller"]["files"]["root_private_key"]
+    assert root_key not in compose_secret_files
+    assert compose_secret_files == installer_secret_files - {root_key}
     assert "configs" not in compose
     assert "control-secret-init" not in compose_text
     assert "/repository" not in compose_text

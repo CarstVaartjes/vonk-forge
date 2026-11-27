@@ -118,6 +118,10 @@ def load_members(root: Path, payload: NasInstallTemplate) -> dict[str, bytes]:
         value = read_member(root, name)
         if value is not None:
             members[name] = value
+    if payload.step_ca_controller:
+        # Installs created before the root key was kept have none: an empty
+        # member, like an unset optional secret.
+        members.setdefault(payload.step_ca_controller.files.root_private_key, b"")
     return members
 
 
