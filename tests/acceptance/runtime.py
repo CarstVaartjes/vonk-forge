@@ -16,7 +16,11 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 MAXIMUM_HTTPS_BODY_BYTES = 2 * 1024 * 1024
-OPTIONAL_SECRET_FILES = {"hf-token"}
+#: Members a valid install may hold empty: the operator skipped the optional
+#: Hugging Face token, or the install predates the kept root CA key
+#: (NasStepCaControllerFiles.root_private_key; this module stays stdlib-only
+#: because the root acceptance environment has no workspace packages).
+OPTIONAL_SECRET_FILES = {"hf-token", "step-ca/root-key"}
 
 
 class AcceptanceError(RuntimeError):
