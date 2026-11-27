@@ -1187,7 +1187,7 @@ def test_sse_route_accepts_shared_auth_and_sets_exact_headers() -> None:
     )
     assert stream.calls == []
 
-    client.cookies.set("vonk_session", browser_session)
+    client.cookies.set("__Host-vonk_session", browser_session)
     assert client.get(route, headers={"last-event-id": "+1"}).status_code == 400
     assert (
         client.get(

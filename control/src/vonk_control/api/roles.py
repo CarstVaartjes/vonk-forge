@@ -10,7 +10,14 @@ from fastapi import (
     Request,
 )
 
-from vonk_control.auth import MUTATION_ROLES, Actor, AuthError, BearerTokens
+from vonk_control.auth import (
+    CSRF_COOKIE,
+    MUTATION_ROLES,
+    SESSION_COOKIE,
+    Actor,
+    AuthError,
+    BearerTokens,
+)
 from vonk_control.security.browser_auth import (
     BrowserAuthenticationError,
     BrowserAuthService,
@@ -37,7 +44,7 @@ def make_actor_dependency(
                     status_code=401, detail="authentication failed"
                 ) from None
         else:
-            encoded = request.cookies.get("vonk_session", "")
+            encoded = request.cookies.get(SESSION_COOKIE, "")
             cookie_auth = bool(encoded)
             if not encoded:
                 raise HTTPException(status_code=401, detail="authentication required")
@@ -50,7 +57,7 @@ def make_actor_dependency(
                     status_code=401, detail="authentication failed"
                 ) from None
         if cookie_auth and request.method not in {"GET", "HEAD", "OPTIONS"}:
-            cookie = request.cookies.get("vonk_csrf")
+            cookie = request.cookies.get(CSRF_COOKIE)
             header = request.headers.get("x-csrf-token")
             if not cookie or not header or not secrets.compare_digest(cookie, header):
                 raise HTTPException(status_code=403, detail="CSRF validation failed")

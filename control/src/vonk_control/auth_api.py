@@ -10,7 +10,13 @@ from fastapi import FastAPI, HTTPException, Path, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from vonk_agent_protocol.http_failure import TransientReason
-from vonk_control.auth import ADMIN_ROLE, Actor, AdministratorRole
+from vonk_control.auth import (
+    ADMIN_ROLE,
+    CSRF_COOKIE,
+    SESSION_COOKIE,
+    Actor,
+    AdministratorRole,
+)
 from vonk_control.http_errors import temporary_http_answer
 from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
@@ -25,8 +31,6 @@ from vonk_control.security.browser_auth import (
 )
 
 _COOKIE_MAX_AGE = 43_200
-_SESSION_COOKIE = "vonk_session"
-_CSRF_COOKIE = "vonk_csrf"
 
 
 class LoginRequest(BaseModel):
@@ -122,7 +126,7 @@ def install_auth_routes(
         )
 
     def cookie_identity(request: Request) -> BrowserIdentity:
-        token = request.cookies.get(_SESSION_COOKIE, "")
+        token = request.cookies.get(SESSION_COOKIE, "")
         try:
             return service.resolve(token)
         except BrowserAuthenticationError:
@@ -131,7 +135,7 @@ def install_auth_routes(
             ) from None
 
     def require_csrf(request: Request) -> None:
-        cookie = request.cookies.get(_CSRF_COOKIE)
+        cookie = request.cookies.get(CSRF_COOKIE)
         header = request.headers.get("x-csrf-token")
         if not cookie or not header or not secrets.compare_digest(cookie, header):
             raise HTTPException(status_code=403, detail="CSRF validation failed")
@@ -163,12 +167,12 @@ def install_auth_routes(
             ) from None
         response.headers.append(
             "set-cookie",
-            f"{_SESSION_COOKIE}={issued.token}; HttpOnly; Max-Age={_COOKIE_MAX_AGE}; "
+            f"{SESSION_COOKIE}={issued.token}; HttpOnly; Max-Age={_COOKIE_MAX_AGE}; "
             "Path=/; SameSite=strict; Secure",
         )
         response.headers.append(
             "set-cookie",
-            f"{_CSRF_COOKIE}={issued.csrf}; Max-Age={_COOKIE_MAX_AGE}; Path=/; "
+            f"{CSRF_COOKIE}={issued.csrf}; Max-Age={_COOKIE_MAX_AGE}; Path=/; "
             "SameSite=strict; Secure",
         )
         return summary(issued.identity)
@@ -198,16 +202,16 @@ def install_auth_routes(
     ) -> None:
         require_csrf(request)
         cookie_identity(request)
-        service.logout(request.cookies[_SESSION_COOKIE])
+        service.logout(request.cookies[SESSION_COOKIE])
         response.delete_cookie(
-            _SESSION_COOKIE,
+            SESSION_COOKIE,
             path="/",
             secure=True,
             httponly=True,
             samesite="strict",
         )
         response.delete_cookie(
-            _CSRF_COOKIE,
+            CSRF_COOKIE,
             path="/",
             secure=True,
             httponly=False,

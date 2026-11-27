@@ -72,7 +72,13 @@ test("Chromium recipe setting editor sends the exact wide integer through the re
   const routing = JSON.parse(source);
   const requests: string[] = [];
   await context.addCookies([
-    { name: "vonk_csrf", value: "fixture-csrf", url: "http://127.0.0.1:4174" },
+    {
+      name: "__Host-vonk_csrf",
+      value: "fixture-csrf",
+      domain: "127.0.0.1",
+      path: "/",
+      secure: true,
+    },
   ]);
   await page.route(
     (url) => url.pathname === "/api/artifact-jobs/capabilities",

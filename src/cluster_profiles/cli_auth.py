@@ -51,8 +51,9 @@ from cluster_profiles.control_client.transport import _read_control_response
 from cluster_profiles.control_transport import open_https
 
 _TIMEOUT_SECONDS = 15
-_SESSION_COOKIE = "vonk_session"
-_CSRF_COOKIE = "vonk_csrf"
+# The Controller's cookie names (control auth.SESSION_COOKIE and CSRF_COOKIE).
+_SESSION_COOKIE = "__Host-vonk_session"
+_CSRF_COOKIE = "__Host-vonk_csrf"
 
 
 class AuthAction(StrEnum):

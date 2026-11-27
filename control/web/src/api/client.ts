@@ -73,11 +73,14 @@ import type {
   RecipeLibrary,
 } from "./types";
 
+/** The Controller's CSRF cookie (control auth.CSRF_COOKIE); __Host- keeps sibling hosts from planting it. */
+const CSRF_COOKIE = "__Host-vonk_csrf";
+
 function csrfToken(): string | undefined {
   const cookie = document.cookie
     .split(";")
     .map((value) => value.trim())
-    .find((value) => value.startsWith("vonk_csrf="));
+    .find((value) => value.startsWith(`${CSRF_COOKIE}=`));
   return cookie?.slice(cookie.indexOf("=") + 1);
 }
 
