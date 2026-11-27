@@ -7,8 +7,8 @@ and transfer behavior remain the starting point for that work.
 
 Recipe images are normally prebuilt. When a recipe is published or updated,
 the recipe library builds each distinct image on a GitHub-hosted ARM64 runner
-with the same build flags and platform adaptation stage a Spark uses, pushes
-it to GHCR (public), and pins the pushed manifest digest beside the recipe in
+as the recipe's own build, with no platform layer (only the Spark fallback
+build below adds the platform adaptation stage), pushes it to GHCR (public), and pins the pushed manifest digest beside the recipe in
 the signed catalog index (`prebuilt_image: {reference, build_key}`). The
 pinned manifest digest is the image's identity. The `build_key` is the recipes
 CI's own handle for finding or skipping a build, planned and derived in the
