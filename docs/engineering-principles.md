@@ -332,5 +332,6 @@ recipes reproducible rather than to restrict them.
 The interaction model adopts proven patterns while keeping Vonk Forge's safety
 boundary: Kubernetes labels and selectors for cross-cutting groupings,
 Tailscale Machines for search and health filtering, Argo CD's live-versus-
-desired diff as the language of preview, and Nomad node pools plus progressive
-rollout for placement and one-at-a-time fleet change.
+desired diff as the language of preview, and Nomad node pools for placement.
+A fleet upgrade sends every Spark its own order at once; each upgrades
+independently.
