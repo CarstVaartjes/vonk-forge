@@ -96,6 +96,23 @@ never interrupted. Tag releases never cancel and are never cancelled.
 `.github/workflows/installer-maintenance.yml` refreshes both channel manifests
 daily and, when dispatched, removes stale disposable CI tailnets.
 
+### Installer manifest expiry
+
+The signed `current.manifest` of each channel expires 7 days after its last
+refresh. If new installs or `vonkctl update` say the release manifest has
+expired, the scheduled refresh has stopped. Enable *Installer maintenance* in
+the Actions tab if GitHub disabled it (public repositories lose scheduled
+workflows after 60 days without repository activity). The refresh only runs on
+the schedule, never on a dispatch: rerun the latest scheduled run (all jobs)
+when it is less than 30 days old, otherwise the next scheduled run (03:17 UTC)
+refreshes both channels.
+
+Every scheduled run re-enables the workflow, which prevents that 60-day
+disable, and a failed scheduled run opens or comments on the issue "Installer
+maintenance is failing" (it closes only when a scheduled run fully succeeds). That issue
+means the refresh is failing, for example because of a rotated R2 or signing
+secret: fix the cause, then rerun the failed run.
+
 ## One-time publication authority setup
 
 The workflow separates candidate signing, behavioral canaries, acceptance
