@@ -25,7 +25,9 @@ wheel's own `Requires-Python` floor (the installer uses the same form), so depen
 package index, with `--exclude-newer` at the release's stamped source commit
 time so they resolve as when the release was accepted; `uv` must be available. The command neither edits
 Controller credentials nor changes the chosen channel or installer signing key.
-It does not update the Controller or Sparks. A CLI installed before the Python
+`--apply` also tries once, briefly, to record the Controller's compatibility
+observation in its result; with no Controller configured, no login or no
+network it installs the verified wheel without it. It does not update the Controller or Sparks. A CLI installed before the Python
 3.15 release passes `--python 3.14` and cannot update across that floor: after
 deploying it, reinstall vonkctl once through `install/channel`. Later floor bumps
 update normally. A failed verification leaves the

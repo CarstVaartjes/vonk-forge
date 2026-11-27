@@ -34,6 +34,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from cluster_profiles import cli, cli_update, runtime_identity
+from cluster_profiles.control_client.errors import (
+    ControlNotConfigured,
+    ControlUnauthorized,
+)
 from cluster_profiles.control_client.transfers import ControlClient
 from cluster_profiles.runtime_identity import (
     contract_fingerprint,
@@ -1538,8 +1542,23 @@ def test_update_refuses_tampered_bytes_then_allows_fresh_update(
     assert len(installed) == 1
 
 
-def test_update_reobserves_malformed_peer_then_installs_and_admits_fresh_update(
-    tmp_path, monkeypatch
+def _unauthorized() -> dict[str, object]:
+    raise ControlUnauthorized(401, "denied")
+
+
+def _unreachable() -> dict[str, object]:
+    raise ConnectionRefusedError
+
+
+def _not_configured() -> dict[str, object]:
+    raise ControlNotConfigured
+
+
+@pytest.mark.parametrize(
+    "observation", [_unauthorized, _unreachable, _not_configured, dict]
+)
+def test_update_installs_without_a_controller_observation(
+    tmp_path, monkeypatch, observation
 ):
     key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
     monkeypatch.setattr(
@@ -1557,91 +1576,18 @@ def test_update_reobserves_malformed_peer_then_installs_and_admits_fresh_update(
             subprocess.CompletedProcess(command, 0),
         )[1],
     )
-    observations = iter([{}, OSError(), _controller_observation()])
-    ticks = [0.0]
-
-    def observe():
-        value = next(observations)
-        if isinstance(value, Exception):
-            raise value
-        return value
-
-    def sleep(seconds):
-        ticks[0] += seconds
-
     result = cli_update.run_update(
         channel="stable",
         origin="https://install.vonkforge.ai",
         apply=True,
         public_key=key,
         download=lambda url, _: objects[url],
-        compatibility_observation=observe,
-        clock=lambda: ticks[0],
-        sleeper=sleep,
+        compatibility_observation=observation,
     )
-    assert result["updated"]
+    assert result["updated"] is True
     assert len(installed) == 1
-    assert ticks[0] == 1.0
-    fresh = cli_update.run_update(
-        channel="stable",
-        origin="https://install.vonkforge.ai",
-        apply=True,
-        public_key=key,
-        download=lambda url, _: objects[url],
-        compatibility_observation=_controller_observation,
-    )
-    assert fresh["updated"]
-    assert len(installed) == 2
-
-
-def test_unknown_update_ends_without_install_then_fresh_request_works(
-    tmp_path, monkeypatch
-):
-    key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
-    monkeypatch.setattr(
-        cli_update,
-        "current_build",
-        lambda: {"version": "0.1.1", "source_sha": "c" * 40},
-    )
-    installed = []
-    monkeypatch.setattr(cli_update.shutil, "which", lambda _: "uv")
-    monkeypatch.setattr(
-        cli_update,
-        "_install",
-        lambda command, **kwargs: (
-            installed.append(command),
-            subprocess.CompletedProcess(command, 0),
-        )[1],
-    )
-    ticks = [0.0]
-
-    def sleep(seconds):
-        ticks[0] += seconds
-
-    with not_adopted():
-        cli_update.run_update(
-            channel="stable",
-            origin="https://install.vonkforge.ai",
-            apply=True,
-            public_key=key,
-            download=lambda url, _: objects[url],
-            compatibility_observation=dict,
-            observation_timeout_seconds=1,
-            clock=lambda: ticks[0],
-            sleeper=sleep,
-        )
-    assert ticks[0] == 1
-    assert installed == []
-    fresh = cli_update.run_update(
-        channel="stable",
-        origin="https://install.vonkforge.ai",
-        apply=True,
-        public_key=key,
-        download=lambda url, _: objects[url],
-        compatibility_observation=_controller_observation,
-    )
-    assert fresh["updated"]
-    assert len(installed) == 1
+    assert "controller" not in result
+    assert "compatibility" not in result
 
 
 def test_notice_owner_cannot_unlink_replacement_lock(tmp_path):
