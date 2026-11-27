@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
-from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_nas_setup import publication
 from vonk_nas_setup.compose import resolve_compose
 from vonk_nas_setup.environment import (
@@ -43,7 +43,6 @@ from vonk_nas_setup.pki import (
 )
 from vonk_nas_setup.prompts import PromptIo
 from vonk_nas_setup.secrets import (
-    apply_secret_group,
     generate_missing,
     generated,
     load_members,
@@ -58,14 +57,6 @@ from vonk_nas_setup.secrets import (
 class SetupOutcome:
     root: Path
     dropped_environment: tuple[str, ...] = ()
-
-
-def permission_note(payload: NasInstallTemplate, root: Path, prompt: PromptIo) -> None:
-    pending = apply_secret_group(payload, root)
-    if pending and payload.group_readable_secrets:
-        prompt.note(
-            f"{SecurityRefusalReason.PERMISSION_DENIED.value}: group {payload.group_readable_secrets.gid}: {', '.join(pending)}"
-        )
 
 
 def fresh(
@@ -122,7 +113,6 @@ def fresh(
         atomic_replace(staging / ".env", render_environment(environment))
         for name, value in members.items():
             write_member(staging / "secrets", name, value)
-        permission_note(payload, staging / "secrets", prompt)
         publication.remember_verified(payload, staging)
         publication.sync_tree(staging)
         staging.replace(bundle)
@@ -213,7 +203,6 @@ def upgrade_credentials(
     # bundle. Every run rewrites Compose, so a rerun repairs an interruption.
     publication.publish(payload, bundle, members, environment)
     atomic_replace(bundle / "docker-compose.yaml", compose, 0o644)
-    permission_note(payload, root, prompt)
     retired = root / "runtime-configs"
     if metadata(retired):
         try:

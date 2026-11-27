@@ -117,10 +117,10 @@ running.
 ## Upgrade
 
 Run the same command from the directory that already contains `vonk-forge/`.
-Use the account that owns the existing private files. For a root-owned bundle,
-or an explicitly authorized repair of the configured secret group, put `sudo`
-on the `sh` side of the pipe (`sudo curl ... | sh` does not work). Installed `uv`
-must be available to the account running the installer:
+Use the account that owns the existing private files. Only for a root-owned
+bundle, put `sudo` on the `sh` side of the pipe (`sudo curl ... | sh` does not
+work); under `sudo` the installer falls back to the invoking user's `uv` in
+`~/.local/bin` or `~/.cargo/bin`:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/nas | sudo sh
@@ -197,6 +197,9 @@ time its container starts it stages, before the services that read it start:
   `normalized-private-keys` (owner and mode per consumer, the administrator
   password included), and the gateway master key under
   `secrets/gateway/authority`;
+- the Tailscale OAuth secrets in `tailscale-oauth`, root-owned `0400`, which
+  only the capability-free gateway mounts (removed when Lab mode leaves them
+  empty);
 - this release's runtime kit in `runtime-assets`, with files a release no
   longer ships removed;
 - the ownership of the shared volume roots (`/state`, the object stores,

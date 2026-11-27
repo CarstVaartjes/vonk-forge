@@ -410,6 +410,71 @@ def test_admin_password_is_staged_for_the_api_when_compose_supplies_it(
     assert (shared / "database-url").read_bytes() == b"secret\n"
 
 
+def test_tailscale_oauth_secrets_get_a_root_owned_copy_whatever_the_host_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches the capability-free gateway (root, no DAC_OVERRIDE) reading the
+    # installer's 0600 files of another host user: it reads only this copy.
+    source, shared, gateway = tmp_path / "source", tmp_path / "shared", tmp_path / "gw"
+    tailscale = tmp_path / "tailscale-oauth"
+    for directory in (source, shared, gateway):
+        directory.mkdir()
+    for name in (
+        "host-runtime-grant-private-key",
+        "database-url",
+        "token-signing-key",
+        "metrics-token",
+        "agent-client-ca",
+        "agent-intermediate-certificate",
+        "controller-ca",
+        "agent-proxy-auth",
+        "litellm-master-key",
+        "litellm-database-url",
+    ):
+        (source / name).write_bytes(b"secret\n")
+    names = ("tailscale-oauth-client-id", "tailscale-oauth-client-secret")
+    for name in names:
+        (source / name).write_bytes(f"{name}-value\n".encode())
+        (source / name).chmod(0o600)
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
+
+    def stage() -> None:
+        stage_compose_secrets(
+            source,
+            shared,
+            gateway_master_key=gateway / "authority" / "master-key",
+            tailscale_root=tailscale,
+        )
+
+    staged: list[tuple[Path, int, int, int]] = []
+    original = runtime_init.stage_private_key
+
+    def observe(source_path, destination, **kwargs):
+        if destination.parent == tailscale:
+            staged.append(
+                (
+                    destination,
+                    kwargs.get("owner_uid", 0),
+                    kwargs.get("owner_gid", 0),
+                    kwargs["mode"],
+                )
+            )
+        return original(source_path, destination, **kwargs)
+
+    monkeypatch.setattr(runtime_init, "stage_private_key", observe)
+    stage()
+    assert staged == [(tailscale / name, 0, 0, 0o400) for name in names]
+    for name in names:
+        assert (tailscale / name).read_bytes() == f"{name}-value\n".encode()
+        assert stat.S_IMODE((tailscale / name).stat().st_mode) == 0o400
+    # Lab mode writes the files empty: the copy goes, the rest still stages.
+    for name in names:
+        (source / name).write_bytes(b"")
+    stage()
+    assert not any((tailscale / name).exists() for name in names)
+    assert (shared / "database-url").read_bytes() == b"secret\n"
+
+
 def test_existing_object_store_directories_stop_new_files_being_copy_on_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

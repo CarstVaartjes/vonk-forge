@@ -58,6 +58,7 @@ def _run_bootstrap(
     machine: str,
     arguments: tuple[str, ...] = (),
     release_root: str | None = "file",
+    sudo_user_uv: bool = False,
 ):
     commands = tmp_path / "commands"
     commands.mkdir()
@@ -135,6 +136,16 @@ def _run_bootstrap(
         'wheel=$7; [ -f "$wheel" ]; case "$wheel" in *.whl) ;; *) exit 98 ;; esac\n'
         'shift 7; [ "$1" = vonk-nas-setup ]; shift\nexec sh "$wheel" "$@"\n',
     )
+    sudo_home = tmp_path / "invoking-user"
+    if sudo_user_uv:
+        # sudo's PATH has no uv; only the invoking user's ~/.local/bin has it.
+        (sudo_home / ".local/bin").mkdir(parents=True)
+        (commands / "uv").rename(sudo_home / ".local/bin/uv")
+        _fake_command(
+            commands,
+            "getent",
+            f'[ "$1 $2" = "passwd operator" ]; printf "operator:x:1000:1000::{sudo_home}:/bin/sh\\n"\n',
+        )
     for command in ("apt-get", "dpkg-deb", "systemctl"):
         _fake_command(commands, command, "exit 97\n")
     forbidden = tmp_path / "forbidden-tools"
@@ -161,6 +172,8 @@ def _run_bootstrap(
     }
     if release_root is not None:
         environment["VONK_INSTALL_RELEASE_PUBLIC_KEY"] = str(root)
+    if sudo_user_uv:
+        environment["SUDO_USER"] = "operator"
     result = subprocess.run(
         ["sh", str(rendered), *arguments],
         cwd=tmp_path,
@@ -263,6 +276,16 @@ def test_nas_bootstrap_reuses_the_same_command_for_upgrade(tmp_path: Path) -> No
     invocation = receipt.read_text().splitlines()[0].split("|", 1)[1].split()
     assert invocation[0] == "--template"
     assert invocation[2:] == ["--upgrade"]
+    assert not forbidden.exists()
+
+
+def test_nas_bootstrap_under_sudo_uses_the_invoking_users_uv(tmp_path: Path) -> None:
+    result, receipt, forbidden = _run_bootstrap(
+        tmp_path, "nas", system="Linux", machine="x86_64", sudo_user_uv=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert receipt.read_text().splitlines()[0].split("|", 1)[1].startswith("--template")
     assert not forbidden.exists()
 
 

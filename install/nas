@@ -26,7 +26,19 @@ validate_arguments() {
 }
 validate_arguments "$@"
 
-command -v uv >/dev/null 2>&1 || fail "uv is required; install uv, then rerun this command"
+# sudo resets PATH, which hides a per-user uv (~/.local/bin); use the invoking
+# user's own uv then.
+uv=$(command -v uv 2>/dev/null) || uv=
+if [ -z "$uv" ] && [ -n "${SUDO_USER:-}" ] && command -v getent >/dev/null 2>&1; then
+    sudo_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    for candidate in "$sudo_home/.local/bin/uv" "$sudo_home/.cargo/bin/uv"; do
+        if [ -n "$sudo_home" ] && [ -x "$candidate" ]; then
+            uv=$candidate
+            break
+        fi
+    done
+fi
+[ -n "$uv" ] || fail "uv is required; install uv, then rerun this command"
 expected='@NAS_WHEEL_SHA256@'
 wheel_filename='@NAS_WHEEL_FILENAME@'
 wheel_size='@NAS_WHEEL_SIZE@'
@@ -76,9 +88,9 @@ actual=$(sha256 "$wheel")
 [ "$actual" = "$expected" ] || fail "the NAS setup wheel failed checksum verification"
 
 if [ -e ./vonk-forge ]; then
-    uv run --isolated --no-project --python 3.15 --with "$wheel" \
+    "$uv" run --isolated --no-project --python 3.15 --with "$wheel" \
         vonk-nas-setup --template "$payload" --upgrade "$@"
 else
-    uv run --isolated --no-project --python 3.15 --with "$wheel" \
+    "$uv" run --isolated --no-project --python 3.15 --with "$wheel" \
         vonk-nas-setup --template "$payload" "$@"
 fi
