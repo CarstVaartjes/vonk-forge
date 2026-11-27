@@ -24,6 +24,12 @@ from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
 # response contract both refer to it, so the set cannot drift.
 AdministratorRole = Literal["administrator"]
 ADMIN_ROLE: Final[AdministratorRole] = "administrator"
+# The browser session and CSRF cookie names. The __Host- prefix makes the browser
+# refuse a cookie with a Domain attribute, a non-root Path or no Secure flag, so a
+# same-site sibling host (the LiteLLM origin on the same tailnet) cannot plant or
+# shadow either cookie.
+SESSION_COOKIE: Final = "__Host-vonk_session"
+CSRF_COOKIE: Final = "__Host-vonk_csrf"
 _ROLES = frozenset({"viewer", "operator", "administrator"})
 _AGENT_NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _AGENT_IDENTITY_SCOPE_KEY = "vonk.agent_identity"

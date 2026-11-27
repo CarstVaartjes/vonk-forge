@@ -276,3 +276,34 @@ def test_a_refused_token_listing_is_the_standard_unauthorized_error(
 
     with pytest.raises(ControlUnauthorized):
         cli_auth.run_auth("tokens", url=None, password_stdin=False)
+
+
+@pytest.mark.parametrize("prefix", ["__Host-", ""])
+def test_login_replays_the_session_cookies_under_the_names_the_controller_set(
+    monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    """Matching one exact cookie name would strand vonkctl on the other Controller."""
+    sent: dict[str, dict[str, str]] = {}
+
+    def controller(
+        _url: str, path: str, headers: dict[str, str], _body: bytes | None = None
+    ) -> tuple[int, bytes, Message]:
+        sent[path] = headers
+        answer = Message()
+        if path == "/api/auth/login":
+            answer["set-cookie"] = (
+                f"{prefix}vonk_session=s3ss; HttpOnly; Path=/; Secure"
+            )
+            answer["set-cookie"] = f"{prefix}vonk_csrf=csrf; Path=/; Secure"
+            return 200, b"{}", answer
+        answer["x-vonk-token-expires-at"] = "2026-12-21T12:00:00Z"
+        return 200, b"minted-token", answer
+
+    monkeypatch.setattr(cli_auth, "_post", controller)
+
+    token, _expires = cli_auth._mint_token("https://forge.example.test", "pw")
+
+    assert token == "minted-token"
+    minting = sent["/api/auth/cli-token"]
+    assert minting["Cookie"] == f"{prefix}vonk_session=s3ss; {prefix}vonk_csrf=csrf"
+    assert minting["X-CSRF-Token"] == "csrf"

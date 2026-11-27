@@ -265,7 +265,7 @@ def test_admin_schema_is_secret_free() -> None:
         "BearerAuth": {"scheme": "bearer", "type": "http"},
         "BrowserSession": {
             "in": "cookie",
-            "name": "vonk_session",
+            "name": "__Host-vonk_session",
             "type": "apiKey",
         },
     }

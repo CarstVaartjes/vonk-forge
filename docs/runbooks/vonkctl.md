@@ -38,6 +38,10 @@ transport is separate and is not a CLI fallback.
 Log in once with the admin password. `vonkctl` asks for it without echo, uses
 it only to mint the Controller's CLI token, and stores the token alone; the
 password is never stored, put in arguments or environment, or printed.
+To mint it, `vonkctl` opens a short browser session (cookies
+`__Host-vonk_session` and `__Host-vonk_csrf`, the same as the web UI) and
+logs it out again. It also accepts the cookie names without the `__Host-`
+prefix, which Controllers before the rename set.
 
 ```bash
 vonkctl auth login https://forge.example.test

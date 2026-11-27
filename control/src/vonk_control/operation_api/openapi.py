@@ -13,6 +13,7 @@ from pydantic.json_schema import JsonSchemaMode, JsonSchemaValue, models_json_sc
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
 from vonk_agent_protocol.outcome import ErrorCatalog
 from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
+from vonk_control.auth import SESSION_COOKIE
 from vonk_control.auth_api import CliTokenDownload
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS, _HTTP_METHODS
 from vonk_control.stored.json_values import ExternalPassthrough, contract_models
@@ -68,7 +69,7 @@ def admin_openapi_schema(app: FastAPI) -> ExternalSchemaDocument:
     components["securitySchemes"] = {"BearerAuth": {"scheme": "bearer", "type": "http"}}
     components["securitySchemes"]["BrowserSession"] = {
         "in": "cookie",
-        "name": "vonk_session",
+        "name": SESSION_COOKIE,
         "type": "apiKey",
     }
 

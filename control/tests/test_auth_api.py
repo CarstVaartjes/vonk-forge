@@ -202,10 +202,10 @@ def test_login_returns_only_a_session_summary_and_exact_secure_cookies() -> None
     assert response.headers["cache-control"] == "no-store"
     assert response.headers.get_list("set-cookie") == [
         (
-            f"vonk_session={SESSION_TOKEN}; HttpOnly; Max-Age=43200; Path=/; "
+            f"__Host-vonk_session={SESSION_TOKEN}; HttpOnly; Max-Age=43200; Path=/; "
             "SameSite=strict; Secure"
         ),
-        f"vonk_csrf={CSRF_TOKEN}; Max-Age=43200; Path=/; SameSite=strict; Secure",
+        f"__Host-vonk_csrf={CSRF_TOKEN}; Max-Age=43200; Path=/; SameSite=strict; Secure",
     ]
     serialized = repr((response.headers.items(), response.content))
     assert ADMIN_PASSWORD not in serialized
@@ -366,10 +366,10 @@ def test_session_status_and_logout_use_the_durable_cookie_session() -> None:
     assert logout.headers["cache-control"] == "no-store"
     cleared = logout.headers.get_list("set-cookie")
     assert len(cleared) == 2
-    assert cleared[0].startswith('vonk_session="";')
+    assert cleared[0].startswith('__Host-vonk_session="";')
     assert "HttpOnly" in cleared[0]
     assert "Max-Age=0" in cleared[0]
-    assert cleared[1].startswith('vonk_csrf="";')
+    assert cleared[1].startswith('__Host-vonk_csrf="";')
     assert "HttpOnly" not in cleared[1]
     assert "Max-Age=0" in cleared[1]
     assert client.get("/api/auth/session").status_code == 401
@@ -514,8 +514,8 @@ def test_cli_token_checks_csrf_even_when_actor_dependency_already_authenticated(
         Depends(lambda: Actor("admin", "administrator")),
     )
     client = TestClient(app, base_url=ORIGIN)
-    client.cookies.set("vonk_session", SESSION_TOKEN)
-    client.cookies.set("vonk_csrf", CSRF_TOKEN)
+    client.cookies.set("__Host-vonk_session", SESSION_TOKEN)
+    client.cookies.set("__Host-vonk_csrf", CSRF_TOKEN)
     assert client.post("/api/auth/cli-token").status_code == 403
     assert (
         client.post(

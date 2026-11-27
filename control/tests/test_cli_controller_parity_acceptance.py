@@ -217,7 +217,7 @@ def _validate_request(path: str, method: str, payload: object) -> None:
 
 def _auth(request: Request, *, mutation: bool = False) -> None:
     bearer = request.headers.get("authorization") == f"Bearer {TOKEN}"
-    cookie = request.cookies.get("vonk_session") == TOKEN
+    cookie = request.cookies.get("__Host-vonk_session") == TOKEN
     if not (bearer or cookie):
         raise HTTPException(status_code=401, detail="authentication required")
     if mutation and cookie and request.headers.get("x-csrf-token") != CSRF:
@@ -431,7 +431,7 @@ class HTTPTransport:
             headers["accept"] = OBSERVATION_MEDIA_TYPE
         if self.browser:
             headers["x-csrf-token"] = CSRF
-            self.client.cookies.set("vonk_session", TOKEN)
+            self.client.cookies.set("__Host-vonk_session", TOKEN)
         else:
             headers["authorization"] = f"Bearer {TOKEN}"
         response = self.client.request(

@@ -1347,15 +1347,20 @@ class LocalBrowserController:
         for value in headers.get("set-cookie", []):
             pair = value.partition(";")[0]
             name, marker, cookie_value = pair.partition("=")
-            if marker and name in {"vonk_session", "vonk_csrf"} and cookie_value:
+            if (
+                marker
+                and name in {"__Host-vonk_session", "__Host-vonk_csrf"}
+                and cookie_value
+            ):
                 cookies[name] = cookie_value
-        if set(cookies) != {"vonk_session", "vonk_csrf"}:
+        if set(cookies) != {"__Host-vonk_session", "__Host-vonk_csrf"}:
             raise LifecycleError("administrator session cookies are incomplete")
         fixed_headers = {
             "Cookie": "; ".join(
-                f"{name}={cookies[name]}" for name in ("vonk_session", "vonk_csrf")
+                f"{name}={cookies[name]}"
+                for name in ("__Host-vonk_session", "__Host-vonk_csrf")
             ),
-            "X-CSRF-Token": cookies["vonk_csrf"],
+            "X-CSRF-Token": cookies["__Host-vonk_csrf"],
         }
 
         def transport(
