@@ -10,10 +10,11 @@ from sqlalchemy.pool import StaticPool
 
 from cluster_profiles import runtime_identity
 from tests.observation_transfer_peer import observation_document
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.build_identity import RuntimeBuildIdentity
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import ControlProcessHeartbeat

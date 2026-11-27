@@ -1,4 +1,4 @@
-"""``vonkctl auth login`` against the real app: password in, token files out."""
+"""``vonkctl auth`` against the real app: password in, token files out, revocable."""
 
 from __future__ import annotations
 
@@ -14,12 +14,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 from vonk_control.api.application import create_app
-from vonk_control.auth import TokenCodec
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
-from vonk_control.security.browser_auth import BrowserAuthService
+from vonk_control.security.browser_auth import BrowserAuthService, SessionBearerTokens
 from vonk_control.security.passwords import hash_password
 
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
@@ -68,16 +67,13 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
     def now():
         return datetime.now(UTC)
 
+    service = BrowserAuthService(sessions, clock=now)
     api = TestClient(
         create_app(
             jobs=JobService(sessions, clock=now),
-            tokens=TokenCodec(_KEY),
+            tokens=SessionBearerTokens(service, _KEY),
             fleet_projection=FleetProjection(sessions, clock=now),
-            browser_auth=BrowserAuthService(
-                sessions,
-                token_signing_key=_KEY,
-                clock=now,
-            ),
+            browser_auth=service,
             now=lambda: int(time.time()),
         )
     )
@@ -123,13 +119,32 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
         status_json = _run(
             installed_vonkctl, ("auth", "status", "--json"), environment, ""
         )
+        listed = _run(installed_vonkctl, ("auth", "tokens", "--json"), environment, "")
+        modes = {
+            name: stat.S_IMODE((config / name).stat().st_mode)
+            for name in ("token", "connection.json")
+        }
+        stored = json.loads((config / "connection.json").read_text())
+        # A copy of the token file (a lost laptop) must die with the logout.
+        copied = tmp_path / "copied-token"
+        copied.write_text((config / "token").read_text())
+        copied.chmod(0o600)
+        logout = _run(installed_vonkctl, ("auth", "logout", "--json"), environment, "")
+        reused = _run(
+            installed_vonkctl,
+            ("--check-connection",),
+            {
+                **environment,
+                "VONK_CONTROL_URL": url,
+                "VONK_CONTROL_TOKEN_FILE": str(copied),
+            },
+            "",
+        )
 
     assert login.returncode == 0, login.stdout + login.stderr
-    token = (config / "token").read_text().strip()
+    token = copied.read_text().strip()
     assert stat.S_IMODE(config.stat().st_mode) == 0o700
-    for name in ("token", "connection.json"):
-        assert stat.S_IMODE((config / name).stat().st_mode) == 0o600
-    stored = json.loads((config / "connection.json").read_text())
+    assert modes == {"token": 0o600, "connection.json": 0o600}
     assert stored["controller_url"] == url
     assert connected.returncode == 0, connected.stdout + connected.stderr
     assert status.returncode == 0, status.stdout + status.stderr
@@ -138,6 +153,12 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
     assert minted[0] in status.stdout
     assert json.loads(status_json.stdout)["token_expires_at"] == minted[0]
     assert "in 30 days" in login.stdout
+    [entry] = json.loads(listed.stdout)["tokens"]
+    assert entry["presented"] is True
+    assert entry["revoked"] is False
+    assert json.loads(logout.stdout) == {"token_revocation": "revoked"}
+    assert not (config / "token").exists()
+    assert reused.returncode != 0
     for output in (login, connected, status):
         assert token not in output.stdout + output.stderr
         assert _PASSWORD not in output.stdout + output.stderr

@@ -10,9 +10,9 @@ from pathlib import Path
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts.recipe import RecipeJobInput
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.compiled_execution_plan import CompiledJobInput
 from vonk_control.api.application import create_app
-from vonk_control.auth import TokenCodec
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.jobs.queue import JobService
@@ -49,7 +49,6 @@ def _application():
         tokens=TokenCodec(key),
         browser_auth=BrowserAuthService(
             sessionmaker(),
-            token_signing_key=key,
             clock=lambda: datetime(2026, 9, 7, tzinfo=UTC),
         ),
     )

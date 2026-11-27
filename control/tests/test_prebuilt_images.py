@@ -23,12 +23,12 @@ from tests.recipe_builds_support import RecordingQueue
 from tests.recipe_library_source import recipe_library_root
 from tests.runtime_image_fixtures import place_test_image
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.images import ImageStoreCode, PrebuiltImageCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_control import prebuilt_images
-from vonk_control.auth import TokenCodec
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )

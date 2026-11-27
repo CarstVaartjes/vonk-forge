@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from cluster_profiles.cli_render.progress import progress_line
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
@@ -31,7 +32,6 @@ from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_jobs.waits import refresh_queue_waits
-from vonk_control.auth import TokenCodec
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.jobs import Job

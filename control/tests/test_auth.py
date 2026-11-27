@@ -3,32 +3,13 @@ from pydantic import TypeAdapter
 from vonk_forge_contracts.model import Slug
 from vonk_forge_contracts.recipe import RecipeIdentity
 
-from vonk_control.auth import (
-    Actor,
-    CursorError,
-    TokenCodec,
-)
+from vonk_control.auth import CursorCodec, CursorError
 from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
 
 
-def test_signed_token_round_trip_and_tamper_rejection() -> None:
-    codec = TokenCodec(b"x" * 32)
-    token = codec.issue(Actor("admin", "administrator"), ttl_seconds=60, now=100)
-    assert codec.verify(token, now=120) == Actor("admin", "administrator")
-    accepted = []
-    with pytest.raises(Exception):  # noqa: B017 -- tampered token yields no identity
-        accepted.append(codec.verify(token + "changed", now=120))
-    assert not accepted
-    with pytest.raises(Exception):  # noqa: B017 -- expired token yields no identity
-        accepted.append(codec.verify(token, now=161))
-    assert not accepted
-    fresh = codec.issue(Actor("admin", "administrator"), ttl_seconds=60, now=161)
-    assert codec.verify(fresh, now=162) == Actor("admin", "administrator")
-
-
-def test_codec_rejects_short_signing_key() -> None:
+def test_cursor_signer_rejects_short_signing_key() -> None:
     with pytest.raises(ValueError):
-        TokenCodec(b"short")
+        CursorCodec.from_signing_key(b"short")
 
 
 def test_cursor_fits_longest_canonical_selector_and_remains_query_bound() -> None:
@@ -42,7 +23,7 @@ def test_cursor_fits_longest_canonical_selector_and_remains_query_bound() -> Non
     )
     recipe_selector = f"{recipe_identity.publisher}/{recipe_identity.slug}"
     context = {"l": 512, "s": "updated", "f": "f" * 64}
-    codec = TokenCodec(b"c" * 32).cursor_codec()
+    codec = CursorCodec.from_signing_key(b"c" * 32)
 
     for resource, selector in (
         ("models", model_selector),

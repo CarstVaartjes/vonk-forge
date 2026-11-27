@@ -55,9 +55,15 @@ password from stdin (discouraged: the password then passes through your
 script).
 
 `vonkctl auth status` shows the Controller, where the credential comes from and
-its expiry, and checks it with a Fleet read. `vonkctl auth logout` deletes the
-two local files; the token itself stays valid until it expires because the
-Controller keeps no revocation list.
+its expiry, and checks it with a Fleet read. Every CLI token is a revocable row
+on the Controller (only its digest is stored). `vonkctl auth logout` revokes
+this login's token when the Controller answers, then deletes the two local
+files. `vonkctl auth tokens` lists the tokens (id, expiry, revoked, which one is
+this login). `vonkctl auth tokens --revoke ID` revokes one token at once, for example a
+lost laptop's, and leaves the others working; `vonkctl auth tokens --revoke-all`
+revokes every CLI token and every browser session, this login's included, so
+log in again afterwards. The browser menu's token download mints the same kind
+of row.
 
 `VONK_CONTROL_URL` and `VONK_CONTROL_TOKEN_FILE` still override the address and
 the token path (for example for a second Controller or a CI job). Set both

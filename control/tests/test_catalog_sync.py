@@ -25,7 +25,7 @@ import vonk_control.catalog.service as catalog_service_module
 import vonk_control.catalog.sync as catalog_sync_module
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
-from vonk_control.auth import TokenCodec
+from tests.token_support import TokenCodec
 from vonk_control.catalog.api import ManagedCatalogSyncResponse, _managed_sync
 from vonk_control.catalog.queries import active_head_revision
 from vonk_control.catalog.revision_contract import (

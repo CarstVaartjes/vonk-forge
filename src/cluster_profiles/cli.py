@@ -198,9 +198,28 @@ def _parser() -> argparse.ArgumentParser:
     )
     logout = auth_actions.add_parser(
         AuthAction.LOGOUT.value,
-        help="Delete the local login (tokens stay valid until they expire)",
+        help="Revoke this login's token on the Controller and delete the local login",
     )
-    for auth_command in (login, status, logout):
+    tokens = auth_actions.add_parser(
+        AuthAction.TOKENS.value,
+        help="List the Controller's CLI tokens, or revoke one or all of them",
+        description=(
+            "Lists every CLI token (id, expiry, revoked, this login). --revoke ID "
+            "revokes one at once, for example a lost laptop's; --revoke-all also "
+            "ends every browser session and this login, so log in again after."
+        ),
+    )
+    revocation = tokens.add_mutually_exclusive_group()
+    revocation.add_argument(
+        "--revoke", dest="token_id", metavar="ID", help="Revoke this CLI token"
+    )
+    revocation.add_argument(
+        "--revoke-all",
+        dest="revoke_all",
+        action="store_true",
+        help="Revoke every CLI token and browser session",
+    )
+    for auth_command in (login, status, logout, tokens):
         auth_command.add_argument(
             "--json",
             action="store_true",
@@ -852,6 +871,8 @@ def _main(
                 args.auth_action,
                 url=getattr(args, "url", None),
                 password_stdin=getattr(args, "password_stdin", False),
+                token_id=getattr(args, "token_id", None),
+                revoke_all=getattr(args, "revoke_all", False),
             )
             print(
                 _json_text(auth_result.document())

@@ -25,7 +25,7 @@ from vonk_control.api.application import create_app
 from vonk_control.api.common import _LOGGER, SpaFiles
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.service import ArtifactJobService
-from vonk_control.auth import CursorCodec, TokenCodec
+from vonk_control.auth import CursorCodec
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
@@ -90,7 +90,7 @@ from vonk_control.runtime_image_preparation.preparation import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
-from vonk_control.security.browser_auth import BrowserAuthService
+from vonk_control.security.browser_auth import BrowserAuthService, SessionBearerTokens
 from vonk_control.settings import (
     AGENT_RELEASE_API_URL,
     ARTIFACT_JOB_RETENTION_SECONDS,
@@ -299,10 +299,15 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     def clock() -> datetime:
         return datetime.now(UTC)
 
+    browser_auth = capabilities.guard(
+        ControllerCapability.BROWSER_AUTH,
+        BrowserAuthService,
+        lambda: BrowserAuthService(sessions, clock=clock),
+    )
     token_codec = capabilities.guard(
         ControllerCapability.TOKEN_AUTH,
-        TokenCodec,
-        lambda: TokenCodec(settings.token_signing_key),
+        SessionBearerTokens,
+        lambda: SessionBearerTokens(browser_auth, settings.token_signing_key),
     )
     cursor_codec = capabilities.guard(
         ControllerCapability.CURSOR_AUTH,
@@ -668,13 +673,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 except Exception:  # noqa: BLE001 -- each durable owner resumes independently on restart
                     _LOGGER.exception("Controller shutdown cleanup deferred")
 
-    browser_auth = capabilities.guard(
-        ControllerCapability.BROWSER_AUTH,
-        BrowserAuthService,
-        lambda: BrowserAuthService(
-            sessions, token_signing_key=settings.token_signing_key, clock=clock
-        ),
-    )
     metrics_secret = capabilities.provider(
         ControllerCapability.METRICS_AUTH,
         str,

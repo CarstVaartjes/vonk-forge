@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.agent_operations import ArtifactDistributionResult
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.contracts import AgentResult, ArtifactDistributionPayload
@@ -32,7 +33,6 @@ from vonk_agent_protocol.wire_model import (
     canonical_message,
 )
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
 from vonk_control.distribution.assignment_contract import NodeDistributionAssignment
 from vonk_control.distribution.filesystem import RecipeBuildObjectSource

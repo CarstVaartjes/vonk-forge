@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import Session
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
@@ -23,7 +24,6 @@ from vonk_agent_protocol.state_machines import (
     RouteState,
     RunState,
 )
-from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract.endpoints import (
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,

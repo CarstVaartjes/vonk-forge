@@ -14,13 +14,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_upgrades.service import AgentUpgradeService
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base

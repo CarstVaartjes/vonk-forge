@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import secrets
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Path, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from vonk_agent_protocol.http_failure import TransientReason
-from vonk_control.auth import ADMIN_ROLE, Actor, AdministratorRole, TokenCodec
+from vonk_control.auth import ADMIN_ROLE, Actor, AdministratorRole
 from vonk_control.http_errors import temporary_http_answer
+from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
 from vonk_control.operator_acceptance.receipt_contract import SecurityEdge
@@ -25,7 +25,6 @@ from vonk_control.security.browser_auth import (
 )
 
 _COOKIE_MAX_AGE = 43_200
-_CLI_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 _SESSION_COOKIE = "vonk_session"
 _CSRF_COOKIE = "vonk_csrf"
 
@@ -64,6 +63,25 @@ class CliTokenDownload(BaseModel):
     expires_at: str
 
 
+class CliTokenSummary(BaseModel):
+    """One stored CLI token: never the token itself, only what identifies it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    expires_at: datetime
+    revoked: bool
+    presented: bool = Field(
+        description="True for the CLI token that authenticated this request"
+    )
+
+
+class CliTokenList(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tokens: list[CliTokenSummary]
+
+
 class LoginRequestInvalid(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -74,8 +92,6 @@ def install_auth_routes(
     app: FastAPI,
     service: BrowserAuthService,
     actor_dependency: Any,
-    tokens: TokenCodec,
-    now: Callable[[], int],
 ) -> None:
 
     _ADMIN_OPERATION_IDS.update(
@@ -84,6 +100,9 @@ def install_auth_routes(
             ("get", "/api/auth/session"): "getBrowserSession",
             ("post", "/api/auth/logout"): "logoutBrowser",
             ("post", "/api/auth/cli-token"): "downloadCliToken",
+            ("get", "/api/auth/cli-tokens"): "listCliTokens",
+            ("post", "/api/auth/cli-tokens/{token_id}/revoke"): "revokeCliToken",
+            ("post", "/api/auth/cli-tokens/revoke-all"): "revokeAllCliTokens",
         }
     )
     authenticated = actor_dependency
@@ -232,22 +251,77 @@ def install_auth_routes(
         # prevents a bearer caller from minting another bearer.
         identity = cookie_identity(request)
         require_csrf(request)
-        issued_at = now()
-        token = tokens.issue(
-            identity.actor,
-            ttl_seconds=_CLI_TOKEN_TTL_SECONDS,
-            now=issued_at,
-        )
+        issued = service.issue_cli_token(identity)
         expires_at = (
-            datetime.fromtimestamp(issued_at + _CLI_TOKEN_TTL_SECONDS, tz=UTC)
-            .isoformat()
-            .replace("+00:00", "Z")
+            issued.expires_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
         )
         return Response(
-            content=f"{token}\n",
+            content=f"{issued.token}\n",
             media_type="text/plain",
             headers={
                 "Content-Disposition": 'attachment; filename="vonkctl-token"',
                 "X-Vonk-Token-Expires-At": expires_at,
             },
         )
+
+    def require_administrator(actor: Actor) -> None:
+        if actor.role != ADMIN_ROLE:
+            raise HTTPException(status_code=403, detail="insufficient role")
+
+    @app.get(
+        "/api/auth/cli-tokens",
+        response_model=CliTokenList,
+        responses=bounded_error_responses(401, 403),
+        operation_id="listCliTokens",
+    )
+    def cli_tokens(request: Request, actor: Actor = authenticated) -> CliTokenList:
+        require_administrator(actor)
+        # The actor dependency already resolved this bearer; the listing only
+        # marks its row by digest.
+        authorization = request.headers.get("authorization", "")
+        presented = (
+            authorization.removeprefix("Bearer ")
+            if authorization.startswith("Bearer ")
+            else None
+        )
+        return CliTokenList(
+            tokens=[
+                CliTokenSummary(
+                    id=record.session_id,
+                    expires_at=record.expires_at,
+                    revoked=record.revoked,
+                    presented=record.presented,
+                )
+                for record in service.cli_tokens(presented)
+            ]
+        )
+
+    @app.post(
+        "/api/auth/cli-tokens/{token_id}/revoke",
+        status_code=204,
+        response_model=None,
+        responses=bounded_error_responses(401, 403, 404),
+        operation_id="revokeCliToken",
+    )
+    @security_edge(SecurityEdge.CLI_TOKEN_REVOKE)
+    def cli_token_revoke(
+        token_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = authenticated,
+    ) -> None:
+        require_administrator(actor)
+        if not service.revoke_cli_token(token_id):
+            raise HTTPException(status_code=404, detail="CLI token not found")
+
+    @app.post(
+        "/api/auth/cli-tokens/revoke-all",
+        status_code=204,
+        response_model=None,
+        responses=bounded_error_responses(401, 403),
+        operation_id="revokeAllCliTokens",
+    )
+    @security_edge(SecurityEdge.CLI_TOKEN_REVOKE_ALL)
+    def cli_token_revoke_all(actor: Actor = authenticated) -> None:
+        # Every CLI token and every browser session, this caller's included:
+        # the recovery for a lost laptop or a leaked token file.
+        require_administrator(actor)
+        service.revoke_all()

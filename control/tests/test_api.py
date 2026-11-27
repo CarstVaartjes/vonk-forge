@@ -17,11 +17,12 @@ from starlette.routing import Route
 
 from cluster_profiles import cli
 from cluster_profiles.control_client.transfers import ControlClient
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_control.api.application import create_app
 from vonk_control.api.common import _bounded_error_content
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.catalog.api import CatalogProblem
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
@@ -122,7 +123,6 @@ def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
     tokens = iter((_opaque(1), _opaque(2)))
     service = BrowserAuthService(
         sessions,
-        token_signing_key=b"k" * 32,
         clock=clock,
         token_source=lambda: next(tokens),
     )

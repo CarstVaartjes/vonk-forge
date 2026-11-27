@@ -13,7 +13,7 @@ from vonk_forge_contracts import document_sha256
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
-from vonk_control.auth import TokenCodec
+from tests.token_support import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision

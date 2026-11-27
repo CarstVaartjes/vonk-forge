@@ -103,7 +103,6 @@ def test_administrator_initialization_creates_one_login_on_postgres(
         assert db.scalar(select(User.role)) == "administrator"
     auth = BrowserAuthService(
         sessions,
-        token_signing_key=b"test-token-signing-key",
         clock=lambda: datetime.now(UTC),
     )
     assert auth.login("admin", password).identity.actor.subject == "admin"

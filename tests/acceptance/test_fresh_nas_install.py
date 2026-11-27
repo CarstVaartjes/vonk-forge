@@ -728,12 +728,18 @@ def verify_deployed_controller_identity(bundle: Path) -> None:
     script = """
 import json, time, urllib.request
 from dataclasses import asdict
-from vonk_control.auth import Actor, TokenCodec
+from datetime import UTC, datetime
+from pathlib import Path
 from vonk_control.build_identity import packaged_runtime_identity
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.db.connections import build_engine, session_factory
+from vonk_control.security.browser_auth import BrowserAuthService
 from vonk_control.settings import Settings
 identity = packaged_runtime_identity()
-token = TokenCodec(Settings.from_env_and_secrets().token_signing_key).issue(Actor("acceptance-runtime", "viewer"), ttl_seconds=30, now=int(time.time()))
+settings = Settings.from_env_and_secrets()
+service = BrowserAuthService(session_factory(build_engine(settings.database_url)), clock=lambda: datetime.now(UTC))
+password = Path("/run/vonk-normalized-secrets/admin-password").read_text(encoding="utf-8").removesuffix("\n")
+token = service.issue_cli_token(service.login("admin", password).identity).token
 request = urllib.request.Request("http://127.0.0.1:8000/api/cli/contract", headers={"Authorization": "Bearer " + token})
 with urllib.request.urlopen(request, timeout=10) as response:
     assert response.status == 200

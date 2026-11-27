@@ -23,7 +23,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.auth import TokenCodec
+from tests.token_support import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.catalog.sync_contract import (

@@ -21,11 +21,11 @@ from vonk_forge_contracts import CONTRACT_MAJOR
 
 from cluster_profiles.control_client.schema import validate_control_document
 from control.tests.index_envelope import index_envelope
+from control.tests.token_support import TokenCodec
 from scripts.fleet.canary_package import canary_package_path
 from tests.spark_lifecycle_runner_support import ENTRY_POINT, _module
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.fleet_projection.common import FleetSnapshot

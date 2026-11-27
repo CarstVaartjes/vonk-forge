@@ -15,12 +15,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, AgentIdentity, TokenCodec
+from vonk_control.auth import Actor, AgentIdentity
 from vonk_control.categorized_errors import MissingRecord
 from vonk_control.gateway.keys_contract import GatewayKeyRevoked
 from vonk_control.jobs.queue import JobService

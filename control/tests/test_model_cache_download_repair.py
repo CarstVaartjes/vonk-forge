@@ -14,10 +14,10 @@ import httpx2
 import pytest
 from pydantic import ValidationError
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.auth import TokenCodec
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.failures.coordinator import CoordinatorFailures
 from vonk_control.jobs.queue import JobService

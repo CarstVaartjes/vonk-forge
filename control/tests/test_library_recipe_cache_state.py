@@ -23,8 +23,8 @@ from sqlalchemy import event, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-from vonk_control.auth import TokenCodec
 from vonk_control.catalog.revision_contract import (
     rederive_projection,
     write_catalog_projection,

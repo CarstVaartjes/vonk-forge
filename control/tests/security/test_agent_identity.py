@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.token_support import TokenCodec
 from vonk_control.agent_api import common
 from vonk_control.api import middleware
 from vonk_control.api.application import create_app
@@ -14,7 +15,6 @@ from vonk_control.auth import (
     AgentIdentity,
     AgentSource,
     AuthError,
-    TokenCodec,
     TrustedProxyAgentIdentityMiddleware,
     agent_identity_from_scope,
     agent_source_from_scope,

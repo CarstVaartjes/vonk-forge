@@ -15,10 +15,11 @@ from sqlalchemy import Table, create_engine, event, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.db.connections import session_factory
 from vonk_control.fleet_events.contract import (
@@ -1153,7 +1154,6 @@ def _browser_client() -> tuple[TestClient, str, str, ApiStream]:
         )
     browser_auth = BrowserAuthService(
         sessions,
-        token_signing_key=b"k" * 32,
         clock=lambda: NOW,
         token_source=iter((_opaque(1), _opaque(2))).__next__,
     )

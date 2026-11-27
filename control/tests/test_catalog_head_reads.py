@@ -10,7 +10,8 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
-from vonk_control.auth import Actor, TokenCodec
+from tests.token_support import TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.catalog.queries import active_head_revision
 from vonk_control.catalog.service import CatalogService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignmentInput

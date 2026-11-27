@@ -68,7 +68,6 @@ def browser_auth(
 
     return BrowserAuthService(
         sessions,
-        token_signing_key=b"test-token-signing-key",
         clock=clock,
         token_source=source,
     )
@@ -265,7 +264,6 @@ def test_throttle_rejects_the_sixth_failed_attempt_for_one_subject(
     )
     service = BrowserAuthService(
         sessions,
-        token_signing_key=b"test-token-signing-key",
         clock=Clock(),
         token_source=lambda: opaque(25),
         rate_limiter=limiter,
@@ -296,7 +294,6 @@ def test_throttle_rejects_a_new_subject_after_twenty_global_failures(
     )
     service = BrowserAuthService(
         sessions,
-        token_signing_key=b"test-token-signing-key",
         clock=Clock(),
         token_source=lambda: opaque(26),
         rate_limiter=limiter,

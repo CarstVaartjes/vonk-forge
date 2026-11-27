@@ -165,7 +165,7 @@ if __name__ == "__main__":
             return False
         return enrollment.reconcile_revocations()
 
-    from vonk_control.auth import TokenCodec
+    from vonk_control.auth import CursorCodec
     from vonk_control.catalog.service import CatalogService
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
     from vonk_control.recipe_packages.client import RecipePackageClient
@@ -179,7 +179,7 @@ if __name__ == "__main__":
             catalog=CatalogService(
                 sessions,
                 clock=clock,
-                cursors=TokenCodec(settings.token_signing_key).cursor_codec(),
+                cursors=CursorCodec.from_signing_key(settings.token_signing_key),
                 source_bundles=DatabaseSourceBundleStore(sessions),
             ),
             # GitHub directly over the worker's artifact-egress network; the

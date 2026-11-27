@@ -14,9 +14,10 @@ from sqlalchemy.orm import sessionmaker
 
 from tests.test_platform_observation import Jobs
 from tests.test_profile_load_installed_cli import _https_api_peer, _process_environment
+from tests.token_support import TokenCodec
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.build_identity import RuntimeBuildIdentity
 from vonk_control.model_primitives import Base
 from vonk_control.observation import platform as platform_observation

@@ -19,10 +19,11 @@ import vonk_control.library.assessment as assessment_module
 from cluster_profiles.cli import main
 from cluster_profiles.cli_render.dispatch import render_payload
 from cluster_profiles.control_client.transfers import ControlClient
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,

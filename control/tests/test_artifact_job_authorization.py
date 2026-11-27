@@ -5,8 +5,9 @@ import hashlib
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.token_support import TokenCodec
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 
 from .agent_api_support import Jobs
 from .artifact_jobs_support import artifact_create_request

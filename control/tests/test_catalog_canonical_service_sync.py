@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
-from vonk_control.auth import TokenCodec
+from tests.token_support import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.catalog.sync_contract import (
