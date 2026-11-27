@@ -59,12 +59,12 @@ flowchart LR
   Spark-local copies are derived execution caches: they do not authorize
   profile choices or pin NAS objects. They are not stored on `vonkforge.ai` or
   Cloudflare Pages.
-- Profile choices and apply require complete, cached, exact model and
-  recipe-image assets in the Controller/NAS cache. Missing assets block apply
-  and offer **Prepare cache**. Once ready, apply distributes the exact assets
-  to selected Sparks in parallel, skips verified local copies, safely replaces
-  workloads, and reports per-Spark progress and readiness. NAS garbage
-  collection removes only unreferenced local model objects.
+- A profile load prepares what it needs: it downloads missing model files and
+  prepares a missing recipe image in the Controller/NAS cache (each skipped when
+  already cached), then distributes the exact assets to the selected Sparks in
+  parallel, skips verified local copies, safely replaces workloads, and reports
+  per-Spark progress and readiness. NAS garbage collection removes only
+  unreferenced local model objects.
 
 ## Operator guides
 

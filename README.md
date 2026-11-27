@@ -181,7 +181,8 @@ verification details.
 
 The same controller command prepares upgrades while preserving local identity
 and secrets. Running the Spark installer on an enrolled node performs an in-place
-agent upgrade; certificate replacement is an explicit Fleet re-enrollment.
+agent upgrade; certificate replacement is an explicit re-enrollment from the
+Spark's page.
 
 ## Daily operation
 
@@ -189,8 +190,7 @@ agent upgrade; certificate replacement is an explicit Fleet re-enrollment.
 | --- | --- |
 | Find | Cache-backed model and recipe choices filtered against the fleet you own |
 | Preview | Compatibility, placement, capacity, exact assets, and actionable blockers |
-| Prepare | Resolve missing Controller model or recipe-image assets with the prepare-cache action |
-| Load | A ready, digest-bound plan prepares exact assets in parallel, skips local copies, and safely replaces workloads |
+| Load | A ready, digest-bound plan prepares any missing model files and recipe image in the Controller cache, sends the exact assets to the Sparks in parallel, skips local copies, and safely replaces workloads |
 | Observe | Live Overview and Workloads state, per-target progress, warnings, recovery, and audit history |
 
 The private Web Controller is the guided path. `vonkctl` exposes the same API,

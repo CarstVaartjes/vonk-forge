@@ -17,13 +17,12 @@ and license facts. The exact reviewed repository snapshot and package SHA-256
 close over those documents and all recipe-owned source, patches, wrappers, and
 serving fixtures.
 
-The production Controller follows the canonical global recipe repository's
-`main` branch through the Caddy proxy. It refreshes catalog metadata at startup
-and every 15 minutes as an automatic, read-only operation. The trusted
-Controller/NAS cache is the preparation authority for the exact model artifact
-set and recipe image required by a profile. An explicit Prepare cache operation
-fetches or builds missing exact assets and verifies them there; profile choices
-and apply require the complete cached pair. The selected revision, package
+The production control worker syncs the newest signed recipe-library GitHub
+release of its contract major every 60 seconds as an automatic, read-only
+operation; the API never contacts GitHub. The trusted Controller/NAS cache is
+the preparation authority for the exact model artifact set and recipe image
+required by a profile. A load fetches or builds the missing exact assets there
+before it distributes them. The selected revision, package
 SHA-256, source-bundle digest, and operation plan remain immutable execution
 receipts, never local recipe authority. Spark-local model bytes and imported
 images are derived execution caches.
@@ -90,10 +89,10 @@ and `vonkctl profile load`. A profile always covers the entire fleet; unassigned
 Sparks idle when it is loaded. The Controller
 binds the selected cached recipe revision and Spark group to fresh
 certificate-bound inventory, capacity, fabric, exact model and image
-identities, operation phases, per-rank receipts, and route state. Run/apply
-never silently prepares missing assets: an incomplete Controller/NAS cache
-blocks the operation with named reasons and offers Prepare cache. Once the
-cache gate succeeds, the Controller distributes the exact assets to all
+identities, operation phases, per-rank receipts, and route state. The load
+prepares missing assets in the Controller/NAS cache first; a preparation that
+cannot finish is named as the reason the load waits. Once the cache holds the
+assets, the Controller distributes the exact assets to all
 selected Sparks in parallel, skips verified local copies, safely stops and
 replaces conflicting workloads, and reports durable per-Spark progress and
 readiness. After the route is active, execute the Recipe's declared HTTP

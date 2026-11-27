@@ -15,14 +15,16 @@ Prepare the complete control-plane project on a Linux or macOS workstation:
 curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
-The wizard creates `vonk-forge/docker-compose.yaml`, `.env`, and `secrets/`.
+The wizard creates `vonk-forge/docker-compose.yaml`, `.env`, `secrets/`,
+`backups/` and `backups-offhost/`.
 It asks for the site networking and imported provider credentials, generates
 the remaining secrets and Step CA identity locally. It does not need Docker, Git, sudo, SSH, or NAS access.
 
 Drag the entire generated directory onto the NAS and start it as one Compose
-project. Keep the relative layout unchanged. Only Caddy publishes the Spark
-backend port; browser access and inference enter
-through the generated Tailscale gateway.
+project. Keep the relative layout unchanged. Caddy publishes 8443 on all host
+interfaces for the Spark backend and the browser UI (TLS plus application
+login); Secure remote also serves the browser through the generated Tailscale
+gateway.
 
 PostgreSQL owns control state and Step CA owns agent certificates. The API
 performs its bounded database and secret initialization before serving, so the
@@ -33,12 +35,12 @@ After startup, open
 `https://vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net/` using the suffix copied during
 the preflight, and run the runbook's
 [post-install verification](tailscale.md#verification).
-Create a one-use Spark pairing grant in that interface, then copy its generated
-command to each Spark. The command includes the reserved NAS LAN address when
+Choose **Enroll Spark** on the Overview page to create a one-use grant, then
+copy its generated command to each Spark. The command includes the reserved NAS LAN address when
 the private service hostnames do not resolve directly:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=<CONTROLLER_LAN_IP> VONK_ENROLLMENT_URL=https://enroll.<control hostname>:8443 VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
 ```
 
 The installer verifies the controller CA before trusting its bootstrap data and
@@ -52,9 +54,9 @@ it is not required on the Sparks.
 Rerun the NAS command from the existing bundle's parent directory to prepare a
 NAS upgrade, then follow the [NAS Compose redeployment procedure](operator-cli-access.md#nas-compose-redeployment).
 An approved headless host CLI can apply the bundle without a NAS browser session.
-After the NAS is running the accepted release, use Fleet's signed
-one-at-a-time upgrade action for routine Spark package rollouts; it uses the
-existing agent connection, requires the exact target identity before advancing,
-and does not require SSH. Rerun the Spark command for package repair, a fresh
+After the NAS is running the accepted release, use **Upgrade agents** on the
+Overview page (or `vonkctl fleet upgrade`) for routine Spark package rollouts;
+every eligible Spark upgrades independently over its existing agent connection,
+each waiting only for its own running work, and no SSH is required. Rerun the Spark command for package repair, a fresh
 installation, or an explicit `--enroll` certificate replacement. No separate
 bootstrap, migration, supervisor, or rollback-slot command is required.

@@ -1,6 +1,7 @@
 # Add a Spark
 
-1. Open Vonk Forge in the browser and create a one-use Spark pairing grant.
+1. Open Vonk Forge in the browser and choose **Enroll Spark** on the Overview
+   page to create a one-use grant.
 2. Copy the generated command from that grant and run it on the Spark. For a
    private NAS it includes the reserved LAN address, for example:
 
@@ -28,7 +29,8 @@ size or repository-owned node list.
 
 ## Re-enroll an installed Spark
 
-Use **Re-enroll Spark** in Fleet when the controller database was restored or
+Use **Re-enroll** on the Spark's page (Settings tab) when the controller
+database was restored or
 reset, when an installed Spark's certificate expired after it could not rotate,
 or when a stale staged generation needs replacement. Run the
 generated command; it uses the NAS installation's own publication channel and
@@ -42,7 +44,8 @@ The re-enrollment flow preserves the locally generated node ID, replaces its
 controller certificate atomically, retires stale local rotation pointers, clears
 systemd's failed-start limit, and verifies sustained readiness. When the node row
 still exists, start the flow from that node's details so the grant is bound to
-its ID. After a complete controller database reset, use the Fleet-header action;
+its ID. After a complete controller database reset, use **Enroll Spark** on the
+Overview page;
 the grant is then bound to the node ID in the Spark's signed CSR. Do not rename
 credential files, edit `setup-state`, or manually restart the service.
 If readiness fails after certificate replacement, rerun the channel command

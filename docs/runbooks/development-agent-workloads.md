@@ -16,14 +16,15 @@ Upload the generated `vonk-forge/` directory to the NAS and start it as one
 Compose project. Do not add source checkouts, host paths, alternate ports,
 manual secret files, or helper containers.
 
-For every Spark, create a distinct one-use pairing token in Fleet and run on
-that Spark:
+For every Spark, choose **Enroll Spark** on the Overview page to create a
+distinct one-use grant, and run its generated command on that Spark. It has
+this shape:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/dev/spark | sh
+curl -fsSL https://install.vonkforge.ai/dev/spark | VONK_CONTROLLER_ADDRESS=<CONTROLLER_LAN_IP> VONK_ENROLLMENT_URL=https://enroll.<control hostname>:8443 VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
 ```
 
-Enter the enrollment URL, controller CA fingerprint, and token shown by Fleet.
+Enter the one-use pairing token shown with the grant.
 The installer discovers the controller endpoint and CA, verifies the CA against
 the out-of-band fingerprint, installs the direct Rust agent, pairs it, starts
 the service, and requires sustained readiness. There is no separate APT setup,
@@ -52,7 +53,7 @@ value is node identity.
 Run one node at a time until the synthetic lifecycle is green, then widen to
 the intended topology:
 
-1. Confirm Fleet inventory is fresh and the planned resource reservation fits.
+1. Confirm the fleet inventory is fresh and the planned resource reservation fits.
 2. Select an immutable canonical Model and Recipe revision from the Controller's
    automatically refreshed global repository metadata.
 3. Review the exact model artifact set and runtime image required by the profile.
@@ -73,17 +74,18 @@ or Spark restart restores only persisted authority—not stale readiness.
 Dev/CI must run `scripts/dev/qualify-recipe --level structural` against the exact
 canonical repository checkout and retain its package and compiler evidence.
 The local checkout is a dev/CI input only; production execution follows the
-global repository metadata that the Controller refreshes at startup and every
-15 minutes through its Caddy proxy. Container qualification remains unavailable
+newest signed recipe-library release of the Controller's contract major, which
+the control worker syncs every 60 seconds. Container qualification remains unavailable
 until the production `CompiledExecutionPlan` materializer is linked; do not
 treat the current `environment-limited` result as a pass. Execute the physical
-lifecycle through a numbered whole-fleet profile. Prepare the profile cache,
-then apply it; every current Spark without an assignment remains idle:
+lifecycle through a numbered whole-fleet profile. Review the load, then load
+it; the load prepares what it needs by itself, and every current Spark without
+an assignment remains idle:
 
 ```sh
 vonkctl --profile 1 profile add RECIPE --spark SPARK
-vonkctl --profile 1 profile prepare-cache --json
-vonkctl --profile 1 profile apply --json
+vonkctl --profile 1 profile load --review --json
+vonkctl --profile 1 profile load --yes --json
 vonkctl --profile 1 profile progress --follow --json
 ```
 
@@ -94,7 +96,7 @@ stop, and cleanup. A verified local model or image copy is skipped on that
 Spark; it is never used as profile authority or as a source for another
 target. Retain the canonical model/revision/image identities and digests with
 the operation receipt. Progress is durable per Spark and includes transfer
-phase, replacement state, and serving readiness; apply reports partial state
+phase, replacement state, and serving readiness; the load reports partial state
 truthfully and never treats enqueueing as success. Once the route is active,
 run the Recipe's declared HTTP serving checks with `scripts/dev/qualify-recipe
 --serving-url URL`; it prints the bounded serving result as JSON.
@@ -103,8 +105,8 @@ run the Recipe's declared HTTP serving checks with `scripts/dev/qualify-recipe
 
 Prepare a NAS upgrade by rerunning the development NAS command from the parent
 of the existing local `vonk-forge/` directory. Upload it and redeploy while
-keeping named volumes. For enrolled online Sparks, preview and apply the signed
-candidate from Fleet (or `vonkctl fleet upgrade`); every Spark upgrades
+keeping named volumes. For enrolled online Sparks, use **Upgrade agents** on
+the Overview page (or `vonkctl fleet upgrade`); every Spark upgrades
 independently, each waiting only for its own running work, and no SSH is
 required. Rerun the development Spark command only for a local
 package repair, fresh installation, or controller-authorized re-enrollment.

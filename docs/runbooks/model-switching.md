@@ -1,8 +1,8 @@
 # Profile activation and model changes
 
 Profiles select exact model and recipe identities. The Controller/NAS cache is
-the preparation authority: a profile choice is valid only while its complete
-model artifact set and required runtime image are cached and verified. A
+the preparation authority: a load prepares there the complete model artifact
+set and runtime image each choice needs before it sends them to the Sparks. A
 Spark-local copy can support current execution, but it is never used to make a
 profile choice available or to repair the NAS cache.
 
@@ -18,21 +18,23 @@ placement, Spark runtime state, and available actions. A model-family label is
 for navigation only; the exact cached model definition and recipe revision
 remain authoritative.
 
-## Select a cached profile choice
+## Select a profile choice
 
-Use `Library` to select an immutable, fully cached model/recipe choice. The
-library shows the model version, execution harness, runtime distribution,
-topology, exact artifact identities, endpoint aliases, and resource envelope.
-Profile creation and updates reject uncached choices. If an existing profile's
-cache entry is missing, stale, or invalid, load is blocked with a concrete
-reason and offers **Prepare cache** for the affected model/image assets.
+Use `Library` to select an immutable model/recipe choice. The library shows the
+model version, execution harness, runtime distribution, topology, exact
+artifact identities, endpoint aliases, resource envelope, and cache state. A
+choice does not have to be cached to be saved: the load prepares what is
+missing. `vonkctl recipe download` and `vonkctl model download` prepare the
+cache ahead of time.
 
 ## Load the profile
 
 1. Choose a profile and its selected Sparks.
-2. The Controller checks the exact cached assets and placement. Missing cache
-   assets block load; the result names each reason and the cache-preparation
-   operation that can resolve it.
+2. The Controller checks the exact assets and placement. The review lists the
+   model download and the image build for each choice (each skipped when
+   already cached), and progress reports them as the load's preparation. A
+   preparation that cannot finish, for example a gated model without a token,
+   is named as the reason the load waits.
 3. Once the cache is ready, the Controller distributes the exact model and
    image assets to all selected Sparks in parallel. It verifies destination
    bytes and image identity and skips any already verified local copy.
@@ -40,8 +42,8 @@ reason and offers **Prepare cache** for the affected model/image assets.
    starting and serving readiness per Spark. Progress is durable and identifies
    the affected target on partial failure.
 
-Load does not silently fetch from upstream, build on a Spark, or select a
-different revision. Cache preparation is a separate operation. Controller garbage
+Load does not select a different revision or repair the NAS cache from a
+Spark copy. Controller garbage
 collection may remove unused local model objects that are no longer referenced
 by a saved profile, active workload, or preparation operation; Spark copies do
 not pin or replace those references.
@@ -62,7 +64,7 @@ profile scope. It preserves completed transfers and reports what is actually
 running on each Spark if the operation is partial. Retry resumes the durable
 operation and reuses verified cache and Spark-local copies.
 
-To roll back, select an earlier profile or exact accepted recipe revision whose
-required assets are cached, then load it through the same cache, distribution,
-replacement, and readiness path. If its cache is unavailable, prepare the cache
-first; do not recover from a Spark-local copy.
+To go back, load an earlier profile. A profile always resolves to the newest
+revision of each recipe it names, and the load prepares any asset that is no
+longer cached through the same cache, distribution, replacement, and readiness
+path; it never recovers from a Spark-local copy.

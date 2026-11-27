@@ -110,8 +110,8 @@ review names the protecting owner; successful removal of the selected entry
 does not imply those shared bytes were reclaimed. Worker recovery retains its
 original scope and checkpoints, and late publication cannot cross a deletion
 fence. No Spark-local copy becomes an authority or fallback for profile cache
-readiness. A profile with a missing asset exposes its cache-preparation action
-instead of silently fetching upstream.
+readiness. A profile load with a missing asset prepares it in the NAS cache
+and reports that preparation as its progress.
 
 NAS garbage collection remains separate from explicit removal and may collect
 unused local objects only after authoritative references are gone. It does not

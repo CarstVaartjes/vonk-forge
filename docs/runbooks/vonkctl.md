@@ -1120,7 +1120,7 @@ replaced with a guessed address. Endpoint discovery does not issue credentials
 or prove physical model quality.
 
 The output opens with `Serving now`, one `alias · recipe title · published` line
-per published route. The Fleet page's "Serving now" block shows the same lines
+per published route. The Overview page's "Serving now" block shows the same lines
 for the loaded Profile, each with the same connection example.
 
 Per alias the default output is short: the assignment, its state, the `API base`,

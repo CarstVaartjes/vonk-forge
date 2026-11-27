@@ -27,24 +27,27 @@ curl -fsSL https://install.vonkforge.ai/dev/nas | sh
 
 Answer the prompts, then drag the generated `vonk-forge/` directory onto the
 NAS and start `docker-compose.yaml` in its Docker application. The directory
-contains the Compose file, `.env`, and all required secrets. No repository
+contains the Compose file, `.env`, all required secrets, and the `backups/` and
+`backups-offhost/` directories. No repository
 checkout, Docker daemon, sudo, SSH, or NAS mount is needed to prepare it.
 
 ## Add each Spark
 
-Create a one-use pairing grant in Vonk Forge, then copy its generated command to
-the Spark as its normal administrator account. It includes
-`VONK_CONTROLLER_ADDRESS=<reserved NAS LAN IP>` when required:
+Choose **Enroll Spark** on the Overview page to create a one-use grant, then
+run its generated command on the Spark as its normal administrator account. It
+has this shape:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/dev/spark | sh
+curl -fsSL https://install.vonkforge.ai/dev/spark | VONK_CONTROLLER_ADDRESS=<CONTROLLER_LAN_IP> VONK_ENROLLMENT_URL=https://enroll.<control hostname>:8443 VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
 ```
 
 The command verifies the development release before requesting sudo, installs
 the direct Rust agent, exchanges the token for the Spark certificate, starts
 the service, configures the verified NAS hostname mapping without Spark-side
-Tailscale or manual DNS changes, and verifies sustained readiness. Repeat the
-controller-generated command later to upgrade the same Spark.
+Tailscale or manual DNS changes, and verifies sustained readiness. To upgrade
+the Spark later, use **Upgrade agents** on the Overview page or
+`vonkctl fleet upgrade`; rerun the channel command without `--enroll` only for
+a local package repair.
 
 Stable installation uses the same two commands without `/dev`; that channel
 selection is the only installation-flow difference.
