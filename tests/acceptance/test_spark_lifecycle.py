@@ -1343,24 +1343,24 @@ class LocalBrowserController:
             raise LifecycleError("administrator login response is invalid") from error
         if session.get("subject") != "admin" or session.get("role") != "administrator":
             raise LifecycleError("administrator login response is invalid")
-        cookies: dict[str, str] = {}
+        received: dict[str, str] = {}
         for value in headers.get("set-cookie", []):
             pair = value.partition(";")[0]
             name, marker, cookie_value = pair.partition("=")
-            if (
-                marker
-                and name in {"__Host-vonk_session", "__Host-vonk_csrf"}
-                and cookie_value
-            ):
-                cookies[name] = cookie_value
-        if set(cookies) != {"__Host-vonk_session", "__Host-vonk_csrf"}:
+            if marker and cookie_value:
+                received[name] = cookie_value
+        # The baseline Controller still sets the plain names; the build under
+        # test sets the __Host- names. Use whichever pair arrived, unchanged.
+        for prefix in ("__Host-", ""):
+            session_name, csrf_name = f"{prefix}vonk_session", f"{prefix}vonk_csrf"
+            if session_name in received and csrf_name in received:
+                break
+        else:
             raise LifecycleError("administrator session cookies are incomplete")
         fixed_headers = {
-            "Cookie": "; ".join(
-                f"{name}={cookies[name]}"
-                for name in ("__Host-vonk_session", "__Host-vonk_csrf")
-            ),
-            "X-CSRF-Token": cookies["__Host-vonk_csrf"],
+            "Cookie": f"{session_name}={received[session_name]}; "
+            f"{csrf_name}={received[csrf_name]}",
+            "X-CSRF-Token": received[csrf_name],
         }
 
         def transport(
