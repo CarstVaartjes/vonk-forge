@@ -1047,12 +1047,8 @@ def test_development_apt_publication_is_bound_to_this_release_run() -> None:
     assert "artifact_token" not in publication
     assert "source_sha: ${{ github.sha }}" in publication
     assert "version: ${{ needs.agent.outputs.version }}" in publication
-    # Later releases reuse the package only after apt dev published it, and
-    # promotion waits for the apt publication.
-    assert (
-        "if: needs.agent.result == 'success' && needs.apt.result == 'success'"
-        in producers
-    )
+    # The unread apt repository never withholds a package or blocks promotion.
+    assert "needs.apt" not in producers
 
 
 def test_development_arm64_lifecycle_gate_is_external_parallel_and_unchanged() -> None:

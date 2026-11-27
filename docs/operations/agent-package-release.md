@@ -43,16 +43,16 @@ release for the current tip. Each run is one fan-in:
 5. `authority` starts once `ci`, `agent`, `images` and `setups` have settled,
    and only if none failed or was cancelled. It verifies the exact evidence
    and hands it to candidate, NAS and Spark acceptance, acceptance signing and
-   promotion. `apt` and the producer records run beside it: promotion waits
-   for both, and a failed or cancelled one blocks it.
+   promotion. The producer records run beside it: promotion waits for them,
+   and a failed or cancelled one blocks it. `apt` also runs beside it but
+   never blocks promotion, because nothing reads the apt repository.
 
 A development producer is skipped when the newest release run that completed
 it, on an ancestor of the source, saw the same producer inputs and its
 artifacts are still available. `scripts/ci/resolve-publication-producer` owns the
 input paths of each producer. Every release records the producers it completed
 as `release-producer-<name>` marker artifacts, so the lookup needs no walk over
-runs that reused. An agent package counts only after apt dev published it; a
-failed apt publication is therefore healed by the next release building again.
+runs that reused.
 Producer artifacts, markers, acceptance and promotion receipts are kept for 90
 days, the repository maximum, which bounds how long evidence can be reused.
 
@@ -123,8 +123,9 @@ Stable releases use three more environments, all restricted to tag `v*`:
 
 The `apt` job signs the public apt repository with the key in
 `APT_REPOSITORY_GPG_PRIVATE_KEY`. Nothing on a Spark or the Controller reads that
-repository (Sparks install the digest-verified package directly), so its key
-expiry breaks only the `apt` job itself. The job warns when the key or a
+repository (Sparks install the digest-verified package directly), so a failed
+`apt` job, an expired key included, blocks neither producer reuse nor
+promotion. The job warns when the key or a
 subkey expires within 60 days; extend it with `gpg --quick-set-expire
 <fingerprint> <period>` (the same `<fingerprint>`, so
 `APT_REPOSITORY_GPG_FINGERPRINT` stays) and store the re-exported private key in
