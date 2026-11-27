@@ -4,6 +4,10 @@ Prometheus has no published port. Platform metrics use stable generated node IDs
 and bounded enum labels; they never include prompts, responses, credentials,
 hostnames, private addresses, raw serials, request IDs, or job IDs.
 
+Each alert in `deploy/compose/prometheus/alerts.yaml` links to a section below or in
+another runbook; a test checks that every `runbook_url` resolves to an existing file
+and heading.
+
 ## Inference statistics
 
 LiteLLM exports bounded Prometheus metrics (requests, input and output tokens,

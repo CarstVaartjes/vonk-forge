@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from deploy.compose.tests.test_networking import _rendered
@@ -87,3 +88,34 @@ def test_no_alert_can_fire_on_the_previous_process_series() -> None:
         and not rule["expr"].startswith("up{")
     }
     assert short == set()
+
+
+RUNBOOK_BASE = "https://github.com/CarstVaartjes/vonk-forge/blob/main/"
+
+
+def _heading_slugs(markdown: str) -> set[str]:
+    slugs: set[str] = set()
+    fenced = False
+    for line in markdown.splitlines():
+        if line.startswith("```"):
+            fenced = not fenced
+        match = None if fenced else re.match(r"#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if match:
+            text = match.group(1).lower()
+            slugs.add(re.sub(r"[^\w\- ]", "", text).replace(" ", "-"))
+    return slugs
+
+
+def test_alert_runbook_urls_resolve_to_a_repository_heading() -> None:
+    document = json.loads((ROOT / "deploy/compose/prometheus/alerts.yaml").read_text())
+    rules = [rule for group in document["groups"] for rule in group["rules"]]
+    assert rules
+    for rule in rules:
+        url = rule["annotations"]["runbook_url"]
+        assert url.startswith(RUNBOOK_BASE), (rule["alert"], url)
+        path, _, anchor = url.removeprefix(RUNBOOK_BASE).partition("#")
+        target = ROOT / path
+        assert target.is_file(), (rule["alert"], url)
+        if anchor:
+            slugs = _heading_slugs(target.read_text(encoding="utf-8"))
+            assert anchor in slugs, (rule["alert"], url)
