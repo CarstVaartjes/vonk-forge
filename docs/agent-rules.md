@@ -266,12 +266,8 @@ Run a subset with `uv sync --inexact --package X` (what `check_environment`
 member's dependencies or version run `uv lock`; CI runs `uv lock --check` in the
 lint job, the only place the lock is compared with the pyprojects.
 
-Every change lands through an integration PR (same-repository `integration/*`
-head, or the `release-acceptance` label); `full` in `scripts/ci/select-ci-areas`
-owns that rule. A member PR runs only the quick tier (`Ruff` with the added-line guards, web
-typecheck/Biome, and Rust fmt/clippy when Rust changed; no full suite) and a
-gate that reports `CI gate (member PR)`, never the required `CI gate`, so it cannot merge
-itself. Check member work locally (targeted tests, fast guards); the integration
+Every change lands through an integration PR; [Testing and CI](testing-and-ci.md)
+owns what makes one and what a member PR runs. Check member work locally (targeted tests, fast guards); the integration
 PR proves it. A member PR is done when its review has passed.
 A Dependabot PR runs nothing at all (every root job skips its author,
 `tests/test_dependabot_updates.py`); fold it into an integration PR.
@@ -428,14 +424,14 @@ identity of the synced catalog; a Spark-local copy is never sufficient.
 Persisted profiles still belong to the current PostgreSQL authority and
 schema-2 contracts, and their readiness is cache-backed.
 
-A choice need not be cached to be saved: saving one that is not cached adds a
-profile warning, not an error. A load prepares missing model or recipe-image
+Saving never checks the cache; the profile read shows each asset's cache
+state. A load prepares missing model or recipe-image
 assets in the NAS cache by itself: the review lists each preparation step (the
 model download and the image build, each skipped when cached), progress reports
 it, an unfinished preparation is named as what the load waits on, and an
 exhausted one fails the load with that reason (`ENDING_BLOCKER_CODES`).
-Do not reintroduce a separate prepare-cache step, and do not leave a missing
-asset for a target Spark to discover.
+Do not make a load depend on a separate prepare step, and do not leave a
+missing asset for a target Spark to discover.
 The local NAS cache is trusted under its managed-storage contract, and so are
 the Spark copies made from it, so do not promise costly repeated full hashing
 as part of ordinary profile reads, admission, Spark installs or profile loads.

@@ -32,12 +32,8 @@ contract checks. See [principle guards](docs/principle-guards.md).
 
 ## CI and pre-merge release acceptance
 
-Every change lands through an integration PR (`integration/*` or the
-`release-acceptance` label), which runs the complete suites, candidate
-acceptance and the path-filtered proof workflows. A member PR runs only the
-quick tier (Ruff, `member-web`, and `rust-quality` when Rust changed) and
-reports `CI gate (member PR)` instead of the required `CI gate`, so it cannot
-merge itself. [Testing and CI](docs/testing-and-ci.md) lists what runs
+Every change lands through an integration PR. A member PR runs only the
+quick tier. [Testing and CI](docs/testing-and-ci.md) lists what runs
 where (`full` in `scripts/ci/select-ci-areas`).
 Integration selection uses the conservative dependency closure documented in
 `scripts/ci/select-ci-areas`; unfamiliar inputs select every integration. The

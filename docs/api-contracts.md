@@ -97,16 +97,17 @@ filesystem records with the same canonical JSON semantics as other producers.
 ## Cache-first profile lifecycle
 
 The Controller cache is the trusted preparation authority for profiles. A
-profile choice binds the exact model artifact set and required runtime image;
-profile creation and updates may select an uncached choice (the profile reports
-it as a warning) but never a merely Spark-local asset. A load whose choice is
-not fully cached starts that revision's preparation itself
+profile choice names a recipe (and model variant); a load resolves it to the
+newest catalog revision and its exact model artifact set and runtime image.
+Saving never checks the cache; the profile read shows each asset's cache state.
+A Spark-local asset never satisfies a choice. A load whose choice is not fully
+cached starts that revision's preparation itself
 (`PreparationStarter`): the review lists the model download and the image
 build, progress names an unfinished preparation as the typed reason the load
 waits on, and an exhausted preparation fails the load with that reason. Load must not choose another revision or recover the authority
 from a Spark copy.
 
-After the cache gate succeeds, the Controller distributes the exact digest- and
+Once the load's preparation has finished, the Controller distributes the exact digest- and
 size-bound assets to all selected Sparks in parallel. Each target verifies its
 destination and image identity; a verified local copy is skipped. The
 Controller then stops and replaces conflicting workloads and reports durable
