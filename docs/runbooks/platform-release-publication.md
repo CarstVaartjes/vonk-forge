@@ -12,10 +12,11 @@ The same signed candidate includes a source-stamped `vonkctl` wheel; operators
 [check and install it explicitly](../operators/cli-updates.md).
 
 Operators prepare a NAS upgrade by rerunning the same stable installer from the
-directory containing the existing bundle:
+directory containing the existing bundle, as the account that owns its private
+files (put `sudo` on the `sh` side only for a root-owned project):
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/nas | sudo sh
+curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
 Until the first stable release exists, a development promotion also writes the
@@ -30,11 +31,11 @@ the NAS Docker UI is not a required authentication or deployment step. The signe
 installer remains the supported NAS upgrade entry point.
 
 Spark nodes use the architecture-specific `vonk-forge-agent` Debian package.
-For an enrolled, online fleet, the authenticated Fleet upgrade action (or
+For an enrolled, online fleet, **Upgrade agents** on the Overview page (or
 `vonkctl fleet upgrade`) previews the current signed package and rolls it out
-through the existing agent relay without SSH. The default one-at-a-time
-strategy requires the exact new agent and helper activation evidence before it
-queues the next Spark. Rerunning the Spark installer remains the package repair,
+through the existing agent relay without SSH. Every eligible Spark upgrades
+independently, each waiting only for its own running work, and each must
+report the exact new agent and helper activation evidence. Rerunning the Spark installer remains the package repair,
 fresh-install, and explicit re-enrollment path; there is no A/B rollback slot or
 offline Spark rollback bundle. A fleet upgrade also moves a Spark between
 channels, with no installer rerun: it finds the installed package under either
@@ -58,19 +59,22 @@ The release path:
    on floating channels;
 4. verifies the complete signed acceptance receipt, published candidate objects,
    current source authority, and the existing channel pointer;
-5. advances all four Vonk image aliases, rechecks authority, then publishes the
+5. advances all three Vonk image aliases, rechecks authority, then publishes the
    signed installer pointer, and after it the channel's recipe-tools bundle and
    its pointer last (see [Recipe-tools bundle](#recipe-tools-bundle)).
 
 The `Release` workflow is the only image-channel promotion workflow. Its promotion
-job records the channel, source commit, generation, and four image digests in the
+job records the channel, source commit, generation, and three image digests in the
 Actions summary and uploads a receipt. Failed promotion attempts restore existing
 image aliases where possible. Registry tags and the installer pointer are separate
 writes, so promotion is not atomic; first publication cannot safely remove an alias
 that had no prior value. Rerun a failed job to reconcile an already accepted set.
 
-Builds and independent test suites remain parallel. Jobs that mutate the same
-channel share a concurrency group and use `queue: max`, so they run one at a time
+Builds and independent test suites remain parallel. Each release job has its
+own concurrency group, where GitHub keeps only the newest pending job, and the
+`supersede` job cancels obsolete `main` runs
+([agent package release](../operations/agent-package-release.md)). Only the
+promotion job uses `queue: max`, so promotions of one channel run one at a time
 and retain up to 100 waiting jobs rather than replacing the previous waiter.
 A newer `main` push never interrupts an active publication. This queues
 Actions work; it does not block PR merges or serialize the entire pipeline.
@@ -169,7 +173,8 @@ control generation to select.
 
 
 Deployment Compose follows channels: Vonk images use `:dev` on development
-and `:latest` on production; every upstream service uses `:latest`. All services
+and `:latest` on production; upstream services stay pinned by version and
+digest from `deploy/compose/images.lock.json`. All services
 use `pull_policy: always`, so starting/redeploying the project checks the registry.
 Already-running containers do not update themselves. Upstream major releases may
 require operator migration, particularly PostgreSQL data directories.

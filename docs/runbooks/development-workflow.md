@@ -42,7 +42,7 @@ Fetch, then create each independent task from that exact `origin/main`. Example:
 
 ```bash
 git -C /opt/vonk-forge fetch origin
-git -C /opt/vonk-forge worktree add -b codex/example-change \
+git -C /opt/vonk-forge worktree add -b agent/example-change \
   /private/tmp/vonk-example-change origin/main
 ```
 
@@ -60,48 +60,44 @@ path stashes in an owned tree must retain and restore their exact stash identity
 
 ## Integrate related agent results
 
-When several subagents finish related work together, prefer one integrated PR
-if it forms a coherent, reviewable outcome. One coordinator owns an integration
-branch/worktree based on current remote `main`, brings in the scoped commits,
-resolves overlaps deliberately, regenerates shared outputs, and verifies the
-combined producer/consumer and recovery boundaries. Passing each child branch
-separately does not establish that their combination works.
+Every change lands through an integration PR: a same-repository
+`integration/*` head, or a PR with the `release-acceptance` label. A member PR
+runs only the quick tier, and its gate (`CI gate (member PR)`) is never the
+required `CI gate`, so it cannot merge itself
+([what runs where](../testing-and-ci.md)). One coordinator owns an integration
+branch/worktree based on current remote `main`, brings in the reviewed member
+commits, resolves overlaps deliberately, regenerates shared outputs, and
+verifies the combined producer/consumer and recovery boundaries. Passing each
+member branch separately does not establish that their combination works.
 
-Keep the PR title and description about the final combined behavior, including
-the relevant component ownership, checks, and remaining evidence limits.
-Unrelated or independently reviewable work may remain separate. Do not bundle
-unfinished changes just because their agents completed at the same time, and
-do not merge both a component PR and its integrated replacement. Close
-superseded component PRs with a link to the integration PR once their final work
-is accounted for. Any schema change in the bundle retains the schema merge gate.
+Keep the integration PR's title and description about the final combined
+behavior, including the member PRs it carries, component ownership, checks, and
+remaining evidence limits. Do not fold unfinished changes just because their
+agents completed at the same time. Close the member PRs with a link to the
+integration PR once their final work is accounted for. Any schema change in the
+batch retains the schema merge gate.
 
-## Review, refresh, and auto-merge
+## Review, refresh, and merge
 
 Before committing, inspect `git status`, the complete diff, and
 `git diff --check`; run the [relevant verification](../testing-and-ci.md).
-Open the PR with base `main`. Use installed `gh` for GitHub operations and its
+Open member and integration PRs with base `main`. Use installed `gh` for GitHub operations and its
 help for the installed command version. Preserve configured commit signing;
 authentication or a locked signing agent is not permission to disable it.
 
-When merge is authorized, prefer auto-merge for an eligible PR. Keep required
-checks, reviews, and branch protection intact; never use an admin bypass to
-make it eligible. Independently reviewed PRs with nonoverlapping changes may
-use auto-merge concurrently. Account for overlapping source and generated
-outputs through their integration owner before merging. Example for a reviewed
-eligible PR:
+When merge is authorized, merge the integration PR once its required checks
+pass. Keep required checks, reviews, and branch protection intact; never use an
+admin bypass to make it eligible. Example for a reviewed integration PR:
 
 ```bash
-gh pr merge PR_NUMBER --auto --squash
+gh pr merge INTEGRATION_PR_NUMBER --auto --squash
 ```
 
 GitHub's merge queue is only offered for organization-owned repositories, and
-this repository is owned by a user account, so auto-merge squashes the PR
-directly once its checks pass. The workflows and the selector already handle
-`merge_group` runs, so nothing changes if the repository ever moves to an
-organization and the queue is enabled in the `main` ruleset. Without the
-queue, the release reuses the pull request's source checks only when the
-merged branch already contained `main`; otherwise main runs CI again, off the
-developer's path.
+this repository is owned by a user account, so there is none; the workflows and
+the selector already handle `merge_group` runs if that ever changes. Release
+reuses the integration PR's run when the merged tree is identical to the tested
+tree; otherwise main runs CI again, off the developer's path.
 
 Keep schema-changing PRs out of auto-merge. Follow the agent guide's
 [schema decision boundary](../../AGENTS.md#schema-implementation-merge-and-deployment)
@@ -156,13 +152,8 @@ committed or staged by the local hook. The authored inputs remain the lockfiles,
 image lock, and reviewed upstream artifact pins. See the
 [supply-chain procedure](supply-chain.md).
 
-- `install.vonkforge.ai/artifacts/dev/current.manifest` is the signed release
-  document carrying version, source, generation, and release path. Scheduled
-  re-signing can refresh `source_sha` without rebuilding artifacts. Check the
-  build commit in the package version and the provenance of the particular
-  image; reused components or separately rebuilt images may have different
-  build revisions. A refreshed source field alone does not prove new code runs.
-- `install.vonkforge.ai/artifacts/dev/current.manifest` is the signed release
+- `install.vonkforge.ai/artifacts/<channel>/current.manifest` (`dev` or
+  `stable`) is the signed release
   document carrying version, source, generation, and release path. Scheduled
   re-signing can refresh `source_sha` without rebuilding artifacts. Check the
   build commit in the package version and the provenance of the particular
@@ -172,15 +163,14 @@ image lock, and reviewed upstream artifact pins. See the
 Prepare the locked environment explicitly and install the repository hook:
 
 ```bash
-scripts/build-control-wheel
 uv sync --project control --frozen
 scripts/dev/install-git-hooks
 ```
 
-After the scripts/ regrouping merges, rerun `scripts/dev/install-git-hooks` in
-every clone. A clone whose `core.hooksPath` is an absolute path (for example
-`/opt/vonk-forge`) must switch to the relative `.githooks`, or worktrees on
-older or newer branches run the wrong hook.
+A clone whose `core.hooksPath` is an absolute path (for example
+`/opt/vonk-forge`) must switch to the relative `.githooks` (rerun
+`scripts/dev/install-git-hooks`), or worktrees on older or newer branches run
+the wrong hook.
 
 The hook runs pinned Ruff lint, formatting checks, and Python types on changed
 Python files selected from the index. Changes to Python dependency/type configuration
@@ -216,7 +206,7 @@ tree whose final work landed through an integrated PR:
    `git worktree remove /path/to/task-worktree`. Never use force removal to
    bypass uncommitted or valuable ignored work.
 4. Delete the landed local task branch only after the merge/diff check proves
-   there are no extra commits. Try `git branch -d codex/example-change` first;
+   there are no extra commits. Try `git branch -d agent/example-change` first;
    if Git refuses solely because the verified merge was squashed, delete that
    exact verified branch explicitly. Preserve branches whose status is uncertain.
 5. Fast-forward the clean, idle canonical `main` checkout and verify
