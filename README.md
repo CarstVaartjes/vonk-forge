@@ -103,10 +103,10 @@ To move an existing deployment between channels, see the
 [stable release runbook](docs/runbooks/stable-release.md#switching-a-deployment-between-channels).
 
 To upgrade an existing install, rerun the installer from the directory that
-contains `vonk-forge/`, using the account that owns its private files. If they
-belong to root, or you need to repair the configured secret group with existing
-administrative authority, put `sudo` on the `sh` side of the pipe.
-`sudo curl ... | sh` does not work. `uv` must be available to that account:
+contains `vonk-forge/`, using the account that owns its private files. Only if
+they belong to root, put `sudo` on the `sh` side of the pipe
+(`sudo curl ... | sh` does not work); the installer then uses your own `uv`
+from `~/.local/bin` or `~/.cargo/bin` when root has none:
 
 ```bash
 curl -fsSL https://install.vonkforge.ai/nas | sudo sh

@@ -30,6 +30,8 @@ class RuntimeSecretError(RuntimeError):
 
 # A private child preserves the operator-owned gateway bind directory.
 GATEWAY_MASTER_KEY_PATH = Path("/gateway-secrets/authority/master-key")
+# The capability-free Tailscale gateway's root-owned copy of its OAuth secrets.
+TAILSCALE_OAUTH_ROOT = Path("/tailscale-oauth")
 
 
 @dataclass(frozen=True)
@@ -395,13 +397,17 @@ def stage_compose_secrets(
     destination_root: Path = Path("/normalized"),
     *,
     gateway_master_key: Path = GATEWAY_MASTER_KEY_PATH,
+    tailscale_root: Path = TAILSCALE_OAUTH_ROOT,
 ) -> None:
     """Startup owns bounded retries, including optional projection cleanup."""
     last_error: BaseException | None = None
     for _attempt in range(3):
         try:
             _stage_compose_secrets_once(
-                source_root, destination_root, gateway_master_key=gateway_master_key
+                source_root,
+                destination_root,
+                gateway_master_key=gateway_master_key,
+                tailscale_root=tailscale_root,
             )
             return
         except (OSError, UnsettledOutcome) as error:
@@ -417,6 +423,7 @@ def _stage_compose_secrets_once(
     destination_root: Path = Path("/normalized"),
     *,
     gateway_master_key: Path = GATEWAY_MASTER_KEY_PATH,
+    tailscale_root: Path = TAILSCALE_OAUTH_ROOT,
 ) -> None:
     """Normalize all file-backed Compose secrets for their runtime consumers."""
     source_root = Path(source_root)
@@ -519,6 +526,13 @@ def _stage_compose_secrets_once(
         owner_gid=10001,
         mode=0o400,
     )
+    # The gateway drops every capability and runs as root: a root-owned 0400
+    # copy is readable without DAC_OVERRIDE, whoever owns the installer's
+    # files. Lab mode writes them empty, which removes the copy.
+    for name in ("tailscale-oauth-client-id", "tailscale-oauth-client-secret"):
+        _stage_optional_private_key(
+            source_root / name, tailscale_root / name, mode=0o400
+        )
 
 
 def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:

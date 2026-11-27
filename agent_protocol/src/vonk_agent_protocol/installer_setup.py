@@ -70,13 +70,6 @@ class NasSecretPrompt(WireModel):
     secure_remote_only: bool = False
 
 
-class NasGroupReadableSecrets(WireModel):
-    """Secrets read by capability-free containers through one supplementary group."""
-
-    gid: U32
-    files: list[str]
-
-
 class NasInstallModes(WireModel):
     prompt: str
     default: str = "secure-remote"
@@ -144,7 +137,6 @@ class NasInstallTemplate(WireModel):
     optional_values: list[str] = Field(default_factory=list)
     secrets: list[NasSecretPrompt] = Field(default_factory=list)
     generated_secrets: NasGeneratedSecrets | None = None
-    group_readable_secrets: NasGroupReadableSecrets | None = None
     install_modes: NasInstallModes | None = None
     step_ca_controller: NasStepCaControllerRequest | None = None
 
@@ -245,18 +237,6 @@ class NasInstallTemplate(WireModel):
                 raise ValueError("Step CA/controller request is incomplete")
             for name in request.files.model_dump().values():
                 secret(name)
-        if self.group_readable_secrets:
-            group = self.group_readable_secrets
-            if (
-                not group.gid
-                or not group.files
-                or len(set(group.files)) != len(group.files)
-            ):
-                raise ValueError("secret group needs a non-root gid and unique files")
-            for name in group.files:
-                validate_secret_name(name)
-                if name not in secret_names:
-                    raise ValueError(f"group-readable secret {name} is undeclared")
         return self
 
 

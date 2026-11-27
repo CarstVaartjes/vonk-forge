@@ -56,7 +56,7 @@ services:
       # seconds; runs that fail after 10 s or more can hold `up` and its
       # dependants for several runs, each at most this grace plus 15 s.
       start_period: 45s
-    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
+    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, tailscale-oauth-client-id, tailscale-oauth-client-secret]
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
@@ -65,6 +65,7 @@ services:
       - litellm-supervisor-state:/supervisor
       - normalized-private-keys:/normalized
       - runtime-assets:/runtime-assets
+      - tailscale-oauth:/tailscale-oauth
       - type: bind
         source: ./secrets/gateway
         target: /gateway-secrets
@@ -365,6 +366,10 @@ secrets:
     file: ./secrets/step-ca/intermediate-key
   step-ca-password:
     file: ./secrets/step-ca-password
+  tailscale-oauth-client-id:
+    file: ./secrets/tailscale-oauth-client-id
+  tailscale-oauth-client-secret:
+    file: ./secrets/tailscale-oauth-client-secret
 
 networks:
   ingress: {}
@@ -390,3 +395,6 @@ volumes:
   route-publications: {}
   normalized-private-keys: {}
   runtime-assets: {}
+  # runtime-init's root-owned copy of the Tailscale OAuth secrets; only the
+  # gateway mounts it.
+  tailscale-oauth: {}

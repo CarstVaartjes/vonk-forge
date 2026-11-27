@@ -14,7 +14,6 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from vonk_agent_protocol.installer_setup import (
-    NasGroupReadableSecrets,
     NasInstallTemplate,
     NasInternalValue,
     NasRequiredValuePrompt,
@@ -293,19 +292,12 @@ def test_consumed_symlinks_and_hardlinks_never_touch_outside_alias(
     assert (stale / "evidence").read_text() == "preserve"
 
 
-def test_exact_group_list_excludes_private_signer_and_rejects_alias(
+def test_upgrade_keeps_secrets_private_and_rejects_an_aliased_lock(
     installed: Path, template: NasInstallTemplate, tmp_path: Path
 ) -> None:
-    """Catch broad group permission fixes and chmod of a multiply linked lock."""
-    template = template.model_copy(
-        update={
-            "group_readable_secrets": NasGroupReadableSecrets(
-                gid=os.getgid() or 1, files=["hf-token"]
-            )
-        }
-    )
+    """Catch a group permission fix and chmod of a multiply linked lock."""
     prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
-    assert stat.S_IMODE((installed / "secrets/hf-token").stat().st_mode) == 0o640
+    assert stat.S_IMODE((installed / "secrets/hf-token").stat().st_mode) == 0o600
     assert stat.S_IMODE((installed / "secrets/signing-key").stat().st_mode) == 0o600
     lock = installed.parent / ".vonk-setup.lock"
     outside = tmp_path / "outside-lock"

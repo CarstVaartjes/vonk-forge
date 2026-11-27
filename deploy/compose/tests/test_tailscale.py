@@ -351,7 +351,7 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
     }
     assert gateway["environment"] == {
         "TS_AUTH_ONCE": "true",
-        "TS_CLIENT_ID": "file:/run/secrets/tailscale-oauth-client-id",
+        "TS_CLIENT_ID": "file:/run/vonk-tailscale-oauth/tailscale-oauth-client-id",
         "TS_EXTRA_ARGS": "--advertise-tags=tag:vonk-gateway",
         "TS_HOSTNAME": "vonk-forge-gateway",
         "TS_SOCKET": "/var/run/tailscale/tailscaled.sock",
@@ -369,10 +369,11 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
     volumes = _volume_targets(gateway)
     assert volumes["/var/lib/tailscale"]["type"] == "volume"
     assert volumes["/var/run/tailscale"]["type"] == "volume"
-    assert {secret["target"] for secret in gateway["secrets"]} == {
-        "/run/secrets/tailscale-oauth-client-id",
-        "/run/secrets/tailscale-oauth-client-secret",
-    }
+    # runtime-init's root-owned copy: no host secret file, no group_add.
+    assert volumes["/run/vonk-tailscale-oauth"]["type"] == "volume"
+    assert volumes["/run/vonk-tailscale-oauth"]["read_only"] is True
+    assert not gateway.get("secrets")
+    assert not gateway.get("group_add")
 
 
 def test_configurator_has_no_profile_dependency() -> None:

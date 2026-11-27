@@ -724,7 +724,7 @@ jobs:
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge
           VONK_ACCEPTANCE_TAILSCALE_MODE: disabled
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
-        run: scripts/fleet/run-with-nas-secret-group uv run --project control --frozen python tests/acceptance/test_fresh_nas_install.py
+        run: uv run --project control --frozen python tests/acceptance/test_fresh_nas_install.py
 
   agent-package:
     # The package lifecycle script only ran after merge, on push to main.

@@ -343,7 +343,7 @@ jobs:
             --output "$RUNNER_TEMP/candidate-cli.whl"
           export VONK_ACCEPTANCE_CANDIDATE_RELEASE="$candidate_release"
           export VONK_ACCEPTANCE_CANDIDATE_CLI_WHEEL="$RUNNER_TEMP/candidate-cli.whl"
-          scripts/fleet/run-with-nas-secret-group uv run --frozen python tests/acceptance/test_fresh_nas_install.py
+          uv run --frozen python tests/acceptance/test_fresh_nas_install.py
 
       - name: Delete isolated disposable Tailscale tailnet
         if: always() && matrix.lane == 'native' && !inputs.premerge

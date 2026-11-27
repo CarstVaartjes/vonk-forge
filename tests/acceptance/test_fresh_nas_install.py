@@ -11,7 +11,6 @@ import re
 import shlex
 import shutil
 import socket
-import stat
 import subprocess
 import sys
 import tempfile
@@ -33,7 +32,6 @@ from tests.acceptance.runtime import (
     assert_compose_compatibility,
     assert_compose_services_healthy,
     bootstrap_command,
-    group_readable_secrets,
     https_over_command,
     reclaim_gateway_journal,
 )
@@ -662,24 +660,6 @@ def assert_installer_answer_bindings(
         if (bundle / "secrets" / name).read_bytes() != expected:
             # Identify the owner without printing the supplied or observed secret.
             raise AcceptanceError(f"installer answer was not bound to secret {name}")
-
-
-def assert_tailscale_secret_group(bundle: Path) -> None:
-    """The capability-free Tailscale services read secrets through group_add.
-
-    The lane runs the installer with the group available, so the files it
-    wrote must be group-readable (0640) with exactly the group Compose adds.
-    """
-    compose = yaml.safe_load((bundle / "docker-compose.yaml").read_text("utf-8"))
-    gid, files = group_readable_secrets(compose)
-    if gid is None or not files:
-        raise AcceptanceError("Tailscale services must share one secret group")
-    for relative in sorted(files):
-        metadata = (bundle / "secrets" / relative).stat()
-        if metadata.st_gid != gid or stat.S_IMODE(metadata.st_mode) != 0o640:
-            raise AcceptanceError(
-                f"secret {relative} is not group {gid} mode 0640 for its reader"
-            )
 
 
 def secret_snapshot(bundle: Path) -> dict[Path, bytes]:
@@ -1769,8 +1749,6 @@ def main() -> None:
             responses=nas_responses(**common),
         )
         assert_installer_answer_bindings(first, **common)
-        if tailscale_mode == "full":
-            assert_tailscale_secret_group(first)
         first_secrets = secret_snapshot(first)
         generate_bundle(
             root / "default-first",
