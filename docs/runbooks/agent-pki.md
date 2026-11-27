@@ -42,7 +42,7 @@ never copied into an image or exposed through an HTTP endpoint.
 ## Upgrade from the CA service
 
 Re-run the signed NAS installer in the directory containing the existing bundle,
-then follow the [NAS redeployment runbook](operator-cli-access.md#nas-compose-redeployment).
+then follow the [NAS redeployment runbook](../maintainers/operator-cli-access.md#nas-compose-redeployment).
 Preserve `.env`, `secrets/`, PostgreSQL and other named volumes. Regenerated
 Compose has no `step-ca` service; remove the stopped orphan service during
 redeployment. The old `step-ca-data` volume may remain unused. Already-issued

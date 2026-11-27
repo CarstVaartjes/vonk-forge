@@ -5,7 +5,7 @@
    private NAS it includes the reserved LAN address, for example:
 
    ```sh
-   curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 VONK_ENROLLMENT_URL=https://enroll.example.test VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
+   curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=<CONTROLLER_LAN_IP> VONK_ENROLLMENT_URL=https://enroll.example.test VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
    ```
 
 3. Enter the one-use pairing token. The generated command supplies the NAS
@@ -35,7 +35,7 @@ generated command; it uses the NAS installation's own publication channel and
 the same generic enrollment intent used for a new Spark:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=<CONTROLLER_LAN_IP> sh -s -- --enroll
 ```
 
 The re-enrollment flow preserves the locally generated node ID, replaces its

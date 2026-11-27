@@ -36,7 +36,7 @@ GitHub API authentication, Git signing, and SSH authentication are separate.
 Keep commit signing enabled; use an approved machine signer when unattended
 signing is required. Never export a personal private key to avoid an unlock.
 For repository edits, first create the task's branch/worktree under the
-[development workflow](development-workflow.md#start-isolated-work).
+[development workflow](../runbooks/development-workflow.md#start-isolated-work).
 
 ## NAS Compose redeployment
 
@@ -55,8 +55,8 @@ bundle with the signed Python NAS setup wheel through the installer endpoint
 `secrets/`, and named
 volumes, and make the bound images available to the NAS. A floating image tag or
 a newly published image alone is not accepted-release evidence. Follow the
-[publication procedure](platform-release-publication.md) and
-[control-plane bootstrap](control-plane-bootstrap.md) for those stages.
+[publication procedure](../runbooks/platform-release-publication.md) and
+[control-plane bootstrap](../runbooks/control-plane-bootstrap.md) for those stages.
 
 On a host with the configured `vonk-nas-compose` helper:
 

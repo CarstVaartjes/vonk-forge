@@ -16,7 +16,6 @@ does not require routine SSH.
 | Read the full agent rules behind AGENTS.md | [Agent rules in full](agent-rules.md) |
 | Understand state ownership and deadlock prevention | [Coordination boundaries](architecture-overview.md#coordination-and-deadlock-prevention) |
 | Use the complete terminal interface | [`vonkctl` guide](runbooks/vonkctl.md) |
-| Use unattended credentials and redeploy NAS Compose | [Operator CLI access](runbooks/operator-cli-access.md) |
 | Deploy or upgrade the Docker Compose project | [Controller-host deployment](../deploy/compose/README.md) |
 | Configure Tailscale before first install | [Tailscale fresh-install preflight](runbooks/tailscale.md#fresh-install-preflight) |
 | Understand identities and trust | [Security threat model](security/threat-model.md) |

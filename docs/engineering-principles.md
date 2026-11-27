@@ -265,7 +265,7 @@ for accepted publication, deployment, or physical acceptance.
 - Routine Spark operation does not require SSH. The Spark agent connects
   outbound, and Spark SSH stays diagnostic and bootstrap-only. An explicitly
   authorized NAS Compose redeploy may use authenticated SSH as its host
-  transport under the [operator procedure](runbooks/operator-cli-access.md#nas-compose-redeployment).
+  transport under the [operator procedure](maintainers/operator-cli-access.md#nas-compose-redeployment).
   This does not bypass Controller authorization or permit SSH Spark rollouts.
 
 ## Every frontier recipe must remain runnable
