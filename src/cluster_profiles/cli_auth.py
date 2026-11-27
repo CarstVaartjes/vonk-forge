@@ -54,7 +54,6 @@ _TIMEOUT_SECONDS = 15
 # The Controller's cookie names (control auth.SESSION_COOKIE and CSRF_COOKIE).
 _SESSION_COOKIE = "__Host-vonk_session"
 _CSRF_COOKIE = "__Host-vonk_csrf"
-_HOST_PREFIX = "__Host-"
 
 
 class AuthAction(StrEnum):
@@ -187,27 +186,17 @@ def _post(
     return _read_control_response(open_https, request, _TIMEOUT_SECONDS)
 
 
-def _session_cookies(headers: Message) -> dict[str, tuple[str, str]]:
-    """The login's session and CSRF cookies, each as the (name, value) it set.
-
-    vonkctl is not a browser, so the __Host- prefix protects nothing here. A name
-    matches with or without it and goes back exactly as the Controller set it.
-    """
-    wanted = {
-        name.removeprefix(_HOST_PREFIX): name
-        for name in (_SESSION_COOKIE, _CSRF_COOKIE)
-    }
-    cookies: dict[str, tuple[str, str]] = {}
+def _session_cookies(headers: Message) -> dict[str, str]:
+    cookies: dict[str, str] = {}
     for line in headers.get_all("set-cookie") or []:
         parsed = http.cookies.SimpleCookie()
         try:
             parsed.load(line)
         except http.cookies.CookieError:
             continue
-        for sent, morsel in parsed.items():
-            name = wanted.get(sent.removeprefix(_HOST_PREFIX))
-            if name is not None:
-                cookies[name] = (sent, morsel.value)
+        for name in (_SESSION_COOKIE, _CSRF_COOKIE):
+            if name in parsed:
+                cookies[name] = parsed[name].value
     return cookies
 
 
@@ -270,8 +259,9 @@ def _mint_token(url: str, password: str) -> tuple[str, datetime]:
     if status != 200 or len(cookies) != 2:
         raise LoginFailed(f"the Controller login answered {status} without a session")
     session = {
-        "Cookie": "; ".join(f"{sent}={value}" for sent, value in cookies.values()),
-        "X-CSRF-Token": cookies[_CSRF_COOKIE][1],
+        "Cookie": f"{_SESSION_COOKIE}={cookies[_SESSION_COOKIE]}; "
+        f"{_CSRF_COOKIE}={cookies[_CSRF_COOKIE]}",
+        "X-CSRF-Token": cookies[_CSRF_COOKIE],
         "Origin": origin,
     }
     try:
