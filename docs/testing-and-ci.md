@@ -72,7 +72,7 @@ when it changes upgrade-sensitive paths (`CARRY_INPUTS`) or the acceptance
 programs. A merge without candidate evidence makes Release run the Spark
 acceptance (and the recipe refresh only if the change can alter the upgrade)
 itself.
-See [the contributor guide](../contributor.md#ci-and-pre-merge-release-acceptance)
+See [the contributor guide](../CONTRIBUTING.md#ci-and-pre-merge-release-acceptance)
 for dispatch by ref and protected-environment configuration. The PR and main
 publishers call the same candidate assembly and acceptance workflows.
 

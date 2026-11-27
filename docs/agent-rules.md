@@ -292,7 +292,7 @@ library by revision and the hash of the build script and `.tool-versions`.
 Before the upgrade the carry's checks require only what any release provides;
 `test_carry_baseline_phase_accepts_an_older_release_shape` runs them against an
 older release's shape (see `docs/testing-and-ci.md`).
-See [the contributor CI guide](../contributor.md#ci-and-pre-merge-release-acceptance)
+See [the contributor CI guide](../CONTRIBUTING.md#ci-and-pre-merge-release-acceptance)
 for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.
 
