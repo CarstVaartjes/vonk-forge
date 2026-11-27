@@ -12,6 +12,7 @@ first expiry warning, so the redeploy that the warning asks for also clears it.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -28,6 +29,9 @@ _LOGGER = logging.getLogger(__name__)
 RENEWAL_WINDOW = timedelta(days=60)
 # The installer's leaf lifetime (the CA/Browser 397-day maximum).
 _VALIDITY = timedelta(days=397)
+_PEM_BLOCK = re.compile(
+    rb"-----BEGIN ([A-Z ]+)-----\s+[A-Za-z0-9+/=\s]+?-----END \1-----\s*"
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,24 @@ class LeafPair:
     # The leaf followed by the intermediate, as Caddy serves the chain.
     certificate: bytes
     key: bytes
+
+    def served_file(self) -> bytes:
+        """The chain then the key in one file: one rename publishes both."""
+        return self.certificate + self.key
+
+    @classmethod
+    def from_served_file(cls, content: bytes) -> LeafPair:
+        certificate, key = b"", b""
+        for match in _PEM_BLOCK.finditer(content):
+            if match.group(1) == b"CERTIFICATE":
+                certificate += match.group(0)
+            elif match.group(1).endswith(b"PRIVATE KEY") and not key:
+                key = match.group(0)
+            else:
+                raise ValueError("controller TLS file holds an unexpected block")
+        if not certificate or not key:
+            raise ValueError("controller TLS file lacks its chain or its key")
+        return cls(certificate, key)
 
 
 def installer_names(installer_certificate: bytes) -> list[str]:

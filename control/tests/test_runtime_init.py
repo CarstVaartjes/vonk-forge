@@ -713,7 +713,9 @@ def _pki(
 
 
 def _served(volume: Path) -> tuple[x509.Certificate, bytes]:
-    certificate = (volume / "controller-server-certificate").read_bytes()
+    certificate = LeafPair.from_served_file(
+        (volume / "controller-server.pem").read_bytes()
+    ).certificate
     return x509.load_pem_x509_certificates(certificate)[0], certificate
 
 
@@ -756,15 +758,12 @@ def test_a_leaf_near_expiry_is_renewed_with_the_installer_names(
             x509.SubjectKeyIdentifier
         ).value.digest
     )
-    key = volume / "controller-server-key"
+    served = volume / "controller-server.pem"
+    key = LeafPair.from_served_file(served.read_bytes()).key
     assert (
-        serialization.load_pem_private_key(key.read_bytes(), None).public_key()
-        == leaf.public_key()
+        serialization.load_pem_private_key(key, None).public_key() == leaf.public_key()
     )
-    assert stat.S_IMODE(key.stat().st_mode) == 0o400
-    assert stat.S_IMODE((volume / "controller-server-certificate").stat().st_mode) == (
-        0o444
-    )
+    assert stat.S_IMODE(served.stat().st_mode) == 0o440
 
 
 def test_a_valid_staged_leaf_is_served_again_unchanged(
@@ -823,7 +822,7 @@ def test_a_renewal_fault_is_logged_and_staging_still_completes(
     runtime_init.main(marker=marker, idle=lambda: None)
 
     assert marker.read_text() == "staged\n"
-    assert not (volume / "controller-server-certificate").exists()
+    assert not (volume / "controller-server.pem").exists()
 
 
 def test_an_older_compose_file_without_the_volume_renews_nothing(
@@ -836,3 +835,34 @@ def test_an_older_compose_file_without_the_volume_renews_nothing(
     stage_controller_tls(secrets, volume)
 
     assert not volume.exists()
+
+
+def test_a_crash_while_publishing_a_renewal_leaves_a_matching_pair(
+    monkeypatch: pytest.MonkeyPatch, tls: tuple[Path, Path]
+) -> None:
+    """Catches a key published without its leaf: Caddy would refuse the pair
+    and restart-loop, taking every agent and browser listener down. The crash
+    hits the second rename, the point where a two-file publication splits."""
+    secrets, volume = tls
+    installer_leaf = _pki(secrets)
+    installer_leaf(_NAMES, _NOW - timedelta(days=10))
+    stage_controller_tls(secrets, volume)  # the installer's pair is staged
+    installer_leaf(_NAMES, _NOW - timedelta(days=340))  # due: a renewal is minted
+    real_replace = Path.replace
+    renames: list[Path] = []
+
+    def crash_on_second(self: Path, target: Path) -> Path:
+        renames.append(self)
+        if len(renames) == 2:
+            raise OSError("power lost during publication")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", crash_on_second)
+    stage_controller_tls(secrets, volume)
+
+    pair = LeafPair.from_served_file((volume / "controller-server.pem").read_bytes())
+    leaf = x509.load_pem_x509_certificates(pair.certificate)[0]
+    assert (
+        serialization.load_pem_private_key(pair.key, None).public_key()
+        == leaf.public_key()
+    )

@@ -18,8 +18,9 @@ The NAS installer creates and preserves these secret files:
 
 The installer issues the controller server leaf (`controller-server-*`, 397
 days) and names its hosts. `runtime-init` renews it on every start into the
-`controller-tls` volume that Caddy serves from, once 60 days or fewer remain,
-keeping the installer leaf's names (see
+`controller-tls` volume that Caddy serves from (`controller-server.pem`, the
+chain and its key in one file), once 60 days or fewer remain, keeping the
+installer leaf's names (see
 [Runtime staging](../../deploy/compose/README.md#runtime-staging-runtime-init)).
 Sparks and Lab browsers trust the root, so a renewed leaf needs no
 re-enrollment. `vonk_controller_certificate_expiry_timestamp_seconds` reports

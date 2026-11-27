@@ -43,13 +43,14 @@ export VONK_CONTROL_HOSTNAME="$control_hostname"
 export VONK_AGENT_ENROLL_HOSTNAME="enroll.$control_hostname"
 export VONK_AGENT_HOSTNAME="agents.$control_hostname"
 
-# runtime-init keeps the served controller leaf renewed in this volume. Until
-# it has staged one, or with an older Compose file that mounts no volume, the
-# installer's leaf from the Compose secrets serves.
-tls_directory=/run/vonk-controller-tls
-if [ -s "$tls_directory/controller-server-certificate" ] && [ -s "$tls_directory/controller-server-key" ]; then
-  export VONK_CONTROLLER_TLS_CERTIFICATE="$tls_directory/controller-server-certificate"
-  export VONK_CONTROLLER_TLS_KEY="$tls_directory/controller-server-key"
+# runtime-init keeps the served controller leaf renewed in this volume, the
+# chain and its key in one file (Caddy reads the certificates and the key from
+# it), so a pair is published by one rename. Until it has staged one, or with
+# an older Compose file that mounts no volume, the installer's leaf serves.
+tls_file=/run/vonk-controller-tls/controller-server.pem
+if [ -s "$tls_file" ]; then
+  export VONK_CONTROLLER_TLS_CERTIFICATE="$tls_file"
+  export VONK_CONTROLLER_TLS_KEY="$tls_file"
 else
   export VONK_CONTROLLER_TLS_CERTIFICATE=/run/secrets/controller-server-certificate
   export VONK_CONTROLLER_TLS_KEY=/run/secrets/controller-server-key

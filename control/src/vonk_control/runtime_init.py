@@ -38,6 +38,15 @@ class RuntimeSecretError(RuntimeError):
 # A private child preserves the operator-owned gateway bind directory.
 GATEWAY_MASTER_KEY_PATH = Path("/gateway-secrets/authority/master-key")
 
+# Caddy serves the controller leaf from this volume (read-only). The chain and
+# the key share one file, so one rename publishes a matching pair. Group 10001
+# lets the API read its certificate for the expiry metric; the API already
+# holds the intermediate that issues this leaf.
+CONTROLLER_TLS = Path("/controller-tls")
+CONTROLLER_TLS_FILE = "controller-server.pem"
+CONTROLLER_CERTIFICATE = "controller-server-certificate"
+CONTROLLER_KEY = "controller-server-key"
+
 
 @dataclass(frozen=True)
 class SharedRuntimePaths:
@@ -527,6 +536,9 @@ def _stage_compose_secrets_once(
         "step-ca-root-certificate",
         "step-ca-intermediate-key",
         "step-ca-password",
+        # The installer leaf Caddy serves until a renewed one is staged: the
+        # API reads it for the expiry metric then.
+        CONTROLLER_CERTIFICATE,
     ):
         source = source_root / name
         if source.exists():
@@ -670,13 +682,6 @@ def _identity(value: os.stat_result) -> tuple[int, ...]:
     )
 
 
-# Caddy reads the served controller leaf here (read-only); the API reads its
-# certificate for the expiry metric. The key is root-only.
-CONTROLLER_TLS = Path("/controller-tls")
-CONTROLLER_CERTIFICATE = "controller-server-certificate"
-CONTROLLER_KEY = "controller-server-key"
-
-
 def _intermediate_key(source_root: Path) -> ed25519.Ed25519PrivateKey:
     key = serialization.load_pem_private_key(
         read_runtime_secret(source_root / "step-ca-intermediate-key"),
@@ -705,12 +710,9 @@ def stage_controller_tls(
         return
     try:
         staged = None
-        if (destination / CONTROLLER_CERTIFICATE).exists() and (
-            destination / CONTROLLER_KEY
-        ).exists():
-            staged = LeafPair(
-                read_runtime_secret(destination / CONTROLLER_CERTIFICATE),
-                read_runtime_secret(destination / CONTROLLER_KEY),
+        if (destination / CONTROLLER_TLS_FILE).exists():
+            staged = LeafPair.from_served_file(
+                read_runtime_secret(destination / CONTROLLER_TLS_FILE)
             )
         chosen = served_leaf(
             installer=LeafPair(
@@ -727,20 +729,16 @@ def stage_controller_tls(
         if chosen is None:
             return
         _directory(destination, 0, 0, 0o755)
-        # Key first: a fault between the two leaves a mismatched pair, which
-        # the next start no longer qualifies and replaces.
-        for name, content, mode in (
-            (CONTROLLER_KEY, chosen.key, 0o400),
-            (CONTROLLER_CERTIFICATE, chosen.certificate, 0o444),
-        ):
-            _replace_file(
-                content,
-                destination / name,
-                owner_uid=0,
-                owner_gid=0,
-                mode=mode,
-                preserve_parent=True,
-            )
+        # One file, one rename: a crash at any point leaves the previous pair
+        # or the new one, never a key with another leaf.
+        _replace_file(
+            chosen.served_file(),
+            destination / CONTROLLER_TLS_FILE,
+            owner_uid=0,
+            owner_gid=10001,
+            mode=0o440,
+            preserve_parent=True,
+        )
         _LOGGER.info("controller TLS leaf staged")
     except (
         OSError,

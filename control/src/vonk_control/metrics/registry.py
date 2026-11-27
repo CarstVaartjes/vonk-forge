@@ -270,9 +270,9 @@ class MetricsRegistry:
         self._recent_job_failures: dict[str, int] = {}
         self._recent_operation_failures: dict[str, int] = {}
         self._history_rows_past_grace: int | None = None
-        self._certificate_files: Mapping[str, Path] = {}
+        self._certificate_files: Mapping[str, tuple[Path, ...]] = {}
 
-    def set_certificate_files(self, files: Mapping[str, Path]) -> None:
+    def set_certificate_files(self, files: Mapping[str, tuple[Path, ...]]) -> None:
         with self._lock:
             self._certificate_files = dict(files)
 

@@ -438,14 +438,10 @@ def test_metrics_export_host_and_engine_readings_and_omit_what_is_not_reported()
     assert "vonk_engine_" not in older_text
 
 
-def test_controller_certificate_expiry_reads_the_files_in_use(tmp_path: Path) -> None:
-    """Catches an expiry read from a copy Caddy does not serve, a crash on a
-    missing file, or a damaged certificate that silences its alert."""
+def _certificate(expires: datetime) -> bytes:
     key = ed25519.Ed25519PrivateKey.generate()
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "served")])
-    expires = datetime(2027, 9, 1, tzinfo=UTC)
-    served = tmp_path / "controller-server-certificate"
-    served.write_bytes(
+    return (
         x509.CertificateBuilder()
         .subject_name(name)
         .issuer_name(name)
@@ -456,19 +452,55 @@ def test_controller_certificate_expiry_reads_the_files_in_use(tmp_path: Path) ->
         .sign(key, algorithm=None)
         .public_bytes(serialization.Encoding.PEM)
     )
+
+
+def _server_series(expires: datetime) -> str:
+    return (
+        'vonk_controller_certificate_expiry_timestamp_seconds{certificate="server"} '
+        f"{int(expires.timestamp())}"
+    )
+
+
+def test_controller_certificate_expiry_reads_the_files_in_use(tmp_path: Path) -> None:
+    """Catches an expiry read from a copy Caddy does not serve, a metric that is
+    blind while Caddy serves the installer fallback, a crash on a missing file,
+    or a damaged certificate that silences its alert."""
+    installer_expires = datetime(2027, 9, 1, tzinfo=UTC)
+    renewed_expires = datetime(2028, 10, 1, tzinfo=UTC)
+    renewed = tmp_path / "controller-server.pem"
+    installer = tmp_path / "controller-server-certificate"
+    installer.write_bytes(_certificate(installer_expires))
     damaged = tmp_path / "controller-ca"
     damaged.write_text("not a certificate\n")
     metrics = MetricsRegistry()
     metrics.set_certificate_files(
-        {"server": served, "intermediate": tmp_path / "absent", "root": damaged}
+        {
+            "server": (renewed, installer),
+            "intermediate": (tmp_path / "absent",),
+            "root": (damaged,),
+        }
     )
 
-    rendered = metrics.render()
+    def server_line() -> list[str]:
+        return [
+            line
+            for line in metrics.render().splitlines()
+            if 'certificate="server"' in line
+        ]
 
-    assert (
-        'vonk_controller_certificate_expiry_timestamp_seconds{certificate="server"} '
-        f"{int(expires.timestamp())}"
-    ) in rendered.splitlines()
+    # No renewed leaf staged: Caddy serves the installer's, and so does the metric.
+    assert server_line() == [_server_series(installer_expires)]
+    # The renewed file holds the chain and then its key; the leaf is read.
+    renewed.write_bytes(
+        _certificate(renewed_expires)
+        + ed25519.Ed25519PrivateKey.generate().private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    assert server_line() == [_server_series(renewed_expires)]
+    rendered = metrics.render()
     assert 'certificate="intermediate"' not in rendered
     # A damaged certificate reads as expired, so its alerts fire.
     assert (

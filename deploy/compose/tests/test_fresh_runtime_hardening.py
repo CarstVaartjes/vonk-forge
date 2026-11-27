@@ -129,9 +129,8 @@ def test_caddy_serves_the_renewed_leaf_or_falls_back_to_the_installer_leaf(
         (run / name).write_text("installer\n")
     (run / "secrets/agent-proxy-auth").write_text("a" * 32 + "\n")
     if renewed:
-        for name in ("controller-server-certificate", "controller-server-key"):
-            (run / "vonk-controller-tls").mkdir(exist_ok=True)
-            (run / "vonk-controller-tls" / name).write_text("renewed\n")
+        (run / "vonk-controller-tls").mkdir()
+        (run / "vonk-controller-tls/controller-server.pem").write_text("renewed\n")
     script = tmp_path / "entrypoint.sh"
     script.write_text(
         (COMPOSE_ROOT / "caddy/entrypoint.sh")
