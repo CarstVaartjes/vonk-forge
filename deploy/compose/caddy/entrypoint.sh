@@ -43,9 +43,21 @@ export VONK_CONTROL_HOSTNAME="$control_hostname"
 export VONK_AGENT_ENROLL_HOSTNAME="enroll.$control_hostname"
 export VONK_AGENT_HOSTNAME="agents.$control_hostname"
 
+# runtime-init keeps the served controller leaf renewed in this volume. Until
+# it has staged one, or with an older Compose file that mounts no volume, the
+# installer's leaf from the Compose secrets serves.
+tls_directory=/run/vonk-controller-tls
+if [ -s "$tls_directory/controller-server-certificate" ] && [ -s "$tls_directory/controller-server-key" ]; then
+  export VONK_CONTROLLER_TLS_CERTIFICATE="$tls_directory/controller-server-certificate"
+  export VONK_CONTROLLER_TLS_KEY="$tls_directory/controller-server-key"
+else
+  export VONK_CONTROLLER_TLS_CERTIFICATE=/run/secrets/controller-server-certificate
+  export VONK_CONTROLLER_TLS_KEY=/run/secrets/controller-server-key
+fi
+
 for required_file in \
-  /run/secrets/controller-server-certificate \
-  /run/secrets/controller-server-key \
+  "$VONK_CONTROLLER_TLS_CERTIFICATE" \
+  "$VONK_CONTROLLER_TLS_KEY" \
   /run/secrets/agent-client-ca
 do
   if [ -L "$required_file" ] || [ ! -f "$required_file" ] || [ ! -r "$required_file" ] || [ ! -s "$required_file" ]; then

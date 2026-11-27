@@ -6,8 +6,9 @@ import math
 import re
 import threading
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
@@ -27,6 +28,7 @@ from vonk_control.compose_bundle import ComposeBundle
 from vonk_control.fleet_projection.common import FleetSnapshot
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import without_agent_operation
+from vonk_control.metrics.certificates import certificate_expiry_lines
 from vonk_control.metrics.readings import (
     engine_reading_lines,
     host_reading_lines,
@@ -268,6 +270,11 @@ class MetricsRegistry:
         self._recent_job_failures: dict[str, int] = {}
         self._recent_operation_failures: dict[str, int] = {}
         self._history_rows_past_grace: int | None = None
+        self._certificate_files: Mapping[str, Path] = {}
+
+    def set_certificate_files(self, files: Mapping[str, Path]) -> None:
+        with self._lock:
+            self._certificate_files = dict(files)
 
     def set_history_rows_past_grace(self, count: int) -> None:
         with self._lock:
@@ -501,6 +508,7 @@ class MetricsRegistry:
             worker_memory = self._worker_memory
             worker_memory_age = self._worker_memory_age
             compose_bundle = self._compose_bundle
+            certificate_files = dict(self._certificate_files)
         snapshot = None if self._fleet_source is None else self._fleet_source()
         nodes, telemetry_samples = (
             ({}, {}) if snapshot is None else self._fleet_values(snapshot)
@@ -744,6 +752,8 @@ class MetricsRegistry:
                     f"vonk_nas_compose_bundle_current{{{labels}}} {int(compose_bundle.current)}",
                 )
             )
+        if certificate_files:
+            lines.extend(certificate_expiry_lines(certificate_files))
         lines.append("# EOF")
         return "\n".join(lines) + "\n"
 

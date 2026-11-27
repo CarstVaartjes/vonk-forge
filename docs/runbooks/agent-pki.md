@@ -16,6 +16,18 @@ The NAS installer creates and preserves these secret files:
 - `controller-server-certificate` and `controller-server-key`
 - `agent-ca-provisioner-public-jwk` (the public issuer identity used in accepted certificate bindings)
 
+The installer issues the controller server leaf (`controller-server-*`, 397
+days) and names its hosts. `runtime-init` renews it on every start into the
+`controller-tls` volume that Caddy serves from, once 60 days or fewer remain,
+keeping the installer leaf's names (see
+[Runtime staging](../../deploy/compose/README.md#runtime-staging-runtime-init)).
+Sparks and Lab browsers trust the root, so a renewed leaf needs no
+re-enrollment. `vonk_controller_certificate_expiry_timestamp_seconds` reports
+when the served leaf, the intermediate and the root expire, and
+`ControllerCertificateExpiring` (60 days) and
+`ControllerCertificateExpiringSoon` (30 days) alert on each; see
+[Controller certificate expiring](observability.md#controller-certificate-expiring).
+
 The names under `step-ca/` are retained to reuse the installed authority. The
 root private key is never deployed. The installer no longer generates a JWT
 signing credential or a CA server configuration. Existing unused files may stay.

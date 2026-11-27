@@ -176,6 +176,23 @@ re-enroll through the authenticated enrollment flow, then verify that the Fleet
 connection state returns to online and that current inventory and telemetry are
 available.
 
+## Controller certificate expiring
+
+`ControllerCertificateExpiring` (warning, under 60 days) and
+`ControllerCertificateExpiringSoon` (critical, under 30 days) read
+`vonk_controller_certificate_expiry_timestamp_seconds`, labelled
+`certificate="server"`, `"intermediate"` or `"root"`.
+
+- `server`: runtime-init renews the leaf Caddy serves on each start once 60
+  days or fewer remain, so redeploy the project. The alert clears after the
+  redeploy. If it stays, read the runtime-init log for `controller TLS leaf
+  renewal failed`. With no `server` series at all, the Compose file predates the
+  `controller-tls` volume, so rerun the NAS installer (it also renews the
+  installer's leaf within 30 days of expiry).
+- `intermediate` or `root`: nothing renews these automatically. When they
+  expire, the agent PKI stops verifying; see the
+  [agent PKI runbook](agent-pki.md#backup-and-recovery).
+
 ## Control job failures
 
 `RepeatedControlJobFailure` and `RepeatedAgentOperationFailures` fire when three

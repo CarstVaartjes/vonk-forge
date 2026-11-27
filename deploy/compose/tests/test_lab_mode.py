@@ -23,8 +23,8 @@ def test_compose_keeps_tailscale_opt_in_and_publishes_local_ca_https() -> None:
         {"target": 8443, "published": 8443, "protocol": "tcp"}
     ]
     assert (
-        "tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key"
-        in caddyfile
+        "tls {$VONK_CONTROLLER_TLS_CERTIFICATE:/run/secrets/controller-server-certificate} "
+        "{$VONK_CONTROLLER_TLS_KEY:/run/secrets/controller-server-key}" in caddyfile
     )
     assert "reverse_proxy 127.0.0.1:8080" in caddyfile
 
