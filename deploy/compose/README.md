@@ -167,10 +167,12 @@ They use development `:dev` or production `:latest` application images and chann
 selected by the installer publication channel.
 
 
-Generated deployment Compose and the NAS curl installer payload use floating image
-tags: Vonk images follow `:dev` or production `:latest`; upstream services follow
-`:latest`. Every service pulls on startup/redeploy. The source templates and pinned
-publication artifact provide evidence inputs, not the installed image policy.
+Generated deployment Compose and the NAS curl installer payload float only the
+Vonk images: they follow `:dev` or production `:latest`. Upstream services
+(PostgreSQL, Caddy, Prometheus, Tailscale and the others) keep the exact version
+the release pins; the bundle builder refuses a floating upstream tag,
+so a new upstream version arrives only with a Vonk release. Every service pulls
+on startup/redeploy.
 
 ## Database backups
 
