@@ -7,8 +7,7 @@ Spark-local copy can support current execution, but it is never used to make a
 profile choice available or to repair the NAS cache.
 
 For the complete clean-fleet acceptance path, follow the [development agent
-workload acceptance runbook](development-agent-workloads.md) after the profile
-has passed its cache and placement gates.
+workload acceptance runbook](development-agent-workloads.md).
 
 ## Inspect current state
 
