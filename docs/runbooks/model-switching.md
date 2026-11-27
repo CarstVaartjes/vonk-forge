@@ -32,9 +32,9 @@ cache ahead of time.
 1. Choose a profile and its selected Sparks.
 2. The Controller checks the exact assets and placement. The review lists the
    model download and the image build for each choice (each skipped when
-   already cached), and progress reports them as the load's preparation. A
-   preparation that cannot finish, for example a gated model without a token,
-   is named as the reason the load waits.
+   already cached), and progress reports them as the load's preparation. An
+   unfinished preparation, for example a gated model without a token, is named
+   as what the load waits on; an exhausted one fails the load with that reason.
 3. Once the cache is ready, the Controller distributes the exact model and
    image assets to all selected Sparks in parallel. It verifies destination
    bytes and image identity and skips any already verified local copy.

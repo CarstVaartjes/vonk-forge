@@ -90,8 +90,9 @@ Sparks idle when it is loaded. The Controller
 binds the selected cached recipe revision and Spark group to fresh
 certificate-bound inventory, capacity, fabric, exact model and image
 identities, operation phases, per-rank receipts, and route state. The load
-prepares missing assets in the Controller/NAS cache first; a preparation that
-cannot finish is named as the reason the load waits. Once the cache holds the
+prepares missing assets in the Controller/NAS cache first; an unfinished
+preparation is named as what the load waits on, and an exhausted one fails the
+load with that reason. Once the cache holds the
 assets, the Controller distributes the exact assets to all
 selected Sparks in parallel, skips verified local copies, safely stops and
 replaces conflicting workloads, and reports durable per-Spark progress and
