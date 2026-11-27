@@ -19,7 +19,7 @@ from tests.token_support import TokenCodec
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor
+from vonk_control.auth import SESSION_COOKIE, Actor
 from vonk_control.auth_api import install_auth_routes
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
@@ -405,7 +405,7 @@ def test_cli_token_is_a_browser_session_only_download_with_expiry() -> None:
 
 
 def _mint(client: TestClient) -> str:
-    if "vonk_session" not in client.cookies:
+    if SESSION_COOKIE not in client.cookies:
         assert _login(client).status_code == 200
     response = client.post("/api/auth/cli-token", headers={"x-csrf-token": CSRF_TOKEN})
     assert response.status_code == 200
@@ -479,7 +479,7 @@ def test_token_kinds_never_cross_and_stateless_tokens_are_refused() -> None:
         == 401
     )
     cookie_only = TestClient(client.app, base_url=ORIGIN)
-    cookie_only.cookies.set("vonk_session", cli_token)
+    cookie_only.cookies.set(SESSION_COOKIE, cli_token)
     assert cookie_only.get("/api/auth/session").status_code == 401
 
 
