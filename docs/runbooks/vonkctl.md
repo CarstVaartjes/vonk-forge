@@ -151,11 +151,13 @@ password, or after restoring PostgreSQL next to a different `secrets/` set:
 
 When the file differs from the stored password the API replaces the stored
 verifier and revokes every browser session and CLI token of the administrator,
-then keeps serving. A file the API cannot use (shorter than 12 characters, an
-extra line, no final newline, not UTF-8, over 256 bytes, empty, or not a
-regular file) changes nothing: the API logs `staged administrator password`
-at error level and keeps the stored password. The API never stops over this
-file.
+then keeps serving. An unusable file changes nothing and the stored password
+keeps working. An empty file or one that is not a regular file is logged by
+`runtime-init` (`staged administrator password is unusable`, error level),
+which keeps the previous staged copy. A file shorter than 12 characters, with
+an extra line, without a final newline, not UTF-8, or over 256 bytes is logged
+by the API (`staged administrator password`, error level). Neither stops over
+this file.
 
 ## Words
 
