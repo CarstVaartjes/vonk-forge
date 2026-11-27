@@ -25,9 +25,9 @@ from vonk_control.operator_acceptance.receipt_contract import SecurityEdge
 from vonk_control.operator_acceptance.resolution import security_edge
 from vonk_control.security.browser_auth import (
     BrowserAuthenticationError,
-    BrowserAuthenticationThrottledError,
     BrowserAuthService,
     BrowserIdentity,
+    BrowserLoginBusyError,
 )
 
 _COOKIE_MAX_AGE = 43_200
@@ -144,7 +144,7 @@ def install_auth_routes(
         "/api/auth/login",
         response_model=AuthSession,
         responses={
-            **bounded_error_responses(401, 403, 429),
+            **bounded_error_responses(401, 403, 503),
             422: {
                 "description": "Invalid login request",
                 "model": LoginRequestInvalid,
@@ -153,14 +153,16 @@ def install_auth_routes(
         operation_id="loginBrowser",
     )
     @security_edge(SecurityEdge.LOGIN)
-    def login(body: LoginRequest, request: Request, response: Response) -> AuthSession:
+    async def login(
+        body: LoginRequest, request: Request, response: Response
+    ) -> AuthSession:
         host = request.headers.get("host")
         if host is None or request.headers.get("origin") != f"https://{host}":
             raise HTTPException(status_code=403, detail="origin validation failed")
         try:
-            issued = service.login(body.subject, body.password)
-        except BrowserAuthenticationThrottledError:
-            temporary_http_answer(TransientReason.RATE_LIMITED)
+            issued = await service.admit(body.subject, body.password)
+        except BrowserLoginBusyError:
+            temporary_http_answer(TransientReason.ADMISSION_BUSY)
         except BrowserAuthenticationError:
             raise HTTPException(
                 status_code=401, detail="authentication failed"

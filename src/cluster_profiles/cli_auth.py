@@ -249,12 +249,6 @@ def _mint_token(url: str, password: str) -> tuple[str, datetime]:
             "the Controller refused the login request (origin check); "
             "check the Controller URL"
         ) from None
-    if status == 429:
-        wait = headers.get("retry-after")
-        raise LoginFailed(
-            "too many login attempts"
-            + (f"; try again in {wait} seconds" if wait else "; try again later")
-        )
     cookies = _session_cookies(headers)
     if status != 200 or len(cookies) != 2:
         raise LoginFailed(f"the Controller login answered {status} without a session")

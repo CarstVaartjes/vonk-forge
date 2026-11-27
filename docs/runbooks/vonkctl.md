@@ -53,7 +53,10 @@ applies; directory mode 0700, files 0600, written atomically). The token lasts
 30 days. From 7 days before it expires every command prints one warning on
 stderr; the stored expiry never blocks a command, the Controller decides. After
 it expires, a refused command names `vonkctl auth login`; run it again. A wrong
-password writes nothing. For unattended use `--password-stdin` reads the
+password writes nothing. The Controller answers a wrong password after a fixed one-second
+delay and never locks the login: one password check runs at a time, so a
+correct password always gets in after its turn (a login that waits more than
+ten seconds is answered busy with a retry time). For unattended use `--password-stdin` reads the
 password from stdin (discouraged: the password then passes through your
 script).
 
@@ -148,11 +151,13 @@ password, or after restoring PostgreSQL next to a different `secrets/` set:
 
 When the file differs from the stored password the API replaces the stored
 verifier and revokes every browser session and CLI token of the administrator,
-then keeps serving. A file the API cannot use (shorter than 12 characters, an
-extra line, no final newline, not UTF-8, over 256 bytes, empty, or not a
-regular file) changes nothing: the API logs `staged administrator password`
-at error level and keeps the stored password. The API never stops over this
-file.
+then keeps serving. An unusable file changes nothing and the stored password
+keeps working. An empty file or one that is not a regular file is logged by
+`runtime-init` (`staged administrator password is unusable`, error level),
+which keeps the previous staged copy. A file shorter than 12 characters, with
+an extra line, without a final newline, not UTF-8, or over 256 bytes is logged
+by the API (`staged administrator password`, error level). Neither stops over
+this file.
 
 ## Words
 
