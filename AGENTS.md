@@ -428,10 +428,12 @@ or account updates that page in the same PR.
 ## Profile cache contract and whole-fleet membership
 
 The local NAS/Controller cache is the authoritative availability surface for
-Fleet profile authoring and apply admission: choices resolve from it to an exact
-model and recipe-image identity, and missing assets are actionable blockers that
-name the asset and the prepare-cache action; never defer them to a Spark. The
-managed cache is trusted, so do not promise repeated full hashing. Applying a
+Fleet profile loads: choices resolve to an exact model and recipe-image
+identity, and a choice need not be cached to be saved. A load prepares what it
+needs in that cache by itself (the review lists the model download and the
+image build, each skipped when cached), names an unfinished preparation as
+what it waits on, and fails with the reason of an exhausted one; never leave a missing asset for a target Spark
+to discover. The managed cache is trusted, so do not promise repeated full hashing. Applying a
 ready profile binds the exact profile and plan digests, prepares assets on the
 targets in parallel, skips what is local, replaces workloads safely and reports
 durable per-target progress before a route is published. Spark-local copies are
@@ -468,7 +470,7 @@ and landed branch. The full lifecycle is in
 ### Schema implementation, merge, and deployment
 
 Necessary schema implementation is allowed within the task scope; inspect the
-actual schema effect of changes to `control/src/vonk_control/models.py` and
+actual schema effect of changes to `control/src/vonk_control/models/` and
 `control/migrations/`. Keep schema-changing PRs out of auto-merge and obtain an
 explicit operator decision; describe the deployment impact in the PR. Startup
 reconciles the live schema to the models transactionally (missing objects added,

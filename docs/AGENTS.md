@@ -37,10 +37,10 @@ do not claim route-wide or Rust coverage until the owning producer and
 consumer tests have passed.
 
 For Fleet profiles, document the local NAS/Controller cache as the authority
-for profile choices and apply admission. Choices resolve to exact cached model
-and recipe-image identities; Spark-local copies are execution caches only.
-Missing assets must remain visible as actionable blockers with a prepare-cache
-action. A ready apply prepares exact assets on target Sparks in parallel,
+for profile loads. Choices resolve to exact model and recipe-image identities;
+Spark-local copies are execution caches only. A load prepares missing assets in
+that cache itself: document the review's preparation steps and the reason a
+load waits on a preparation, not a separate prepare-cache step. A ready apply prepares exact assets on target Sparks in parallel,
 skips assets already local, safely stops and replaces workloads, and reports
 durable progress. The NAS removes unused local model-cache entries while
 preserving referenced entries. Treat the managed local cache as trusted and do

@@ -61,7 +61,7 @@ artifacts is [data-contracts.md](data-contracts.md).
 | Route activation marker | `vonk_agent_protocol.route_activation.ActivationMarker` | Controller publisher and the exact shared model packaged in LiteLLM |
 | Route activation acknowledgement (`drained` or `ready`) | `vonk_agent_protocol.route_activation.SupervisorAcknowledgement` | LiteLLM supervisor writer; Controller `FileSupervisorAcknowledger` (a withdrawal accepts `drained`, a publication only `ready`) |
 | Controller image-cache receipt | `RuntimeImageReceipt` in `runtime_image_preparation.py` | Image preparation, persisted receipt reader, availability worker and execution-plan compiler |
-| Database rows | SQLAlchemy models in `control/src/vonk_control/models.py` | Controller API and worker processes |
+| Database rows | SQLAlchemy models in `control/src/vonk_control/models/` | Controller API and worker processes |
 | Documents stored in JSON columns | The contract bound to each `JSON` column in `control/src/vonk_control/stored/columns.py` (read and written through `stored.json_values`) | Every Controller reader and writer of that column, the published OpenAPI (`x-vonk-json-columns`) and the generated clients |
 
 Model and Recipe are the two **authoring** contracts. Operations, progress,
@@ -70,7 +70,7 @@ additional recipe documents for users to maintain.
 
 ### JSON columns
 
-Every `JSON` column in `models.py` has exactly one contract in
+Every `JSON` column in `models/` has exactly one contract in
 `stored/columns.py`, typed at every level: no `Any`, `object`, `JsonValue`,
 bare `dict`/`list` or mapping of those. A level that is genuinely someone
 else's document is a named `ExternalPassthrough` subclass whose written reason
@@ -97,14 +97,17 @@ filesystem records with the same canonical JSON semantics as other producers.
 ## Cache-first profile lifecycle
 
 The Controller cache is the trusted preparation authority for profiles. A
-profile choice binds the exact model artifact set and required runtime image;
-profile creation and updates must not select an uncached or merely Spark-local
-asset. If an existing choice is no longer fully cached and verified, load is
-blocked with typed, actionable reasons and offers the cache-preparation
-operation. Load must not silently fetch from upstream, choose another
-revision, or recover the authority from a Spark copy.
+profile choice names a recipe (and model variant); a load resolves it to the
+newest catalog revision and its exact model artifact set and runtime image.
+Saving never checks the cache; the profile read shows each asset's cache state.
+A Spark-local asset never satisfies a choice. A load whose choice is not fully
+cached starts that revision's preparation itself
+(`PreparationStarter`): the review lists the model download and the image
+build, progress names an unfinished preparation as the typed reason the load
+waits on, and an exhausted preparation fails the load with that reason. Load must not choose another revision or recover the authority
+from a Spark copy.
 
-After the cache gate succeeds, the Controller distributes the exact digest- and
+Once the load's preparation has finished, the Controller distributes the exact digest- and
 size-bound assets to all selected Sparks in parallel. Each target verifies its
 destination and image identity; a verified local copy is skipped. The
 Controller then stops and replaces conflicting workloads and reports durable

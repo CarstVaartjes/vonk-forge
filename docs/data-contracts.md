@@ -294,7 +294,7 @@ module defines its own.
 | `control/src/vonk_control/inventory/repository.py` | controller-contract | 2 | Append-only authenticated GPU node inventory evidence. |
 | `control/src/vonk_control/telemetry/samples.py` | controller-contract | 1 | Bounded, ordered persistence for authenticated node telemetry. |
 
-`stored/json_values.py` and `stored/columns.py` hold no wire models (`stored/rows.py` loads both for row reads and the write guard): they bind every JSON column of `models.py` to its typed contract (36 of 36), and `tests/test_json_column_contracts.py` fails on an untyped level. The only open values are the declared `ExternalPassthrough` annotations (engine argument values, generic job queue documents), each with a reason.
+`stored/json_values.py` and `stored/columns.py` hold no wire models (`stored/rows.py` loads both for row reads and the write guard): they bind every JSON column of `models/` to its typed contract (36 of 36), and `control/tests/test_json_column_contracts.py` fails on an untyped level. The only open values are the declared `ExternalPassthrough` annotations (engine argument values, generic job queue documents), each with a reason.
 
 ## Counts
 
