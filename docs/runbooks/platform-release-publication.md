@@ -25,7 +25,7 @@ promotion never touches them once `artifacts/stable/current.manifest` exists.
 
 They then transfer the refreshed three-entry directory and redeploy the existing
 Compose project through approved host access. Prefer the configured headless CLI
-and follow the [NAS redeployment procedure](operator-cli-access.md#nas-compose-redeployment);
+and follow the [NAS redeployment procedure](../maintainers/operator-cli-access.md#nas-compose-redeployment);
 the NAS Docker UI is not a required authentication or deployment step. The signed
 installer remains the supported NAS upgrade entry point.
 

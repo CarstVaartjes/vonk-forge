@@ -115,10 +115,10 @@ default route.
 
 | Node | Function label | Interface | Fabric IPv4 | HCA | RoCEv2 GID | MTU | Physical-link state |
 | --- | --- | --- | --- | --- | ---: | ---: | ---: |
-| GPU node 1/head | 100 | `enp1s0f1np1` | `192.168.100.10/24` | `rocep1s0f1` | 3 | 1500 | 200000 Mb/s |
-| GPU node 1/head | 101 | `enP2p1s0f1np1` | `192.168.101.10/24` | `roceP2p1s0f1` | 3 | 1500 | 200000 Mb/s |
-| GPU node 2/worker | 100 | `enp1s0f1np1` | `192.168.100.11/24` | `rocep1s0f1` | 3 | 1500 | 200000 Mb/s |
-| GPU node 2/worker | 101 | `enP2p1s0f1np1` | `192.168.101.11/24` | `roceP2p1s0f1` | 3 | 1500 | 200000 Mb/s |
+| GPU node 1/head | 100 | `enp1s0f1np1` | `<head-ip-100>/24` | `rocep1s0f1` | 3 | 1500 | 200000 Mb/s |
+| GPU node 1/head | 101 | `enP2p1s0f1np1` | `<head-ip-101>/24` | `roceP2p1s0f1` | 3 | 1500 | 200000 Mb/s |
+| GPU node 2/worker | 100 | `enp1s0f1np1` | `<worker-ip-100>/24` | `rocep1s0f1` | 3 | 1500 | 200000 Mb/s |
+| GPU node 2/worker | 101 | `enP2p1s0f1np1` | `<worker-ip-101>/24` | `roceP2p1s0f1` | 3 | 1500 | 200000 Mb/s |
 
 Each recorded GID is IPv4-mapped, type `RoCE v2`, and has `gid_attrs/ndevs`
 bound to the interface in the table. At `2026-08-01T22:34:27Z`, normal and
@@ -136,12 +136,12 @@ export GLOO_SOCKET_IFNAME='enp1s0f1np1,enP2p1s0f1np1'
 ```
 
 The head-only fabric key fingerprint is
-`SHA256:xAsqCZnOIq34EVQR2O5+z+qaLlXFIdT7Qp9wreg4rfg`. The worker entry uses
-`restrict,from="192.168.100.10,192.168.101.10"`; the private key is not on the
-worker or Mac. `vonk-node-2-fabric` binds `192.168.100.10`, disables password,
+`SHA256:<head-fabric-key-fingerprint>`. The worker entry uses
+`restrict,from="<head-ip-100>,<head-ip-101>"`; the private key is not on the
+worker or the operator workstation. `vonk-node-2-fabric` binds `<head-ip-100>`, disables password,
 keyboard-interactive, and agent forwarding, uses strict host checking, and
-returned `node-2297`. The verified worker host Ed25519 fingerprint is
-`SHA256:Q/0cf26vxC6Z+xH6pfB5uoGNXfIEum6KOFVhnl4nngg`.
+returned the worker hostname. The verified worker host Ed25519 fingerprint is
+`SHA256:<worker-host-key-fingerprint>`.
 
 For an existing site, capture the following read-only output from both nodes
 and retain the NVIDIA Sync validation report when Sync owns the cluster. Do not

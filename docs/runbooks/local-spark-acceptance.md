@@ -70,7 +70,7 @@ keeps: the trigger, MemAvailable and full avg10, `pressure_readings` (MemFree,
 swap, full avg60, swap and refault rates), `sustained_ms`, `recent_samples`
 (the last six samples, one per second) and `observed_at`. The thresholds live in
 `host_memory_guard_policy.rs`, marked calibratable; the evidence is the
-2026-10-07 spark-3542 freeze, the 2026-10-08 GB10 OOM research and the
+2026-10-07 freeze of a GB10 Spark, the 2026-10-08 GB10 OOM research and the
 systemd-oomd, oomd and earlyoom defaults.
 
 The helper verifies the exact agent-managed container identity, SIGKILLs its

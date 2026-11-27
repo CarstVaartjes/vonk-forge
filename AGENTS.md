@@ -8,7 +8,7 @@ qualification as separate evidence boundaries.
 ## Operator access
 
 Prefer authenticated CLIs and HTTP APIs for operational work. Follow the
-[operator CLI runbook](docs/runbooks/operator-cli-access.md) and, when present,
+[operator CLI runbook](docs/maintainers/operator-cli-access.md) and, when present,
 the execution host's `~/.config/cli-access/README.md` for configured access.
 Use installed command help; do not open a browser or desktop app for an
 operation the configured CLI supports. Documentation research is separate.
@@ -400,7 +400,7 @@ For a mounted controller project, consume the signed NAS installer from the
 directory containing the existing bundle, preserve `.env`, `secrets/`, and
 named volumes, then redeploy through Docker Compose over approved host access.
 Prefer the configured headless CLI to the NAS browser interface; follow the
-[NAS redeployment procedure](docs/runbooks/operator-cli-access.md#nas-compose-redeployment).
+[NAS redeployment procedure](docs/maintainers/operator-cli-access.md#nas-compose-redeployment).
 Inspect the published manifest first: it must be schema 2 and bind the intended
 current source and artifacts. Do not delete PostgreSQL volumes or run `docker compose down -v` for
 a normal upgrade. An explicitly authorized NAS Compose redeploy may use SSH as
