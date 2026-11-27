@@ -163,10 +163,18 @@ def mint_leaf(
     )
 
 
+def staged_pair(content: bytes) -> LeafPair | Disqualified:
+    """The staged pair, or why the staged file cannot be served."""
+    try:
+        return LeafPair.from_served_file(content)
+    except ValueError:
+        return Disqualified.DAMAGED
+
+
 def served_leaf(
     *,
     installer: LeafPair,
-    staged: LeafPair | None,
+    staged: LeafPair | Disqualified | None,
     intermediate_certificate: bytes,
     intermediate_key: Callable[[], ed25519.Ed25519PrivateKey],
     now: datetime,
@@ -179,6 +187,9 @@ def served_leaf(
     intermediate = x509.load_pem_x509_certificate(intermediate_certificate)
     names = installer_names(installer.certificate)
     newest: tuple[LeafPair, x509.Certificate] | None = None
+    if isinstance(staged, Disqualified):
+        _LOGGER.info("the staged controller leaf is not served: %s", staged.value)
+        staged = None
     # Staged first: on a tie (the staged pair is the installer's copy) it stays.
     for pair in (candidate for candidate in (staged, installer) if candidate):
         leaf = _qualified(pair, intermediate, names, now)

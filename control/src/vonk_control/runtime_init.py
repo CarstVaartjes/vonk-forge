@@ -23,7 +23,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control.categorized_errors import UnsettledOutcome
-from vonk_control.pki.controller_leaf import LeafPair, served_leaf
+from vonk_control.pki.controller_leaf import LeafPair, served_leaf, staged_pair
 from vonk_control.runtime.asset_contract import RuntimeAssetInventory
 
 _LOGGER = logging.getLogger(__name__)
@@ -711,9 +711,7 @@ def stage_controller_tls(
     try:
         staged = None
         if (destination / CONTROLLER_TLS_FILE).exists():
-            staged = LeafPair.from_served_file(
-                read_runtime_secret(destination / CONTROLLER_TLS_FILE)
-            )
+            staged = staged_pair(read_runtime_secret(destination / CONTROLLER_TLS_FILE))
         chosen = served_leaf(
             installer=LeafPair(
                 read_runtime_secret(installer_certificate),

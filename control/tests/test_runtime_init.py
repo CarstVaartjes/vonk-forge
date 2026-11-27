@@ -780,6 +780,22 @@ def test_a_valid_staged_leaf_is_served_again_unchanged(
     assert _served(volume)[1] == first
 
 
+def test_a_damaged_staged_file_is_replaced(
+    tls: tuple[Path, Path],
+) -> None:
+    """Catches a corrupt staged file that Caddy keeps loading and never heals."""
+    secrets, volume = tls
+    _pki(secrets)(_NAMES, _NOW - timedelta(days=340))
+    stage_controller_tls(secrets, volume)
+    served = volume / "controller-server.pem"
+    served.chmod(0o600)
+    served.write_bytes(b"not a certificate chain")
+
+    stage_controller_tls(secrets, volume)
+
+    LeafPair.from_served_file(served.read_bytes())
+
+
 def test_an_installer_name_change_wins_over_a_newer_staged_leaf(
     tls: tuple[Path, Path],
 ) -> None:
