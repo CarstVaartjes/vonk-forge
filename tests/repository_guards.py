@@ -65,6 +65,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/scripts/test_check_agent_protocol_bump.py",
+        "The agent protocol guard accepts a protocol change only with a minor or major workspace bump in the same patch.",
+    ),
+    (
         "tests/scripts/test_stable_preflight.py",
         "The stable preflight reports every kind of gap in the release settings once, by subject, and nothing for a complete shape.",
     ),

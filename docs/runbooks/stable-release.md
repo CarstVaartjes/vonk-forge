@@ -18,13 +18,27 @@ the tagged commit.
 - Right after a tag, bump the patch at once, so a fix-forward `vX.Y.(Z+1)` stays
   possible.
 - A breaking response shape or a deprecation bumps the minor in the same PR.
+- `AGENT_PROTOCOL_VERSION` (`vonk_agent_protocol/claims.py` and the Rust
+  agent) changes only together with a minor or major bump of the workspace
+  version in the same change; the CI `lint` job runs
+  `scripts/dev/check-agent-protocol-bump` on the PR diff. The Controller accepts
+  only its own protocol, so the previous agents get no claims and no relay
+  upgrade after a bump: each Spark needs its `/spark` installer rerun. The
+  release notes say so.
 - Development builds are `X.Y.Z~dev.<seconds>+g<sha>` and sort below `X.Y.Z`:
   `0.1.1 < 1.0.0~dev.N < 1.0.0`.
 
 ## Support statement
 
 - From 1.0.0 the stable channel answers the previous stable `vonkctl` and agent
-  for one minor release (N-1).
+  for one minor release (N-1); for the agent, while `AGENT_PROTOCOL_VERSION` is
+  unchanged. What CI proves of this: the release acceptance's upgrade carry
+  installs the previously promoted release of the same channel, keeps a
+  workload serving across the Controller redeploy, then upgrades the agent
+  through the installer. It does not prove sustained N-1 operation (new claims
+  or loads on the old agent), the no-sudo relay upgrade (`vonkctl fleet
+  upgrade`) from N-1, or real Spark hardware (the lane uses synthetic arm
+  runners). The first stable carry is v1.0.0 from v0.1.1.
 - A deprecated API field or CLI flag keeps working for one minor and is announced
   in the release notes.
 - Database tables a release no longer declares are kept for one minor.
