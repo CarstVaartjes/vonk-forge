@@ -41,7 +41,6 @@ def schema_application(*, browser_auth: bool = True) -> FastAPI:
     key = b"schema-test-signing-key-32-bytes!"
     service = BrowserAuthService(
         sessionmaker(),
-        token_signing_key=key,
         clock=lambda: datetime(2026, 9, 7, tzinfo=UTC),
     )
     return create_app(

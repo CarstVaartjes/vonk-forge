@@ -24,17 +24,23 @@ type ExternalSchemaDocument = Annotated[
 ]
 
 
-def admin_openapi_schema(app: FastAPI) -> ExternalSchemaDocument:
-    """Return the deterministic authenticated admin surface without agent APIs."""
-
-    source = deepcopy(app.openapi())
-    paths: ExternalSchemaDocument = {}
-    browser_auth_paths = {
+#: The browser-cookie routes: a bearer client (vonkctl) never calls them as
+#: operations. The CLI-token routes under /api/auth/cli-tokens take a bearer.
+BROWSER_SESSION_PATHS = frozenset(
+    {
         "/api/auth/login",
         "/api/auth/logout",
         "/api/auth/session",
         "/api/auth/cli-token",
     }
+)
+
+
+def admin_openapi_schema(app: FastAPI) -> ExternalSchemaDocument:
+    """Return the deterministic authenticated admin surface without agent APIs."""
+
+    source = deepcopy(app.openapi())
+    paths: ExternalSchemaDocument = {}
     for path, path_item in source.get("paths", {}).items():
         if path in {"/api/healthz", "/api/readyz"}:
             continue
@@ -52,7 +58,7 @@ def admin_openapi_schema(app: FastAPI) -> ExternalSchemaDocument:
                 ) from error
             if path == "/api/auth/login":
                 operation["security"] = []
-            elif path in browser_auth_paths:
+            elif path in BROWSER_SESSION_PATHS:
                 operation["security"] = [{"BrowserSession": []}]
             else:
                 operation["security"] = [{"BearerAuth": []}, {"BrowserSession": []}]

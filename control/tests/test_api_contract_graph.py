@@ -49,7 +49,6 @@ def _application():
         tokens=TokenCodec(key),
         browser_auth=BrowserAuthService(
             sessionmaker(),
-            token_signing_key=key,
             clock=lambda: datetime(2026, 9, 7, tzinfo=UTC),
         ),
     )

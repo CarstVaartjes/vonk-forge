@@ -757,7 +757,7 @@ from vonk_control.security.browser_auth import BrowserAuthService
 from vonk_control.settings import Settings
 identity = packaged_runtime_identity()
 settings = Settings.from_env_and_secrets()
-service = BrowserAuthService(session_factory(build_engine(settings.database_url)), token_signing_key=settings.token_signing_key, clock=lambda: datetime.now(UTC))
+service = BrowserAuthService(session_factory(build_engine(settings.database_url)), clock=lambda: datetime.now(UTC))
 password = Path("/run/vonk-normalized-secrets/admin-password").read_text(encoding="utf-8").removesuffix("\n")
 token = service.issue_cli_token(service.login("admin", password).identity).token
 request = urllib.request.Request("http://127.0.0.1:8000/api/cli/contract", headers={"Authorization": "Bearer " + token})

@@ -491,9 +491,7 @@ def test_lost_login_response_requires_fresh_authentication(tmp_path, postgres_en
             jobs=Jobs(),
             tokens=TokenCodec(key),
             now=lambda: int(AUTH_NOW.timestamp()),
-            browser_auth=BrowserAuthService(
-                sessions, token_signing_key=key, clock=lambda: AUTH_NOW
-            ),
+            browser_auth=BrowserAuthService(sessions, clock=lambda: AUTH_NOW),
         )
 
     path = "/api/auth/login"

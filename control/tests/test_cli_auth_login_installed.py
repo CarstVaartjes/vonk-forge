@@ -67,7 +67,7 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
     def now():
         return datetime.now(UTC)
 
-    service = BrowserAuthService(sessions, token_signing_key=_KEY, clock=now)
+    service = BrowserAuthService(sessions, clock=now)
     api = TestClient(
         create_app(
             jobs=JobService(sessions, clock=now),
@@ -156,7 +156,7 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
     [entry] = json.loads(listed.stdout)["tokens"]
     assert entry["presented"] is True
     assert entry["revoked"] is False
-    assert json.loads(logout.stdout) == {"token_revoked": True}
+    assert json.loads(logout.stdout) == {"token_revocation": "revoked"}
     assert not (config / "token").exists()
     assert reused.returncode != 0
     for output in (login, connected, status):

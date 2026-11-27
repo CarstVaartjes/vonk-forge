@@ -34,6 +34,7 @@ _SESSION_LIFETIME = timedelta(hours=12)
 CLI_TOKEN_LIFETIME = timedelta(days=30)
 _OPAQUE_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 _EXPIRED_CLEANUP_LIMIT = 100
+_CLI_TOKEN_LIST_LIMIT = 100
 _LOGIN_WINDOW_SECONDS = 300.0
 _MAX_SUBJECT_FAILURES = 5
 _MAX_GLOBAL_FAILURES = 20
@@ -79,7 +80,9 @@ class IssuedCliToken:
 class CliTokenRecord:
     session_id: str
     expires_at: datetime
-    revoked_at: datetime | None
+    revoked: bool
+    #: This row authenticated the listing request.
+    presented: bool
 
 
 @dataclass(frozen=True)
@@ -229,19 +232,17 @@ class BrowserAuthService:
         self,
         sessions: sessionmaker[Session],
         *,
-        token_signing_key: object,
         clock: Callable[[], object],
         token_source: Callable[[], object] | None = None,
         rate_limiter: LoginRateLimiter | None = None,
     ) -> None:
-        if not isinstance(token_signing_key, bytes) or not token_signing_key:
-            raise ValueError("token signing key is invalid")
         self._sessions = sessions
-        self._token_signing_key = token_signing_key
         self._clock = clock
         self._token_source = token_source or _new_token
+        # The limiter's key only keeps its in-memory subject identifiers
+        # opaque; a process-local random key does that.
         self._rate_limiter = rate_limiter or LoginRateLimiter(
-            token_signing_key=token_signing_key
+            token_signing_key=secrets.token_bytes(32)
         )
 
     def login(self, subject: str, password: str) -> IssuedBrowserSession:
@@ -325,8 +326,7 @@ class BrowserAuthService:
             row, _ = self._active_session(
                 db, LoginSession.digest == digest, now, SessionKind.BROWSER
             )
-            row.revoked_at = now
-            require_durable_commit(db)
+            revoke_sessions(db, now, LoginSession.id == row.id)
 
     def issue_cli_token(self, identity: BrowserIdentity) -> IssuedCliToken:
         """Store a new 30-day CLI token for the browser session's administrator."""
@@ -350,9 +350,19 @@ class BrowserAuthService:
             require_durable_commit(db)
             return IssuedCliToken(row.id, expires_at, token)
 
-    def cli_tokens(self) -> list[CliTokenRecord]:
-        """The administrator's CLI tokens that have not expired yet."""
+    def cli_tokens(self, presented_token: str | None) -> list[CliTokenRecord]:
+        """The newest unexpired CLI tokens of the administrator, at most 100.
+
+        ``presented_token`` is the bearer of the listing request: its row is
+        marked by digest, without resolving the token a second time.
+        """
         now = self._now()
+        presented = (
+            _digest(presented_token)
+            if presented_token is not None
+            and _OPAQUE_TOKEN.fullmatch(presented_token) is not None
+            else None
+        )
         with self._sessions.begin() as db:
             rows = db.scalars(
                 select(LoginSession)
@@ -362,13 +372,15 @@ class BrowserAuthService:
                     LoginSession.kind == SessionKind.CLI,
                     LoginSession.expires_at > now,
                 )
-                .order_by(LoginSession.expires_at, LoginSession.id)
+                .order_by(LoginSession.expires_at.desc(), LoginSession.id)
+                .limit(_CLI_TOKEN_LIST_LIMIT)
             ).all()
             return [
                 CliTokenRecord(
                     row.id,
                     _database_utc(row.expires_at),
-                    None if row.revoked_at is None else _database_utc(row.revoked_at),
+                    row.revoked_at is not None,
+                    row.digest == presented,
                 )
                 for row in rows
             ]
@@ -385,16 +397,14 @@ class BrowserAuthService:
             )
             if row is None:
                 return False
-            if row.revoked_at is None:
-                row.revoked_at = now
-            require_durable_commit(db)
+            revoke_sessions(db, now, LoginSession.id == row.id)
             return True
 
     def revoke_all(self) -> None:
         """Revoke every browser session and CLI token of the administrator."""
         now = self._now()
         with self._sessions.begin() as db:
-            revoke_all_sessions(db, now)
+            revoke_sessions(db, now)
 
     def _active_session(
         self,
@@ -456,11 +466,15 @@ class BrowserAuthService:
         return now.astimezone(UTC)
 
 
-def revoke_all_sessions(db: Session, now: datetime) -> None:
-    """Revoke every live browser session and CLI token in the caller's transaction."""
+def revoke_sessions(db: Session, now: datetime, *selected: ColumnElement[bool]) -> None:
+    """The one session revocation: stamp revoked_at on the selected live rows.
+
+    No condition selects every browser session and CLI token. Rows are never
+    deleted here, so a revocation stays visible until the row expires.
+    """
     db.execute(
         update(LoginSession)
-        .where(LoginSession.revoked_at.is_(None))
+        .where(LoginSession.revoked_at.is_(None), *selected)
         .values(revoked_at=now)
     )
     require_durable_commit(db)

@@ -78,7 +78,6 @@ def _client(*, maximum_subject_failures: int = 5) -> tuple[TestClient, str]:
     signing_key = b"test-token-signing-key-for-auth-api"
     service = BrowserAuthService(
         sessions,
-        token_signing_key=signing_key,
         clock=lambda: NOW,
         token_source=lambda: next(first, None) or secrets.token_urlsafe(32),
         rate_limiter=LoginRateLimiter(

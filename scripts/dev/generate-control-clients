@@ -93,6 +93,7 @@ from vonk_control.model_cache.fleet_removal_contract import (  # noqa: E402 -- t
     FleetRemovalReason,
 )
 from vonk_control.operation_api.openapi import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
+    BROWSER_SESSION_PATHS,
     ExternalSchemaDocument,
     admin_openapi_schema,
 )
@@ -123,7 +124,6 @@ def _schema(*, include_browser_auth: bool) -> dict[str, object]:
     signing_key = b"schema-only-signing-key-32-bytes!"
     service = BrowserAuthService(
         sessionmaker(),
-        token_signing_key=signing_key,
         clock=lambda: datetime.now(UTC),
     )
     app = create_app(
@@ -145,10 +145,15 @@ def cli_schema(app: FastAPI | None = None) -> ExternalSchemaDocument:
     """
 
     schema = (
-        _schema(include_browser_auth=False)
-        if app is None
-        else admin_openapi_schema(app)
+        _schema(include_browser_auth=True) if app is None else admin_openapi_schema(app)
     )
+    # vonkctl calls the CLI-token routes with its bearer, as operations; the
+    # browser-cookie routes it reads by hand during login only.
+    paths = schema["paths"]
+    if not isinstance(paths, dict):
+        raise TypeError("admin schema paths are not an object")
+    for path in BROWSER_SESSION_PATHS:
+        paths.pop(path, None)
     open_shown_words(schema)
     return schema
 

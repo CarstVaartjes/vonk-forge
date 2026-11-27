@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import io
+import json
 import stat
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from email.message import Message
 from pathlib import Path
+from typing import Self
 
 import pytest
 
@@ -22,7 +29,10 @@ from cluster_profiles.control_client.connection import (
     resolve_credential,
     write_private,
 )
-from cluster_profiles.control_client.errors import ControlCredentialScope
+from cluster_profiles.control_client.errors import (
+    ControlCredentialScope,
+    ControlUnauthorized,
+)
 
 _NOW = datetime(2026, 11, 21, 12, 0, tzinfo=UTC)
 
@@ -146,11 +156,69 @@ def test_a_bad_stdin_password_fails_without_echoing_its_bytes(
     assert "\xff" not in str(failure.value)
 
 
-_LISTED = (
-    b'{"tokens":[{"id":"a","expires_at":"2026-12-21T12:00:00Z","revoked":false,'
-    b'"presented":false},{"id":"b","expires_at":"2026-12-21T12:00:00Z",'
-    b'"revoked":false,"presented":true}]}'
-)
+_THIS_LOGIN = "22222222-2222-4222-8222-222222222222"
+
+
+class _Answer:
+    def __init__(self, status: int, payload: object | None = None) -> None:
+        self.status = status
+        self.headers = Message()
+        self.headers["Content-Type"] = "application/json"
+        self._body = b"" if payload is None else json.dumps(payload).encode()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self, maximum: int) -> bytes:
+        return self._body[:maximum]
+
+
+def _controller(
+    monkeypatch: pytest.MonkeyPatch, answer: Callable[[str, str], _Answer]
+) -> list[tuple[str, str]]:
+    """Fake the Controller at the HTTPS boundary every vonkctl request uses."""
+    calls: list[tuple[str, str]] = []
+
+    def opener(request: urllib.request.Request, *, timeout: float) -> _Answer:
+        del timeout
+        method = request.get_method()
+        path = urllib.parse.urlsplit(request.full_url).path
+        calls.append((method, path))
+        return answer(method, path)
+
+    monkeypatch.setattr(client_module, "open_https", opener)
+    return calls
+
+
+def _listing(_method: str, _path: str) -> _Answer:
+    if _method == "POST":
+        return _Answer(204)
+    return _Answer(
+        200,
+        {
+            "tokens": [
+                {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "expires_at": "2026-12-21T12:00:00Z",
+                    "revoked": False,
+                    "presented": False,
+                },
+                {
+                    "id": _THIS_LOGIN,
+                    "expires_at": "2026-12-21T12:00:00Z",
+                    "revoked": False,
+                    "presented": True,
+                },
+            ]
+        },
+    )
+
+
+def _denied(_method: str, path: str) -> _Answer:
+    raise urllib.error.HTTPError(path, 401, "denied", Message(), io.BytesIO(b"{}"))
 
 
 def test_logout_revokes_only_this_logins_token_then_deletes_the_files(
@@ -160,46 +228,51 @@ def test_logout_revokes_only_this_logins_token_then_deletes_the_files(
     # file valid for 30 days; one that revokes the wrong row logs out another
     # machine.
     login(_NOW + timedelta(days=30))
-    calls: list[tuple[str, str]] = []
-
-    def controller(_credential, method: str, path: str) -> tuple[int, bytes]:
-        calls.append((method, path))
-        return (200, _LISTED) if method == "GET" else (204, b"")
-
-    monkeypatch.setattr(cli_auth, "_bearer_request", controller)
+    calls = _controller(monkeypatch, _listing)
 
     result = cli_auth.run_auth("logout", url=None, password_stdin=False)
 
-    assert result.document() == {"token_revoked": True}
-    assert calls[-1] == ("POST", "/api/auth/cli-tokens/b/revoke")
+    assert result.document() == {"token_revocation": "revoked"}
+    assert calls == [
+        ("GET", "/api/auth/cli-tokens"),
+        ("POST", f"/api/auth/cli-tokens/{_THIS_LOGIN}/revoke"),
+    ]
     assert not login_token_path().exists()
     assert not connection_path().exists()
 
 
-def test_logout_without_a_controller_still_removes_the_local_login(
-    login, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [(_denied, "not-accepted"), (None, "unconfirmed")],
+)
+def test_logout_without_a_revocation_still_removes_the_local_login(
+    login,
+    monkeypatch: pytest.MonkeyPatch,
+    answer: Callable[[str, str], _Answer] | None,
+    expected: str,
 ) -> None:
+    # Break caught: a failed revocation reported like a refused token, or a
+    # logout that keeps the files when revocation fails.
     login(_NOW + timedelta(days=30))
 
-    def unreachable(_credential, _method: str, _path: str) -> tuple[int, bytes]:
-        raise OSError("no route to host")
+    def revocation_fails(method: str, path: str) -> _Answer:
+        if method == "GET":
+            return _listing(method, path)
+        raise urllib.error.HTTPError(path, 500, "failed", Message(), io.BytesIO(b"{}"))
 
-    monkeypatch.setattr(cli_auth, "_bearer_request", unreachable)
+    _controller(monkeypatch, answer or revocation_fails)
 
     result = cli_auth.run_auth("logout", url=None, password_stdin=False)
 
-    assert result.document() == {"token_revoked": False}
+    assert result.document() == {"token_revocation": expected}
     assert not login_token_path().exists()
 
 
-def test_revoke_takes_one_id_or_everything_not_both(login) -> None:
+def test_a_refused_token_listing_is_the_standard_unauthorized_error(
+    login, monkeypatch: pytest.MonkeyPatch
+) -> None:
     login(_NOW + timedelta(days=30))
+    _controller(monkeypatch, _denied)
 
-    with pytest.raises(cli_auth.LoginFailed):
-        cli_auth.run_auth(
-            "tokens",
-            url=None,
-            password_stdin=False,
-            token_id="b",
-            revoke_all=True,
-        )
+    with pytest.raises(ControlUnauthorized):
+        cli_auth.run_auth("tokens", url=None, password_stdin=False)

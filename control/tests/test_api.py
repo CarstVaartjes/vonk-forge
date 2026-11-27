@@ -123,7 +123,6 @@ def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
     tokens = iter((_opaque(1), _opaque(2)))
     service = BrowserAuthService(
         sessions,
-        token_signing_key=b"k" * 32,
         clock=clock,
         token_source=lambda: next(tokens),
     )

@@ -1154,7 +1154,6 @@ def _browser_client() -> tuple[TestClient, str, str, ApiStream]:
         )
     browser_auth = BrowserAuthService(
         sessions,
-        token_signing_key=b"k" * 32,
         clock=lambda: NOW,
         token_source=iter((_opaque(1), _opaque(2))).__next__,
     )

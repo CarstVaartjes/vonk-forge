@@ -301,9 +301,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     browser_auth = capabilities.guard(
         ControllerCapability.BROWSER_AUTH,
         BrowserAuthService,
-        lambda: BrowserAuthService(
-            sessions, token_signing_key=settings.token_signing_key, clock=clock
-        ),
+        lambda: BrowserAuthService(sessions, clock=clock),
     )
     token_codec = capabilities.guard(
         ControllerCapability.TOKEN_AUTH,

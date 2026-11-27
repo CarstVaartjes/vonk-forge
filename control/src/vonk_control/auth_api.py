@@ -276,24 +276,23 @@ def install_auth_routes(
     )
     def cli_tokens(request: Request, actor: Actor = authenticated) -> CliTokenList:
         require_administrator(actor)
-        presented: str | None = None
+        # The actor dependency already resolved this bearer; the listing only
+        # marks its row by digest.
         authorization = request.headers.get("authorization", "")
-        if authorization.startswith("Bearer "):
-            try:
-                presented = service.resolve_bearer(
-                    authorization.removeprefix("Bearer ")
-                ).session_id
-            except BrowserAuthenticationError:
-                presented = None
+        presented = (
+            authorization.removeprefix("Bearer ")
+            if authorization.startswith("Bearer ")
+            else None
+        )
         return CliTokenList(
             tokens=[
                 CliTokenSummary(
                     id=record.session_id,
                     expires_at=record.expires_at,
-                    revoked=record.revoked_at is not None,
-                    presented=record.session_id == presented,
+                    revoked=record.revoked,
+                    presented=record.presented,
                 )
-                for record in service.cli_tokens()
+                for record in service.cli_tokens(presented)
             ]
         )
 
