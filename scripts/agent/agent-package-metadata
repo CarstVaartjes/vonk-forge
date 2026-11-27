@@ -4,15 +4,15 @@ from __future__ import annotations
 import re
 import sys
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 VERSION_FILES = (
-    (ROOT / "Cargo.toml", ("workspace", "package", "version")),
-    (ROOT / "pyproject.toml", ("project", "version")),
-    (ROOT / "control/pyproject.toml", ("project", "version")),
-    (ROOT / "nas_setup/pyproject.toml", ("project", "version")),
+    ("Cargo.toml", ("workspace", "package", "version")),
+    ("pyproject.toml", ("project", "version")),
+    ("control/pyproject.toml", ("project", "version")),
+    ("nas_setup/pyproject.toml", ("project", "version")),
 )
 SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 SEMVER_RE = re.compile(rf"^{SEMVER}$")
@@ -20,11 +20,17 @@ TAG_RE = re.compile(rf"^v({SEMVER})$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
-def workspace_version() -> str:
+def read_local(relative: str) -> str:
+    return (ROOT / relative).read_text()
+
+
+def workspace_version(read: Callable[[str], str] = read_local) -> str:
+    """The one version of the four version files; ``read`` returns a file's
+    text by repository-relative path (the stable preflight reads them at a sha)."""
     versions: list[str] = []
     for path, keys in VERSION_FILES:
         try:
-            value: object = tomllib.loads(path.read_text())
+            value: object = tomllib.loads(read(path))
             for key in keys:
                 if not isinstance(value, dict):
                     raise TypeError
@@ -35,7 +41,11 @@ def workspace_version() -> str:
             raise ValueError("workspace version is invalid")
         versions.append(value)
     if len(set(versions)) != 1:
-        raise ValueError("workspace version is invalid")
+        found = ", ".join(
+            f"{path} {version}"
+            for (path, _), version in zip(VERSION_FILES, versions, strict=True)
+        )
+        raise ValueError(f"workspace version is invalid: {found}")
     return versions[0]
 
 

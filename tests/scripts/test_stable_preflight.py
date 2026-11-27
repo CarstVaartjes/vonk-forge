@@ -195,3 +195,23 @@ def test_the_image_digest_is_read_for_linux_whatever_the_host(
     assert inspect[:2] == ["skopeo", "inspect"]
     assert inspect[inspect.index("--override-os") + 1] == "linux"
     assert inspect[inspect.index("--override-arch") + 1] == "arm64"
+
+
+def test_every_version_file_must_agree_at_the_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _script()
+    files = {
+        "Cargo.toml": '[workspace.package]\nversion = "1.0.0"\n',
+        "pyproject.toml": '[project]\nversion = "1.0.0"\n',
+        "control/pyproject.toml": '[project]\nversion = "1.0.0"\n',
+        "nas_setup/pyproject.toml": '[project]\nversion = "1.0.0"\n',
+    }
+    monkeypatch.setattr(script, "file_text", lambda repo, path, ref: files[path])
+
+    assert script.workspace_version("o/r", "0" * 40) == "1.0.0"
+
+    files["nas_setup/pyproject.toml"] = '[project]\nversion = "1.0.1"\n'
+
+    with pytest.raises(ValueError):
+        script.workspace_version("o/r", "0" * 40)
