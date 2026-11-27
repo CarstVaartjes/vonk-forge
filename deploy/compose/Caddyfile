@@ -203,6 +203,21 @@
 	request_header -X-Vonk-Agent-*
 }
 
+# The Controller web app's own policy: every script, style, font, worker and
+# request is same-origin (the build bundles the fonts and the hash worker as
+# files, and its validators are precompiled, so nothing evaluates code). The
+# favicon is a data: image. Results open as same-origin /api files and
+# downloads use blob: links, which CSP does not govern. Only the Controller's
+# own routes carry it; LiteLLM's routes and the agent sites set their own.
+# Deferred, so Caddy alone owns these two headers.
+(controller_page_policy) {
+	header {
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+		Permissions-Policy "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=()"
+		defer
+	}
+}
+
 (browser_control_proxy) {
 	import browser_proxy_headers
 	reverse_proxy control-api:8000 {
@@ -303,6 +318,7 @@ http://:8087 {
 			reverse_proxy litellm:4000
 		}
 		handle {
+			import controller_page_policy
 			import browser_control_proxy
 		}
 	}
