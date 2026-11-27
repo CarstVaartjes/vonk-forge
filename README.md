@@ -12,10 +12,10 @@ preview changes, and operate one Spark or a fleet.
 [Browse recipes](https://vonkforge.ai/recipes) ·
 [Read the operator docs](docs/README.md)
 
-![Vonk Forge Controller Overview: the model that is serving, its request rate, GPU power, unified memory, the Sparks that carry it, and what needs attention](docs/assets/controller-overview.webp)
+![Vonk Forge Controller Overview: the workload that is serving, GPU power, unified memory, tokens and energy, the Sparks that carry it, and what needs attention](docs/assets/controller-overview.webp)
 
-> The Controller Overview, captured from the browser-test fixture data. It
-> contains no live fleet data.
+> The Controller Overview with example data (Sparks Atlas, Boreal and Cirrus).
+> It contains no live fleet data.
 
 ## What it gives you
 
