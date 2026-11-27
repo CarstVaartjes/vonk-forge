@@ -181,9 +181,11 @@ Managed synchronization only owns recipes whose source is
 review. If a managed recipe disappears remotely, its immutable local history
 and any installation remain intact. It is surfaced as withdrawn only while it
 is installed or running; synchronization never stops or uninstalls it.
-When a newer revision is imported, existing installations and runs remain bound
-to their old immutable revision and are reported as stale until the operator
-reviews an update.
+When a newer revision is imported, existing installations and runs keep their
+old immutable revision (the sync never restarts anything) and are reported as
+stale, with an update notice on the profile, until the next load: a load always
+resolves the newest revision, and one that has not started anything yet moves
+onto it.
 
 Library lists only the current accepted revision of each recipe, selected by
 the Controller's catalog head. Recipe links and counts on Models use that same

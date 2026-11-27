@@ -736,11 +736,11 @@ issued effects. An older executor receipt cannot cancel effects now owned by a
 newer selection: the refusal names the currently selected application to cancel.
 Repeating the entire same profile remains a fresh explicit load.
 
-Profile authoring resolves every choice through the trusted NAS/Controller
-cache. The cache projection selects the exact active recipe revision, model
-variant, model artifact set, and recipe image available for the profile. A
-public catalog result can describe a candidate, but it cannot author a profile
-choice; a Spark-local copy can satisfy execution, but it cannot authorize one.
+Profile authoring resolves every choice to the exact active head revision of
+the Controller's synced catalog, then observes that revision's model variant,
+model artifact set, and recipe image in the trusted NAS/Controller cache. A
+choice need not be cached to be saved; a Spark-local copy can satisfy
+execution, but it cannot authorize a choice.
 The managed NAS cache is trusted under its storage and identity contract, so
 ordinary profile reads and admission do not promise a costly repeated full
 hash of every asset.
