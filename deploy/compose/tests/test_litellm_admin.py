@@ -42,7 +42,12 @@ def _reverse_proxy_dials(value: object) -> list[str]:
 
 def _route_for_path(adapted: dict, *, port: int, path: str) -> dict:
     routes = _routes_with_handlers(_server_on_port(adapted, port)["routes"])
-    return next(route for route in routes if path in _path_patterns(route))
+    # The route that serves the path, not the response-header policy for it.
+    return next(
+        route
+        for route in routes
+        if path in _path_patterns(route) and _reverse_proxy_dials(route)
+    )
 
 
 def _assert_litellm_route_proxies_directly(route: dict) -> None:
@@ -121,7 +126,7 @@ def test_caddy_routes_native_ui_before_spa_and_blocks_dynamic_model_authority() 
     inference = next(
         (index, route)
         for index, route in enumerate(routes)
-        if "/v1/*" in _path_patterns(route)
+        if "/v1/*" in _path_patterns(route) and _upstream(route)
     )
     model_guard = next(
         (index, route)

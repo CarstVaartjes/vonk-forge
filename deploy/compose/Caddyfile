@@ -249,6 +249,37 @@
 	}
 }
 
+# Every LiteLLM upstream gets the same request: no browser Cookie. The
+# Controller's session and CSRF cookies are never LiteLLM's business, and the
+# LiteLLM UI authenticates with its own bearer (Vonk configures no SSO or MCP
+# OAuth, the only LiteLLM routes that read cookies).
+(litellm_upstream) {
+	reverse_proxy litellm:4000 {
+		header_up -Cookie
+	}
+}
+
+# The LiteLLM routes a browser host serves under /litellm/*. LiteLLM's model
+# and config writes stay with the Controller's publisher, and its Prometheus
+# endpoint is scraped only on the internal litellm-metrics network.
+(litellm_browser_routes) {
+	@litellm_repository_authority {
+		method POST PUT PATCH DELETE
+		path /litellm/model /litellm/model/* /litellm/model_group /litellm/model_group/* /litellm/config /litellm/config/*
+	}
+	handle @litellm_repository_authority {
+		respond 403
+	}
+	@litellm_metrics path /litellm/metrics /litellm/metrics/*
+	handle @litellm_metrics {
+		respond 404
+	}
+	handle_path /litellm/* {
+		import browser_proxy_headers
+		import litellm_upstream
+	}
+}
+
 (browser_control_proxy) {
 	import browser_proxy_headers
 	reverse_proxy control-api:8000 {
@@ -300,19 +331,24 @@ http://:8084 {
 http://:8087 {
 	@litellm_key_admin path /key/generate /key/list /key/info /key/update /key/delete
 	handle @litellm_key_admin {
-		reverse_proxy litellm:4000
+		import litellm_upstream
 	}
 	respond 404
 }
 
 # Secure remote browser traffic arrives from Tailscale over the private
 # tailnet-web-edge network. Tailscale terminates HTTPS before this HTTP
-# listener; Lab mode also serves the control hostname on the local-CA HTTPS
-# listener below. Docker does not publish port 8080.
+# listener; Lab mode also serves the control and LiteLLM hostnames on the
+# local-CA HTTPS listener below. Docker does not publish port 8080.
 :8080 {
 	@canonical_browser_host host {$VONK_CONTROL_HOSTNAME}
 	handle @canonical_browser_host {
 		import browser_edge_guards
+		# LiteLLM's admin UI lives on its own origin (below). Any LiteLLM
+		# document served here renders sandboxed: an opaque origin with no
+		# scripts, so it can never read or use the Controller's cookies.
+		@litellm_response path /v1/* /litellm/*
+		header @litellm_response >Content-Security-Policy "sandbox"
 		handle /healthz {
 			respond 200
 		}
@@ -333,37 +369,31 @@ http://:8087 {
 				import litellm_large_body_gate litellm:4000
 				@systemone path /v1/systemone
 				rewrite @systemone /vllm/systemone
-				reverse_proxy litellm:4000
+				import litellm_upstream
 			}
 		}
-		@litellm_repository_authority {
-			method POST PUT PATCH DELETE
-			path /litellm/model /litellm/model/* /litellm/model_group /litellm/model_group/* /litellm/config /litellm/config/*
-		}
-		handle @litellm_repository_authority {
-			respond 403
-		}
-		# LiteLLM's Prometheus endpoint is scraped only on the internal
-		# litellm-metrics network; it is never served to browsers.
-		@litellm_metrics path /litellm/metrics /litellm/metrics/*
-		handle @litellm_metrics {
-			respond 404
-		}
-		handle_path /litellm/* {
-			import browser_proxy_headers
-			reverse_proxy litellm:4000
-		}
+		import litellm_browser_routes
 		handle {
 			import controller_page_policy
 			import browser_control_proxy
 		}
+	}
+	# The LiteLLM admin UI's own origin: its scripts never share the
+	# Controller's origin, so its host-only cookies are out of their reach.
+	@litellm_browser_host host {$VONK_LITELLM_HOSTNAME:litellm.example.invalid}
+	handle @litellm_browser_host {
+		import edge_guards
+		import litellm_browser_routes
+		@ui_root path /
+		redir @ui_root /litellm/ui/
+		respond 404
 	}
 	respond 421
 }
 
 # Lab mode serves the same browser surface directly on the LAN. This certificate
 # is issued by the installer-created local CA; clients must trust that root.
-https://{$VONK_CONTROL_HOSTNAME}:{$VONK_BACKEND_PORT:8443} {
+https://{$VONK_CONTROL_HOSTNAME}:{$VONK_BACKEND_PORT:8443}, https://{$VONK_LITELLM_HOSTNAME:litellm.example.invalid}:{$VONK_BACKEND_PORT:8443} {
 	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
 	reverse_proxy 127.0.0.1:8080
 }
@@ -372,9 +402,9 @@ https://{$VONK_CONTROL_HOSTNAME}:{$VONK_BACKEND_PORT:8443} {
 # LiteLLM's native listener or management routes.
 :8081 {
 	handle /v1/* {
-			@systemone path /v1/systemone
-			rewrite @systemone /vllm/systemone
-		reverse_proxy litellm:4000
+		@systemone path /v1/systemone
+		rewrite @systemone /vllm/systemone
+		import litellm_upstream
 	}
 	respond 404
 }

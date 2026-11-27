@@ -47,9 +47,13 @@ def pki_hostnames(
     ):
         raise _invalid(f"hostname value for {request.hostname_env} is invalid")
     hostname = hostname.lower()
+    # The LiteLLM admin UI's own origin: "-litellm" appended to the first
+    # label (caddy/entrypoint.sh and tailscale/configure.sh derive the same).
+    first, dot, rest = hostname.partition(".")
     return [
         hostname,
         *(f"{prefix}.{hostname}" for prefix in ("enroll", "agents")),
+        f"{first}-litellm{dot}{rest}",
     ]
 
 

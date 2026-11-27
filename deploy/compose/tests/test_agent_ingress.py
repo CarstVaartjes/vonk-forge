@@ -10,11 +10,16 @@ import sys
 import tarfile
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatchcase
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import NameOID
 from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
 
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
@@ -1104,19 +1109,21 @@ def test_caddy_proxy_auth_is_one_canonical_base64url_like_line(tmp_path: Path) -
             "/bin/sh",
             "-c",
             (
-                'printf "%s %s %s %s" "$VONK_AGENT_PROXY_AUTH" '
+                'printf "%s %s %s %s %s" "$VONK_AGENT_PROXY_AUTH" '
                 '"$VONK_CONTROL_HOSTNAME" "$VONK_AGENT_ENROLL_HOSTNAME" '
-                '"$VONK_AGENT_HOSTNAME"'
+                '"$VONK_AGENT_HOSTNAME" "$VONK_LITELLM_HOSTNAME"'
             ),
         ),
     )
     assert result.returncode == 0, result.stderr
-    # One normalized control hostname names every SNI boundary.
+    # One normalized control hostname names every SNI boundary; the LiteLLM
+    # UI origin is a sibling name, so it can also be a Tailscale Service.
     assert result.stdout.split() == [
         token,
         "control.test.example",
         "enroll.control.test.example",
         "agents.control.test.example",
+        "control-litellm.test.example",
     ]
 
     invalid_values = (
@@ -1628,9 +1635,13 @@ def test_only_the_controller_pages_carry_the_controller_page_policy(tmp_path):
     blocks = []
     for name in (
         "edge_headers",
+        "edge_guards",
         "browser_edge_guards",
+        "litellm_large_body_gate",
         "browser_proxy_headers",
         "controller_page_policy",
+        "litellm_upstream",
+        "litellm_browser_routes",
         "browser_control_proxy",
     ):
         match = re.search(
@@ -1909,4 +1920,156 @@ def test_a_large_inference_body_waits_for_a_key_litellm_accepts(tmp_path: Path) 
     finally:
         subprocess.run(
             ["docker", "stop", container], check=True, capture_output=True, timeout=10
+        )
+
+
+def _self_signed_pem(hostnames: tuple[str, ...]) -> tuple[bytes, bytes]:
+    key = ed25519.Ed25519PrivateKey.generate()
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostnames[0])])
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(hours=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName(host) for host in hostnames]),
+            False,
+        )
+        .sign(key, algorithm=None)
+    )
+    return (
+        certificate.public_bytes(serialization.Encoding.PEM),
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ),
+    )
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(30)
+def test_litellm_ui_has_its_own_origin_and_never_sees_controller_cookies(
+    tmp_path: Path,
+) -> None:
+    """The real Caddyfile in front of stub LiteLLM and Controller upstreams.
+
+    Catches: the LiteLLM UI still executing on the Controller's origin (no
+    sandbox), a Cookie header reaching LiteLLM from either host, and a LiteLLM
+    host that does not serve the UI or that falls through to the Controller.
+    """
+    _require_docker_runtime()
+    control, litellm = "control.test.example", "control-litellm.test.example"
+    certificate, key = _self_signed_pem((control, litellm))
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    (secrets_dir / "controller-server-certificate").write_bytes(certificate)
+    (secrets_dir / "controller-server-key").write_bytes(key)
+    (secrets_dir / "agent-client-ca").write_bytes(certificate)
+    caddyfile = tmp_path / "Caddyfile"
+    caddyfile.write_text(
+        (ROOT / "deploy/compose/Caddyfile").read_text(encoding="utf-8")
+        # Stub LiteLLM: echoes the Cookie it received and sets its own CSP.
+        + ":4000 {\n\theader Content-Security-Policy \"default-src 'self'\"\n"
+        '\trespond "cookie=[{http.request.header.Cookie}] uri={http.request.uri}" 200\n}\n'
+        + ':8000 {\n\trespond "controller" 200\n}\n',
+        encoding="utf-8",
+    )
+    for path in (*secrets_dir.iterdir(), caddyfile):
+        path.chmod(0o644)
+    container = f"vonk-litellm-origin-{os.getpid()}"
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            container,
+            "-p",
+            "127.0.0.1::8080",
+            "--add-host",
+            "litellm:127.0.0.1",
+            "--add-host",
+            "control-api:127.0.0.1",
+            "-e",
+            f"VONK_CONTROL_HOSTNAME={control}",
+            "-e",
+            f"VONK_LITELLM_HOSTNAME={litellm}",
+            "-e",
+            "VONK_AGENT_PROXY_AUTH=test-proxy-secret",
+            "-v",
+            f"{caddyfile}:/etc/caddy/Caddyfile:ro",
+            "-v",
+            f"{secrets_dir}:/run/secrets:ro",
+            DEV_CADDY_IMAGE,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        port = int(
+            subprocess.run(
+                ["docker", "port", container, "8080/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            .stdout.splitlines()[0]
+            .rsplit(":", 1)[1]
+        )
+
+        def request(
+            method: str, host: str, path: str
+        ) -> tuple[int, dict[str, str], str]:
+            for _ in range(50):
+                try:
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", port, timeout=5
+                    )
+                    connection.request(
+                        method,
+                        path,
+                        body=b"{}" if method == "POST" else None,
+                        headers={
+                            "Host": host,
+                            "Cookie": "__Host-vonk_session=s; vonk_csrf=c",
+                        },
+                    )
+                    response = connection.getresponse()
+                    body = response.read().decode()
+                    headers = {k.lower(): v for k, v in response.getheaders()}
+                    return response.status, headers, body
+                except (ConnectionError, http.client.RemoteDisconnected):
+                    time.sleep(0.1)
+            raise AssertionError("caddy did not start")
+
+        status, headers, body = request("GET", litellm, "/litellm/ui/")
+        assert (status, body) == (200, "cookie=[] uri=/ui/")
+        # On its own origin the UI keeps LiteLLM's own policy and can run.
+        assert headers["content-security-policy"] == "default-src 'self'"
+        status, headers, _ = request("GET", litellm, "/")
+        assert (status, headers["location"]) == (302, "/litellm/ui/")
+        assert request("GET", litellm, "/api/fleet")[0] == 404
+        assert request("POST", litellm, "/litellm/config/update")[0] == 403
+        assert request("GET", litellm, "/litellm/metrics")[0] == 404
+
+        for method, path, uri in (
+            ("GET", "/litellm/ui/", "/ui/"),
+            ("POST", "/v1/chat/completions", "/v1/chat/completions"),
+        ):
+            status, headers, body = request(method, control, path)
+            assert (status, body) == (200, f"cookie=[] uri={uri}")
+            assert headers["content-security-policy"] == "sandbox"
+        status, headers, body = request("GET", control, "/api/fleet")
+        assert (status, body) == (200, "controller")
+        # The Controller's own routes carry its page policy, never the sandbox.
+        assert headers["content-security-policy"].startswith("default-src 'self'")
+    finally:
+        subprocess.run(
+            ["docker", "rm", "-f", container], capture_output=True, check=False
         )

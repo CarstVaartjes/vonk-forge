@@ -28,7 +28,7 @@ continue.
 
 The Spark management network defaults to the controller host's own /24. To narrow it (for
 example to the Sparks' exact addresses), edit `VONK_MANAGEMENT_CIDRS` in `.env`. Add LAN DNS records for `vonk-forge.internal`, `enroll.vonk-forge.internal`,
-and `agents.vonk-forge.internal`, all pointing to the
+`agents.vonk-forge.internal` and `vonk-forge-litellm.internal`, all pointing to the
 controller host address. On a small lab network, equivalent host-file entries can be used.
 Earlier installs keep their `vonk-forge.local` names; `VONK_CONTROL_HOSTNAME`
 in `.env` holds the name your install uses.
@@ -47,6 +47,12 @@ project is root-owned.
 Import `secrets/step-ca/root-certificate` into the trust store used by your
 browser and Spark clients. Then open `https://vonk-forge.internal:8443` and sign
 in as `admin` using the password in `secrets/admin-password`.
+
+The LiteLLM admin UI (gateway usage and keys) has its own origin,
+`https://vonk-forge-litellm.internal:8443/`, so its scripts never share the
+Controller's cookies. The Controller address still serves `/v1` and the
+`/litellm/*` API to clients; a LiteLLM page opened there renders without
+scripts.
 
 Port 8443 is published on all NAS interfaces; Docker-published ports bypass
 the host's INPUT firewall rules. Keep the NAS on a trusted LAN and do not

@@ -97,7 +97,12 @@ def test_litellm_metrics_are_not_routed_through_caddy() -> None:
         [p for m in r.get("match", []) for p in m.get("path", [])] for r in browser
     ]
     guard = next(i for i, p in enumerate(patterns) if "/litellm/metrics" in p)
-    proxy = next(i for i, p in enumerate(patterns) if "/litellm/*" in p)
+    # The route that proxies /litellm/*, not the response-header policy for it.
+    proxy = next(
+        i
+        for i, p in enumerate(patterns)
+        if "/litellm/*" in p and "reverse_proxy" in json.dumps(browser[i])
+    )
     assert guard < proxy
     # The other listeners only allow-list /v1/* and key routes.
     for port in (8081, 8087):

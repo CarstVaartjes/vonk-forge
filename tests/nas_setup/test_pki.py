@@ -105,6 +105,9 @@ def test_generated_chain_enrolls_with_strict_tls_and_root_only_trust(
     client.verify_flags |= ssl.VERIFY_X509_STRICT
     for hostname in pki_hostnames(request_contract, ENVIRONMENT):
         _tls_handshake(server, client, hostname)
+    # The LiteLLM admin UI's own origin is a sibling name, never a subdomain
+    # (a Tailscale Service name has exactly one label before the tailnet).
+    _tls_handshake(server, client, "control-litellm.example.test")
     with pytest.raises(ssl.SSLCertVerificationError):
         _tls_handshake(server, client, "unrelated.example.test")
 
