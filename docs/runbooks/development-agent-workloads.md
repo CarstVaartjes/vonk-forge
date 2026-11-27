@@ -17,12 +17,9 @@ Compose project. Do not add source checkouts, host paths, alternate ports,
 manual secret files, or helper containers.
 
 For every Spark, choose **Enroll Spark** on the Overview page to create a
-distinct one-use grant, and run its generated command on that Spark. It has
-this shape:
-
-```sh
-curl -fsSL https://install.vonkforge.ai/dev/spark | VONK_CONTROLLER_ADDRESS=<CONTROLLER_LAN_IP> VONK_ENROLLMENT_URL=https://enroll.<control hostname>:8443 VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
-```
+distinct one-use grant, and run its generated `--enroll` command on that Spark
+(shape: [Install or upgrade a Spark](../operations/install-vonk-agent.md); a
+development NAS generates the `/dev/spark` URL).
 
 Enter the one-use pairing token shown with the grant.
 The installer discovers the controller endpoint and CA, verifies the CA against

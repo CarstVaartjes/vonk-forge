@@ -30,15 +30,10 @@ size or repository-owned node list.
 ## Re-enroll an installed Spark
 
 Use **Re-enroll** on the Spark's page (Settings tab) when the controller
-database was restored or
-reset, when an installed Spark's certificate expired after it could not rotate,
+database was restored, when an installed Spark's certificate expired after it could not rotate,
 or when a stale staged generation needs replacement. Run the
 generated command; it uses the NAS installation's own publication channel and
-the same generic enrollment intent used for a new Spark:
-
-```sh
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll
-```
+the same generic `--enroll` command shape as a new Spark (step 2 above).
 
 The re-enrollment flow preserves the locally generated node ID, replaces its
 controller certificate atomically, retires stale local rotation pointers, clears

@@ -36,12 +36,9 @@ After startup, open
 the preflight, and run the runbook's
 [post-install verification](tailscale.md#verification).
 Choose **Enroll Spark** on the Overview page to create a one-use grant, then
-copy its generated command to each Spark. The command includes the reserved NAS LAN address when
-the private service hostnames do not resolve directly:
-
-```sh
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=<CONTROLLER_LAN_IP> VONK_ENROLLMENT_URL=https://enroll.<control hostname>:8443 VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
-```
+run its generated `--enroll` command on that Spark; one grant enrolls one Spark.
+The command includes the reserved NAS LAN address when the private service
+hostnames do not resolve directly; its shape is in [Install or upgrade a Spark](../operations/install-vonk-agent.md).
 
 The installer verifies the controller CA before trusting its bootstrap data and
 manages the Spark's hostname mapping automatically. On each fresh Spark it
@@ -57,6 +54,7 @@ An approved headless host CLI can apply the bundle without a NAS browser session
 After the NAS is running the accepted release, use **Upgrade agents** on the
 Overview page (or `vonkctl fleet upgrade`) for routine Spark package rollouts;
 every eligible Spark upgrades independently over its existing agent connection,
-each waiting only for its own running work, and no SSH is required. Rerun the Spark command for package repair, a fresh
-installation, or an explicit `--enroll` certificate replacement. No separate
+each waiting only for its own running work, and no SSH is required. Rerun the
+channel command without `--enroll` for package repair; run a newly generated
+`--enroll` command for a fresh install or certificate replacement. No separate
 bootstrap, migration, supervisor, or rollback-slot command is required.

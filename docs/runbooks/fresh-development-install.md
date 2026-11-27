@@ -34,12 +34,9 @@ checkout, Docker daemon, sudo, SSH, or NAS mount is needed to prepare it.
 ## Add each Spark
 
 Choose **Enroll Spark** on the Overview page to create a one-use grant, then
-run its generated command on the Spark as its normal administrator account. It
-has this shape:
-
-```sh
-curl -fsSL https://install.vonkforge.ai/dev/spark | VONK_CONTROLLER_ADDRESS=<CONTROLLER_LAN_IP> VONK_ENROLLMENT_URL=https://enroll.<control hostname>:8443 VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
-```
+run its generated `--enroll` command on the Spark as its normal administrator
+account. Its shape is in [Install or upgrade a Spark](../operations/install-vonk-agent.md); a development NAS generates the `/dev/spark`
+URL.
 
 The command verifies the development release before requesting sudo, installs
 the direct Rust agent, exchanges the token for the Spark certificate, starts

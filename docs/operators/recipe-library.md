@@ -32,8 +32,8 @@ is the contract version (`vMAJOR.MINOR.PATCH`), so new or changed models and rec
 need a vonk-forge change: the recipe repository updates the existing release
 for the current contract in place and records when its recipes last changed
 (`updated_at` in `catalog-index.json`). An additive contract change (a new
-optional field) is published as a new minor release (for example `v5.9.0` after `v5.8.2`); a breaking one
-as a new major release (`v6.0.0`) that needs a coordinated vonk-forge release.
+optional field) is published as a new minor release (`vMAJOR.MINOR+1.0`); a breaking one
+as a new major release (`vMAJOR+1.0.0`) that needs a coordinated vonk-forge release.
 
 The Controller reads the signed index only through the contract's one reader,
 `vonk_forge_contracts.catalog_reader.read_catalog`, which verifies each entry's
