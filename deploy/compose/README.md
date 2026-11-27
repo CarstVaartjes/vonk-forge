@@ -221,7 +221,20 @@ time its container starts it stages, before the services that read it start:
 - this release's runtime kit in `runtime-assets`, with files a release no
   longer ships removed;
 - the ownership of the shared volume roots (`/state`, the object stores,
-  `/routes`, `/supervisor`, `secrets/gateway`).
+  `/routes`, `/supervisor`, `secrets/gateway`);
+- the controller TLS leaf that Caddy serves, in `controller-tls` as one
+  file, `controller-server.pem`: the chain and then its key, root-owned `0440`
+  with group 10001 so the API can read the certificate for the expiry metric.
+  One rename publishes the pair, so a crash never leaves a key beside another
+  leaf. It is the newest leaf, from that
+  volume or from the installer's `controller-server-*` secrets, that is issued
+  by the current intermediate and carries exactly the installer leaf's names.
+  The installer stays the authority for the names. When none has more than 60
+  days left, runtime-init mints a new 397-day leaf with the intermediate. Each
+  redeploy therefore renews it, and Caddy restarts with runtime-init. A
+  renewal fault is logged (`controller TLS leaf renewal failed`) and never
+  fails staging: Caddy keeps the leaf it has. Until a leaf is staged, or with
+  a Compose file that predates the volume, Caddy serves the installer's leaf.
 
 Every file is a bounded regular file (at most 64 KiB) published with fsync and
 atomic replacement, so a reader sees the old or the new copy, never a partial

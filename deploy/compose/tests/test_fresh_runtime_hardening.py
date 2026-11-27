@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -100,11 +103,57 @@ def test_caddy_serves_the_site_controller_certificate() -> None:
     }
     assert (
         caddyfile.count(
-            "tls /run/secrets/controller-server-certificate "
-            "/run/secrets/controller-server-key"
+            "tls {$VONK_CONTROLLER_TLS_CERTIFICATE:/run/secrets/controller-server-certificate} "
+            "{$VONK_CONTROLLER_TLS_KEY:/run/secrets/controller-server-key}"
         )
         == 3
     )
+
+
+@pytest.mark.parametrize("renewed", [True, False])
+def test_caddy_serves_the_renewed_leaf_or_falls_back_to_the_installer_leaf(
+    tmp_path: Path, renewed: bool
+) -> None:
+    """Catches a Caddy that cannot start on a Compose file without the volume.
+
+    Pull and redeploy without an installer rerun keeps the previous Compose
+    file: no controller-tls volume. Caddy then serves the installer's leaf.
+    """
+    run = tmp_path / "run"
+    for name in (
+        "secrets/controller-server-certificate",
+        "secrets/controller-server-key",
+        "secrets/agent-client-ca",
+    ):
+        (run / name).parent.mkdir(parents=True, exist_ok=True)
+        (run / name).write_text("installer\n")
+    (run / "secrets/agent-proxy-auth").write_text("a" * 32 + "\n")
+    if renewed:
+        (run / "vonk-controller-tls").mkdir()
+        (run / "vonk-controller-tls/controller-server.pem").write_text("renewed\n")
+    script = tmp_path / "entrypoint.sh"
+    script.write_text(
+        (COMPOSE_ROOT / "caddy/entrypoint.sh")
+        .read_text(encoding="utf-8")
+        .replace("/run/", f"{run}/")
+        .replace("/config/", f"{tmp_path}/config/")
+    )
+
+    served = subprocess.run(
+        [
+            "sh",
+            str(script),
+            "sh",
+            "-c",
+            'cat "$VONK_CONTROLLER_TLS_CERTIFICATE" "$VONK_CONTROLLER_TLS_KEY"',
+        ],
+        env={"PATH": os.environ["PATH"], "VONK_CONTROL_HOSTNAME": "vonk-forge.local"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+    assert served == ("renewed\nrenewed\n" if renewed else "installer\ninstaller\n")
 
 
 def test_control_images_do_not_install_git_or_ssh() -> None:

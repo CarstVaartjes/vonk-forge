@@ -64,6 +64,7 @@ from vonk_control.jobs.queue import JobService
 from vonk_control.library.assessment import LibraryAssessment
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.logging import configure_controller_logging, log_event, redact_text
+from vonk_control.metrics.certificates import CERTIFICATE_FILES
 from vonk_control.metrics.registry import (
     MetricsRegistry,
     OperationalMetricsCollector,
@@ -331,6 +332,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         lambda: telemetry_repository.live_engine_readings(clock())
     )
     metrics.set_compose_bundle(compose_bundle())
+    metrics.set_certificate_files(CERTIFICATE_FILES)
     operational_metrics = OperationalMetricsCollector(
         metrics,
         sessions,

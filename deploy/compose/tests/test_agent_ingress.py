@@ -440,8 +440,14 @@ def test_agent_bootstrap_uses_the_normalized_public_ca() -> None:
         volume["target"] == "/run/vonk-normalized-secrets" and volume["read_only"]
         for volume in api["volumes"]
     )
-    assert "controller-server-key" not in staged
     assert "agent-intermediate-key" not in staged
+    # runtime-init renews the served leaf, but the API reads only its
+    # certificate: the key it stages there is root-only (test_runtime_init).
+    assert {
+        (volume["source"], volume["target"], volume.get("read_only"))
+        for volume in api["volumes"]
+        if volume["source"] == "controller-tls"
+    } == {("controller-tls", "/run/vonk-controller-tls", True)}
 
 
 def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:

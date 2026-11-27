@@ -393,8 +393,10 @@ http://:8087 {
 
 # Lab mode serves the same browser surface directly on the LAN. This certificate
 # is issued by the installer-created local CA; clients must trust that root.
+# The entrypoint names the served leaf (runtime-init renews it); the defaults
+# keep a hot-reloaded Caddyfile valid under an entrypoint that names none.
 https://{$VONK_CONTROL_HOSTNAME}:{$VONK_BACKEND_PORT:8443}, https://{$VONK_LITELLM_HOSTNAME:litellm.example.invalid}:{$VONK_BACKEND_PORT:8443} {
-	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
+	tls {$VONK_CONTROLLER_TLS_CERTIFICATE:/run/secrets/controller-server-certificate} {$VONK_CONTROLLER_TLS_KEY:/run/secrets/controller-server-key}
 	reverse_proxy 127.0.0.1:8080
 }
 
@@ -413,7 +415,7 @@ https://{$VONK_CONTROL_HOSTNAME}:{$VONK_BACKEND_PORT:8443}, https://{$VONK_LITEL
 # certificate. It exposes only bounded discovery and enrollment submission.
 https://{$VONK_AGENT_ENROLL_HOSTNAME:enroll.example.invalid}:{$VONK_BACKEND_PORT:8443} {
 	import edge_guards
-	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
+	tls {$VONK_CONTROLLER_TLS_CERTIFICATE:/run/secrets/controller-server-certificate} {$VONK_CONTROLLER_TLS_KEY:/run/secrets/controller-server-key}
 
 	@bootstrap {
 		method GET
@@ -439,7 +441,7 @@ https://{$VONK_AGENT_ENROLL_HOSTNAME:enroll.example.invalid}:{$VONK_BACKEND_PORT
 # node-ID grammar before it reaches the application.
 https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} {
 	import agent_edge_guards
-	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key {
+	tls {$VONK_CONTROLLER_TLS_CERTIFICATE:/run/secrets/controller-server-certificate} {$VONK_CONTROLLER_TLS_KEY:/run/secrets/controller-server-key} {
 		client_auth {
 			trust_pool file /run/secrets/agent-client-ca
 			mode require_and_verify

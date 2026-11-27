@@ -56,7 +56,7 @@ services:
       # seconds; runs that fail after 10 s or more can hold `up` and its
       # dependants for several runs, each at most this grace plus 15 s.
       start_period: 45s
-    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, tailscale-oauth-client-id, tailscale-oauth-client-secret]
+    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, tailscale-oauth-client-id, tailscale-oauth-client-secret, controller-server-certificate, controller-server-key]
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
@@ -66,6 +66,9 @@ services:
       - normalized-private-keys:/normalized
       - runtime-assets:/runtime-assets
       - tailscale-oauth:/tailscale-oauth
+      # The controller TLS leaf Caddy serves, renewed here on each start from
+      # the installer's leaf (the authority for its names) and the intermediate.
+      - controller-tls:/controller-tls
       - type: bind
         source: ./secrets/gateway
         target: /gateway-secrets
@@ -140,6 +143,8 @@ services:
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
+      # The served controller leaf, for its expiry metric (the key is root-only).
+      - controller-tls:/run/vonk-controller-tls:ro
       # The Controller keeps the default gateway client key here (mode 600).
       - type: bind
         source: ./secrets/gateway
@@ -300,6 +305,9 @@ services:
       - runtime-assets:/run/vonk-runtime-assets:ro
       - caddy-data:/data
       - caddy-config:/config
+      # The controller leaf runtime-init keeps renewed. The installer's
+      # controller-server-* secrets below serve until it is first staged.
+      - controller-tls:/run/vonk-controller-tls:ro
       # Caddy serves model and image bytes itself, but only after the
       # Controller authorizes the request and names the file. Same layout as
       # the Controller's /state, read-only, and only the two object stores.
@@ -394,6 +402,7 @@ volumes:
   prometheus-data: {}
   route-publications: {}
   normalized-private-keys: {}
+  controller-tls: {}
   runtime-assets: {}
   # runtime-init's root-owned copy of the Tailscale OAuth secrets; only the
   # gateway mounts it.
