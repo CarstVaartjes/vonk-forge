@@ -220,7 +220,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
             session,
             NODE_A,
             contact_certificate_serial="bounded-a",
-            management_address="192.0.2.11",
+            management_address="192.0.2.211",
             management_observed_at=NOW,
         )
         session.add_all(
@@ -279,7 +279,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 "id": NODE_A,
                 "display_name": "Alpha",
                 "hostname": "alpha.internal",
-                "ip_address": "192.0.2.11",
+                "ip_address": "192.0.2.211",
                 "lifecycle": "managed",
                 "labels": {"rack": "left"},
                 "projection_issues": None,
@@ -445,13 +445,13 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
         session.add(node)
         session.flush()
         session.add(_profile(NODE_A, display_name=NODE_A))
-        set_inventory_hostname(session, NODE_A, "spark-3542.internal")
+        set_inventory_hostname(session, NODE_A, "spark-bbbb.internal")
         session.add(_certificate(NODE_A, "profile-a"))
         record_contact(
             session,
             NODE_A,
             contact_certificate_serial="profile-a",
-            management_address="192.0.2.11",
+            management_address="192.0.2.211",
             management_observed_at=NOW,
         )
 
@@ -461,12 +461,12 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
     assert identity.model_dump() == {
         "id": NODE_A,
         "display_name": "Studio Spark",
-        "hostname": "spark-3542.internal",
-        "ip_address": "192.0.2.11",
+        "hostname": "spark-bbbb.internal",
+        "ip_address": "192.0.2.211",
     }
     snapshot = projection.read()
     assert snapshot.nodes[0].display_name == "Studio Spark"
-    assert snapshot.nodes[0].ip_address == "192.0.2.11"
+    assert snapshot.nodes[0].ip_address == "192.0.2.211"
     assert snapshot.event_cursor == 1
     with sessions() as session:
         event = session.get(FleetStreamEvent, 1)

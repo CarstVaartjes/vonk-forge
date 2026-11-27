@@ -261,7 +261,7 @@ class ReachWorld(World):
         routes = RecipeRouteService(
             self.sessions,
             publisher=ConcurrentPublisher(),
-            management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+            management_policy=ManagementAddressPolicy.parse("192.0.2.0/24"),
             clock=clock,
         )
         lifecycle = RecipeOperationService(

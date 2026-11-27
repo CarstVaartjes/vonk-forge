@@ -38,7 +38,7 @@ def test_agent_reported_unconfirmed_job_is_lost_with_its_reason(
     assert claim is not None
 
     # The agent's lease is live; it reports at once that it could not confirm
-    # the job's effect (hardware 2026-10-15, step1x geometry on spark-2297).
+    # the job's effect (hardware 2026-10-15, step1x geometry on spark-aaaa).
     clock.advance(seconds=5)
     agent_jobs.record_result(
         AgentResult.model_validate_json(

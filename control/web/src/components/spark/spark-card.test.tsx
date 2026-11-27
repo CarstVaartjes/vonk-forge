@@ -10,8 +10,8 @@ const api = { metricsSeries: () => Promise.reject(new Error("no history")) };
 function spark(over: Record<string, unknown> = {}, sample: Record<string, unknown> = {}) {
   return {
     id: "spk_a",
-    display_name: "spark-3542",
-    hostname: "spark-3542",
+    display_name: "spark-bbbb",
+    hostname: "spark-bbbb",
     labels: {},
     connection: { online_state: "online", last_seen_at: "2026-11-12T11:59:58Z" },
     inventory: null,
@@ -43,7 +43,7 @@ function spark(over: Record<string, unknown> = {}, sample: Record<string, unknow
 
 test("an online Spark reads its memory split, live readings and uptime", () => {
   render(<SparkCard api={api} node={spark()} now={NOW} index={0} />);
-  expect(screen.getByRole("meter", { name: "spark-3542 unified memory" })).toHaveAttribute(
+  expect(screen.getByRole("meter", { name: "spark-bbbb unified memory" })).toHaveAttribute(
     "aria-valuetext",
     "Models 105.9 GiB, System 6.9 GiB, Free 10.4 GiB of 123.2 GiB",
   );

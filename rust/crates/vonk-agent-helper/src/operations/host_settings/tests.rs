@@ -128,7 +128,7 @@ fn a_desktop_host_is_made_headless_and_a_second_pass_changes_nothing() {
 
 #[test]
 fn a_failed_desktop_still_gets_the_headless_target_and_is_not_stopped() {
-    // spark-2297: graphical.target whose display manager never came back.
+    // spark-aaaa: graphical.target whose display manager never came back.
     let systemd = Systemd::host(Some("graphical.target"), Some("failed"));
     let (_temp, executor) = helper(&systemd);
 

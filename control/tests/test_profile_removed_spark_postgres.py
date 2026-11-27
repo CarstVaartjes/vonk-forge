@@ -165,7 +165,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                 session,
                 unrelated_node,
                 contact_certificate_serial=serial,
-                management_address=f"192.168.1.{213 + index}",
+                management_address=f"192.0.2.{213 + index}",
                 management_observed_at=observed_at,
             )
         InventoryRepository(sessions, clock=lifecycle._clock).record(

@@ -203,7 +203,7 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
             session,
             node_b,
             contact_certificate_serial="serial-b",
-            management_address="192.168.1.212",
+            management_address="192.0.2.212",
             management_observed_at=NOW,
         )
         revision = session.scalar(
@@ -275,7 +275,7 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
     )
     runtime = AtomicRouteBundlePublisher(tmp_path / "routes")
     publisher = AtomicRecipeRoutePublisher(runtime)
-    policy = ManagementAddressPolicy.parse("192.168.1.0/24")
+    policy = ManagementAddressPolicy.parse("192.0.2.0/24")
     routes = RecipeRouteService(
         sessions, publisher=publisher, management_policy=policy, clock=lambda: clock[0]
     )

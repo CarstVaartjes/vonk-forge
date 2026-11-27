@@ -316,7 +316,7 @@ def make_agent_system(tmp_path, *, engine=None, authority=None):
             enrollment_endpoint="https://enroll.example.test:8443",
             ca_fingerprint=controller_ca_fingerprint,
             ca_pem=controller_ca_pem,
-            controller_address="192.168.1.231",
+            controller_address="192.0.2.231",
             service_hostnames=(
                 "control.example.test",
                 "enroll.example.test",

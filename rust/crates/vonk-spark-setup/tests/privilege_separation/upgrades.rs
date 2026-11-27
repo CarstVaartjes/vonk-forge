@@ -97,8 +97,8 @@ fn damaged_generated_files_are_repaired_without_replacing_enrollment() {
         }
         let mut prompt = FreshAnswers {
             values: [
-                "192.168.1.231",
-                "192.168.1.211",
+                "10.0.0.231",
+                "10.0.0.211",
                 "192.168.100.10",
                 "192.168.100.11",
             ]

@@ -4,7 +4,7 @@ import type { ControlApi, VisualFleetNode } from "../../api/types";
 
 const NOW = new Date("2026-11-12T13:00:00Z");
 const nodes = [
-  { id: "spk_a", display_name: "spark-3542", hostname: "h", labels: {} },
+  { id: "spk_a", display_name: "spark-bbbb", hostname: "h", labels: {} },
 ] as unknown as VisualFleetNode[];
 
 function operation(id: string, state: string, createdAt: string) {
@@ -29,8 +29,8 @@ test("shows the newest seven activities in the Activity page's words, newest fir
   rows.push(operation("op-fail", "failed", "2026-11-12T12:30:00Z"));
   render(<ActivityPreview api={apiWith(rows)} nodes={nodes} now={NOW} />);
   expect(await screen.findAllByRole("listitem")).toHaveLength(7);
-  expect(screen.getAllByText("spark-3542 · Recipe start finished").length).toBe(6);
-  expect(screen.getByText("spark-3542 · Recipe start failed")).toBeInTheDocument();
+  expect(screen.getAllByText("spark-bbbb · Recipe start finished").length).toBe(6);
+  expect(screen.getByText("spark-bbbb · Recipe start failed")).toBeInTheDocument();
   expect(screen.getByText("Unsuccessful")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "View all" })).toHaveAttribute("href", "/activity");
 });

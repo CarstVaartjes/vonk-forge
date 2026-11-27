@@ -151,10 +151,10 @@ fn nas_address_preserves_literal_address_families() {
         nas_addresses(&literal, &SystemProcessRunner),
         vec!["fd7a:115c:a1e0::5".parse::<IpAddr>().unwrap()]
     );
-    let v4 = Url::parse("https://192.168.1.231:8443").unwrap();
+    let v4 = Url::parse("https://10.0.0.231:8443").unwrap();
     assert_eq!(
         nas_addresses(&v4, &SystemProcessRunner),
-        vec!["192.168.1.231".parse::<IpAddr>().unwrap()]
+        vec!["10.0.0.231".parse::<IpAddr>().unwrap()]
     );
 }
 
@@ -296,9 +296,9 @@ impl ProcessRunner for DnsRouteRunner {
     ) -> Result<crate::process::ProcessOutput, crate::process::ProcessError> {
         assert!(timeout <= Duration::from_millis(500));
         let text = match program {
-            Program::Getent => "192.168.1.20 STREAM nas\n2001:db8::20 STREAM nas\n",
+            Program::Getent => "10.0.0.20 STREAM nas\n2001:db8::20 STREAM nas\n",
             Program::Ip if arguments[3].contains(':') => self.ipv6_route,
-            Program::Ip => "192.168.1.20 dev wlP9s9",
+            Program::Ip => "10.0.0.20 dev wlP9s9",
             Program::Curl
             | Program::Docker
             | Program::NvidiaCtk

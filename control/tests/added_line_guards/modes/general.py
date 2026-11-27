@@ -23,6 +23,7 @@ from ... import (
     scratch_names,
     shared_id_patterns,
     shell_trap_waits,
+    site_identifiers,
     typed_string_lengths,
     whole_collection_readers,
 )
@@ -897,4 +898,12 @@ def check_shared_id_patterns(ctx: CheckContext) -> None:
         ctx.hits.extend(
             (line, shared_id_patterns.KIND)
             for line in shared_id_patterns.scan_source(ctx.path, ctx.source)
+        )
+
+
+def check_site_identifiers(ctx: CheckContext) -> None:
+    if "site-identifiers" in ctx.modes:
+        ctx.hits.extend(
+            (line, site_identifiers.KIND)
+            for line in site_identifiers.scan_source(ctx.source)
         )

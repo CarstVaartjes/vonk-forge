@@ -191,6 +191,8 @@ exclude-unset registries describe semantic exceptions rather than debt counts.
 
 A shared id type is defined once. The `shared-id-patterns` added-line guard refuses a new string that equals the digest, OCI digest, node id or UUID pattern outside the two `identifiers.py` files and `route_activation.py` (loaded with no package around it); import the constant or the `Annotated` type (`control/tests/shared_id_patterns.py`).
 
+Examples, fixtures and docs never name one real site. The `site-identifiers` added-line guard refuses an added line, in any file, with an address in the owner's home LAN (`192.168.1.<n>`) or either real Spark hostname. Use RFC 5737 TEST-NET addresses (`192.0.2.0/24`, `198.51.100.0/24`), `10.0.0.0/8` where Rust needs a private address (`Ipv4Addr::is_private` excludes TEST-NET), and neutral Spark names such as `spark-aaaa` and `spark-bbbb` (`control/tests/site_identifiers.py`).
+
 ## Stored rows are not re-hashed
 
 A row records its digest when it is written; comparing a stored `*_digest` /

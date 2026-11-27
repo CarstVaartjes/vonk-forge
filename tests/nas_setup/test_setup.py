@@ -39,10 +39,10 @@ def test_fresh_lab_and_secure_remote_keep_secret_answers_private(
 ) -> None:
     """Catch ignored install modes, echoed secret answers and unsafe file modes."""
     for mode, answers, expected in (
-        ("lab", "lab\n192.168.1.5\nprivate-hf\n", ""),
+        ("lab", "lab\n192.0.2.5\nprivate-hf\n", ""),
         (
             "secure",
-            "secure-remote\n192.168.1.5\nprivate-hf\nprivate-ts\n",
+            "secure-remote\n192.0.2.5\nprivate-hf\nprivate-ts\n",
             "secure-remote",
         ),
     ):
@@ -52,7 +52,7 @@ def test_fresh_lab_and_secure_remote_keep_secret_answers_private(
         ).root
         values = parse_environment(bundle / ".env")
         assert values["COMPOSE_PROFILES"] == expected
-        assert values["VONK_MANAGEMENT_CIDRS"] == "192.168.1.0/24"
+        assert values["VONK_MANAGEMENT_CIDRS"] == "192.0.2.0/24"
         assert "private-hf" not in output.getvalue()
         assert "private-ts" not in output.getvalue()
         assert (bundle / "secrets/hf-token").read_text() == "private-hf\n"
@@ -139,7 +139,7 @@ def test_upgrade_asks_only_new_inputs_and_keeps_secure_remote_profile(
     bundle = prepare(
         template,
         tmp_path,
-        PromptIo(io.StringIO("secure-remote\n192.168.1.5\n\nexisting-secret\n")),
+        PromptIo(io.StringIO("secure-remote\n192.0.2.5\n\nexisting-secret\n")),
     ).root
     template.required_values.append(
         NasRequiredValuePrompt(env="NEW_SITE_VALUE", prompt="New site value")
@@ -178,7 +178,7 @@ def test_projection_repair_reuses_verified_authority(
             )
     prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
     assert credentials(installed) == before
-    assert parse_environment(installed / ".env")["NAS_LAN_IP"] == "192.168.1.5"
+    assert parse_environment(installed / ".env")["NAS_LAN_IP"] == "192.0.2.5"
     if damage == "foreign-root":
         assert any(
             path.read_text() == "preserve this foreign object"

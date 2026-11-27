@@ -23,11 +23,11 @@ fn expired_renewal_proof_matches_the_controller_signed_wire_fixture() {
 
 #[test]
 fn reported_hostname_is_bounded_dns_syntax() {
-    assert!(valid_reported_hostname("spark-3542"));
-    assert!(valid_reported_hostname("spark-3542.lab.internal"));
+    assert!(valid_reported_hostname("spark-bbbb"));
+    assert!(valid_reported_hostname("spark-bbbb.lab.internal"));
     assert!(!valid_reported_hostname(""));
     assert!(!valid_reported_hostname("-spark"));
-    assert!(!valid_reported_hostname("spark_3542"));
+    assert!(!valid_reported_hostname("spark_bbbb"));
     assert!(!valid_reported_hostname(&"a".repeat(256)));
 }
 

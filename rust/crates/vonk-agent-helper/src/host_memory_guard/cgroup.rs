@@ -1,5 +1,5 @@
 //! Kernel-only termination of one managed container. Under GB10 memory thrash
-//! dockerd stops answering (spark-3542, 2026-10-13: every `docker` call missed
+//! dockerd stops answering (spark-bbbb, 2026-10-13: every `docker` call missed
 //! its deadline for 30+ minutes) while the kernel still honours `cgroup.kill`,
 //! so the safety action never depends on the daemon it protects the host from.
 use std::{

@@ -778,7 +778,7 @@ def test_authenticated_claim_persists_certificate_bound_source(agent_system) -> 
 
 @pytest.mark.parametrize(
     "hostname",
-    ["", "-spark", "spark_3542", "spark 3542", "spark..lab", "a" * 256],
+    ["", "-spark", "spark_bbbb", "spark bbbb", "spark..lab", "a" * 256],
 )
 def test_authenticated_claim_drops_an_invalid_reported_hostname(
     agent_system, hostname: str

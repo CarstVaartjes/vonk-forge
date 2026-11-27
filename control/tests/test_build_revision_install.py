@@ -313,7 +313,7 @@ def test_editorial_successor_installs_and_starts_without_any_record_of_the_image
             session,
             plan.nodes[0].node_id,
             contact_certificate_serial="revision-reuse-preflight",
-            management_address="192.0.2.11",
+            management_address="192.0.2.211",
             management_observed_at=now,
         )
     run_plan = service.preview_run(installed.id, "qwen")

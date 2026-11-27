@@ -130,7 +130,7 @@ def test_channel_passes_the_verified_immutable_release_to_setup(
             "PATH": f"{commands}:{os.environ['PATH']}",
             "VONK_TEST_PUBLIC": str(public),
             "VONK_TEST_RECEIPT": str(receipt),
-            "VONK_CONTROLLER_ADDRESS": "192.0.2.10",
+            "VONK_CONTROLLER_ADDRESS": "192.0.2.231",
         },
         text=True,
         capture_output=True,
@@ -142,7 +142,7 @@ def test_channel_passes_the_verified_immutable_release_to_setup(
         release.read_bytes()
         + signature.read_bytes()
         + f"https://install.example.test/{prefix}\n".encode()
-        + b"192.0.2.10\n"
+        + b"192.0.2.231\n"
         + f"arguments={' '.join(arguments)}\n".encode()
         # The bootstrap receives exactly the root that verified the release.
         + public_key.read_bytes()

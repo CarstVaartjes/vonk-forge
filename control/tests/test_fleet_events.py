@@ -618,7 +618,7 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
             )
         )
     with sessions.begin() as session:
-        set_inventory_hostname(session, node_id, "spark-3542")
+        set_inventory_hostname(session, node_id, "spark-bbbb")
 
     rows = _event_rows(sessions)
     assert [(row.event_type, row.entity_kind, row.entity_id) for row in rows] == [
@@ -643,7 +643,7 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
                 },
             }
         )
-    assert "spark-3542" not in repr(rows[-1].payload)
+    assert "spark-bbbb" not in repr(rows[-1].payload)
 
 
 def test_recorder_uses_attribute_history_for_every_authoritative_transition(

@@ -6,7 +6,7 @@ use vonk_agent_protocol::generated::{DisplayMemoryObservation, DisplayMemorySign
 const SOC_FW_CLASS: &str = "b488217b-3895-4fc0-b1bf-ab7005a2d45a";
 const MAX_EVIDENCE_BYTES: u64 = 1024 * 1024;
 
-// Owner measurements, 2026-10-22, spark-2297 before/after and spark-3542.
+// Owner measurements, 2026-10-22, spark-aaaa before/after and spark-bbbb.
 // The block ending here contains display RAM plus unchanged firmware memory.
 const RESERVED_END: u64 = 0x0003_237f_ffff;
 const OTHER_FIRMWARE_BYTES: u64 = 0x2380_0000;

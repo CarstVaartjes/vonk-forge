@@ -103,7 +103,7 @@ def _singleton_recovery_process_tick(database_url: str, now_value: str) -> None:
     routes = RecipeRouteService(
         sessions,
         publisher=ConcurrentPublisher(),
-        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+        management_policy=ManagementAddressPolicy.parse("192.0.2.0/24"),
         clock=lambda: now,
         maximum_age_seconds=120,
     )

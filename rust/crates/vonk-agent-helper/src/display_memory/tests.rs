@@ -147,7 +147,7 @@ fn root_observation_keeps_the_peer_gate_and_rejects_client_paths() {
     put(
         root.path(),
         "proc/iomem",
-        include_str!("../../tests/fixtures/spark-2297-after.iomem"),
+        include_str!("../../tests/fixtures/spark-aaaa-after.iomem"),
     );
     let verifier = GrantVerifier::new(&[0; 32], 42).unwrap();
     let mut peer = PeerIdentity {
@@ -188,11 +188,11 @@ fn owner_iomem_dumps_calibrate_only_the_measured_display_reservation() {
     platform(root.path());
     for (dump, expected) in [
         (
-            include_str!("../../tests/fixtures/spark-2297-before.iomem"),
+            include_str!("../../tests/fixtures/spark-aaaa-before.iomem"),
             0x8000_0000,
         ),
         (
-            include_str!("../../tests/fixtures/spark-2297-after.iomem"),
+            include_str!("../../tests/fixtures/spark-aaaa-after.iomem"),
             0x2000_0000,
         ),
     ] {

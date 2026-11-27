@@ -1,7 +1,7 @@
 """A run the plan keeps is already on its Spark: its memory is not new demand.
 
 Production (2026-10-13, Controller 8ff89e829, the hardware sweep): a profile
-review that kept the serving llama run on spark-3542 (declared 115 GB, about
+review that kept the serving llama run on spark-bbbb (declared 115 GB, about
 103 GB held, 21.5 GiB of 128 free) refused the load on memory. The kept
 assignment was fitted as if it started again (its 115 GB on top of its own
 claim), and a recipe beside it was charged the kept run's whole declared peak
@@ -24,7 +24,7 @@ from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.sparks import Memory
 from .lifecycle_simulation.world import SOLO, SOLO_B, World, build_world
 
-#: spark-3542: 128 GB, about 125 GB free when idle.
+#: spark-bbbb: 128 GB, about 125 GB free when idle.
 _SPARK = Memory(total=12_800, idle_free=12_500, held_percent=90)
 #: The baseline declares 115 GB and holds 90% of it (about 103 GB), which
 #: leaves 2_150 free; the World's planner keeps a 50-byte floor.

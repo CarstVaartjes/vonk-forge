@@ -321,7 +321,7 @@ test("a loaded profile names the inference gateway and alias as its client endpo
         endpoint: {
           alias: "qwen-code",
           api_base: "https://vonk-forge.example.ts.net/v1",
-          backend_api_base: "http://192.0.2.11:8888/v1",
+          backend_api_base: "http://192.0.2.211:8888/v1",
           generation: 3,
           node_id: nodeA,
           observed_at: "2026-09-10T00:00:00Z",
@@ -552,7 +552,7 @@ test("a completed load refreshes the saved profile and shows the endpoint withou
         endpoint: {
           alias: "qwen-code",
           api_base: "https://vonk-forge.example.ts.net/v1",
-          backend_api_base: "http://192.0.2.11:8888/v1",
+          backend_api_base: "http://192.0.2.211:8888/v1",
           generation: 3,
           node_id: nodeA,
           observed_at: "2026-09-10T00:00:00Z",

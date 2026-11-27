@@ -188,7 +188,7 @@ def test_memory_free_as_at_admission_is_no_use_and_the_upload_succeeds(
 ) -> None:
     """Catches telemetry refused with HTTP 500 while a run holds its claim.
 
-    2026-11-05: an LTX job exited on spark-2297 while its claim was still
+    2026-11-05: an LTX job exited on spark-aaaa while its claim was still
     active. The Spark then reported more free memory than at admission, the
     peak came out negative (-35913728 bytes), and the measured-peak insert hit
     ``ck_measured_role_peaks_values``: the upload was refused with HTTP 500

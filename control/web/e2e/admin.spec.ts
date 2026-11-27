@@ -117,7 +117,7 @@ test("Overview fits a phone and a desktop and passes the accessibility checks", 
   await serveOverviewFleet(page);
   await page.goto("/overview");
   await expect(page.getByRole("heading", { name: "GLM 5.3 Flash" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "spark-3542" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "spark-bbbb" })).toBeVisible();
   for (const colorScheme of ["dark", "light"] as const) {
     await page.emulateMedia({ colorScheme });
     for (const [width, height] of [
@@ -163,9 +163,9 @@ test("a Spark page fits a phone and a desktop and passes the accessibility check
 }) => {
   await serveOverviewFleet(page);
   await page.goto("/overview");
-  await page.getByRole("link", { name: "spark-3542" }).first().click();
+  await page.getByRole("link", { name: "spark-bbbb" }).first().click();
   await expect(page).toHaveURL(/\/sparks\/spk_/);
-  await expect(page.getByRole("heading", { name: "spark-3542", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "spark-bbbb", level: 1 })).toBeVisible();
   for (const colorScheme of ["dark", "light"] as const) {
     await page.emulateMedia({ colorScheme });
     for (const [width, height] of [

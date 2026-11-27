@@ -29,7 +29,7 @@ def secrets_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in _ENVIRONMENT:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("VONK_CONTROL_HOSTNAME", "vonk-forge.tail1234.ts.net")
-    monkeypatch.setenv("VONK_NAS_LAN_IP", "192.168.1.231")
+    monkeypatch.setenv("VONK_NAS_LAN_IP", "192.0.2.231")
     return root
 
 
@@ -49,7 +49,7 @@ def test_production_defaults_and_derived_service_names(secrets_root: Path) -> No
     assert settings.agent_runtime_enabled
     assert settings.database_host == "postgres"
     assert settings.secrets_root == secrets_root
-    assert settings.management_cidrs == "192.168.1.0/24"
+    assert settings.management_cidrs == "192.0.2.0/24"
     assert settings.install_channel == "stable"
     assert settings.recipe_library_release == "latest"
     assert settings.agent_service_hostnames == (
@@ -112,14 +112,14 @@ def test_network_lists_self_heal(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv(
-        "VONK_MANAGEMENT_CIDRS", "192.168.1.5/24, not-a-cidr 192.168.1.0/24,fd00::1/64"
+        "VONK_MANAGEMENT_CIDRS", "192.0.2.5/24, not-a-cidr 192.0.2.0/24,fd00::1/64"
     )
-    monkeypatch.setenv("VONK_DIRECT_FABRIC_CIDRS", "10.10.0.7/24,192.168.1.240/28")
+    monkeypatch.setenv("VONK_DIRECT_FABRIC_CIDRS", "10.10.0.7/24,192.0.2.240/28")
 
     with caplog.at_level(logging.WARNING):
         settings = Settings.from_env_and_secrets()
 
-    assert settings.management_cidrs == "192.168.1.0/24,fd00::/64"
+    assert settings.management_cidrs == "192.0.2.0/24,fd00::/64"
     # The fabric entry inside a management network is dropped, not fatal.
     assert settings.direct_fabric_cidrs == "10.10.0.0/24"
     assert "not-a-cidr" in caplog.text
@@ -129,7 +129,7 @@ def test_management_networks_default_to_the_nas_lan(
     secrets_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "garbage")
-    assert Settings.from_env_and_secrets().management_cidrs == "192.168.1.0/24"
+    assert Settings.from_env_and_secrets().management_cidrs == "192.0.2.0/24"
 
     monkeypatch.delenv("VONK_NAS_LAN_IP")
     assert Settings.from_env_and_secrets().management_cidrs == ""

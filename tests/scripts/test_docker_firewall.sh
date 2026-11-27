@@ -14,8 +14,8 @@ trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 config=$temporary/docker-firewall.conf
 install -o root -g root -m 0600 /dev/null "$config"
 printf '%s\n' \
-    'VONK_NAS_MANAGEMENT_IP=192.168.1.231' \
-    'VONK_NODE_MANAGEMENT_IP=192.168.1.211' \
+    'VONK_NAS_MANAGEMENT_IP=192.0.2.231' \
+    'VONK_NODE_MANAGEMENT_IP=192.0.2.211' \
     'VONK_NODE_FABRIC_IP=192.168.100.10' \
     'VONK_PEER_FABRIC_IP=192.168.100.11' \
     'VONK_ENDPOINT_HOST_PORTS=8000,8101' \
@@ -34,7 +34,7 @@ if $helper --config "$config" apply >/dev/null 2>&1; then
 fi
 /usr/sbin/ip link add vonk-mgmt type dummy
 /usr/sbin/ip link add vonk-fabric type dummy
-/usr/sbin/ip address add 192.168.1.211/24 dev vonk-mgmt
+/usr/sbin/ip address add 192.0.2.211/24 dev vonk-mgmt
 /usr/sbin/ip address add 192.168.100.10/24 dev vonk-fabric
 /usr/sbin/ip link set vonk-mgmt up
 /usr/sbin/ip link set vonk-fabric up
@@ -63,8 +63,8 @@ test "$($helper --config "$config" check-fabric-run 192.168.100.10 192.168.100.1
 for invalid in \
     '192.168.100.10 192.168.100.10 29500 none' \
     '192.168.100.10 192.168.100.11 29500 0' \
-    '192.168.1.211 192.168.100.10 29500 8888' \
-    '192.168.100.10 192.168.1.231 29500 none' \
+    '192.0.2.211 192.168.100.10 29500 8888' \
+    '192.168.100.10 192.0.2.231 29500 none' \
     '192.168.100.10 192.168.100.10 29501 8888' \
     '192.168.100.10 192.168.100.10 29500 8000' \
     '192.168.100.10 192.168.100.11 29500 8888'; do
@@ -102,7 +102,7 @@ $iptables -C VONK-FORGE-HOST -i lo -s 192.168.100.10 \
     -d 192.168.100.10 -p tcp -j RETURN
 $iptables -C VONK-FORGE-HOST -i lo -s 192.168.100.10 \
     -d 192.168.100.10 -p udp -j RETURN
-$iptables -C VONK-FORGE-HOST -i vonk-mgmt -p tcp -s 192.168.1.231 \
+$iptables -C VONK-FORGE-HOST -i vonk-mgmt -p tcp -s 192.0.2.231 \
     --dport 8888 -j RETURN
 $iptables -C VONK-FORGE-HOST -p tcp --dport 8888 -j DROP
 $iptables -C VONK-FORGE-HOST -i vonk-fabric -s 192.168.100.11 \
@@ -128,12 +128,12 @@ if $helper --config "$config" check >/dev/null 2>&1; then
 fi
 $helper --config "$config" apply
 $helper --config "$config" check
-$iptables -C VONK-FORGE -i vonk-mgmt -p tcp -s 192.168.1.231 \
-    -m conntrack --ctorigdst 192.168.1.211 --ctorigdstport 8000 -j RETURN
+$iptables -C VONK-FORGE -i vonk-mgmt -p tcp -s 192.0.2.231 \
+    -m conntrack --ctorigdst 192.0.2.211 --ctorigdstport 8000 -j RETURN
 $iptables -C VONK-FORGE -i vonk-fabric -p tcp -s 192.168.100.11 \
     -m conntrack --ctorigdst 192.168.100.10 --ctorigdstport 29500 -j RETURN
 $iptables -C VONK-FORGE -p tcp -m conntrack \
-    --ctorigdst 192.168.1.211 -j DROP
+    --ctorigdst 192.0.2.211 -j DROP
 $iptables -C VONK-FORGE -p tcp -m conntrack \
     --ctorigdst 192.168.100.10 -j DROP
 

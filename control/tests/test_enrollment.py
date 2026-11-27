@@ -730,7 +730,7 @@ def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(
         monotonic=lambda: time.monotonic() + (120 if stop_waiting.is_set() else 0),
     )
     source = AgentSource(
-        AgentIdentity(NODE_ID, issued.serial, issued.fingerprint, True), "192.168.1.10"
+        AgentIdentity(NODE_ID, issued.serial, issued.fingerprint, True), "192.0.2.10"
     )
     with ThreadPoolExecutor(max_workers=1) as pool:
         waiting = pool.submit(
@@ -806,7 +806,7 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
         recipe_stop_payload(NODE_ID, plan_digest="a" * 64),
     )
     old_source = AgentSource(
-        AgentIdentity(NODE_ID, issued.serial, issued.fingerprint, True), "192.168.1.10"
+        AgentIdentity(NODE_ID, issued.serial, issued.fingerprint, True), "192.0.2.10"
     )
     claim = claim_agent(
         jobs,
@@ -822,7 +822,7 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
     assert isinstance(renewed, IssuedCertificate)
     new_source = AgentSource(
         AgentIdentity(NODE_ID, renewed.serial, renewed.fingerprint, True),
-        "192.168.1.10",
+        "192.0.2.10",
     )
     with sessions.begin() as session:
         attempt = session.scalar(

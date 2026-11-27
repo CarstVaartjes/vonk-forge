@@ -265,9 +265,9 @@ def test_recipe_start_result_accepts_only_a_typed_endpoint_uri() -> None:
     ("field", "value"),
     [
         ("endpoint", "/var/lib/vonk-forge/result.json"),
-        ("endpoint", "http://192.0.2.11:8000/private"),
+        ("endpoint", "http://192.0.2.211:8000/private"),
         ("endpoint", "http://worker.example.invalid:8000"),
-        ("endpoint", "http://192.0.2.11:0"),
+        ("endpoint", "http://192.0.2.211:0"),
     ],
 )
 def test_typed_recipe_result_uri_fields_reject_path_or_credential_confusion(
@@ -280,7 +280,7 @@ def test_typed_recipe_result_uri_fields_reject_path_or_credential_confusion(
 
 
 def test_typed_result_uri_exceptions_do_not_apply_to_claims_or_progress() -> None:
-    endpoint = "http://192.0.2.11:8000"
+    endpoint = "http://192.0.2.211:8000"
 
     with pytest.raises(AgentProtocolError):
         AgentClaim.parse(claim_with_payload({"endpoint": endpoint}))

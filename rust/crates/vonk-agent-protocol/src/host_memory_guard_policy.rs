@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::swap::{GIB, SWAP_POLICY};
 
-// spark-3542 froze 2026-10-07 after NVRM NV_ERR_NO_MEMORY without kernel OOM.
+// spark-bbbb froze 2026-10-07 after NVRM NV_ERR_NO_MEMORY without kernel OOM.
 // gb10-oom-research-2026-10-08: GPU allocations bypass cgroup accounting.
 //
 // Swap-aware policy R1-R5 (owner approved 2026-10-28). A load that swaps
@@ -48,7 +48,7 @@ pub const THRASH_SUSTAIN: Duration = Duration::from_secs(10);
 // GPU/pinned growth. The floor spares pressured-but-healthy runs (2026-10-31
 // MiniMax H3: 11.5 GiB available, killed at 75 GiB headroom) and keeps R4's
 // existing behaviour for unswappable growth once MemAvailable falls below it.
-// It does not change the spark-3542 2026-10-30 case, whose 47 s squeeze during
+// It does not change the spark-bbbb 2026-10-30 case, whose 47 s squeeze during
 // a load stays open (#1987).
 pub const PRESSURE_AVAILABLE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 pub const SERVING_FULL_PSI_PERCENT: f64 = 60.0;
@@ -61,7 +61,7 @@ pub const PSI_FALLING_RATIO: f64 = 0.85;
 // R1's condition, R3's condition, or MemFree below this while no reclaim is
 // moving pages: without swap, or with swap and swap-out below
 // DRIVER_FAILURE_RECLAIM_PAGES_PER_SECOND. A load whose host pages are being
-// swapped out is absorbed, not wedged (spark-3542, 2026-10-29T12:35:29Z: 976 MiB
+// swapped out is absorbed, not wedged (spark-bbbb, 2026-10-29T12:35:29Z: 976 MiB
 // MemFree, 63 GiB free swap, 148k pages/s swap-out, a load that finished on
 // 2026-10-25 with the same content); pinned memory that cannot reclaim still
 // stops. CALIBRATABLE.

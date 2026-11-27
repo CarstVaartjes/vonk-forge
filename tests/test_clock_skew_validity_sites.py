@@ -3,7 +3,7 @@
 The Controller signs what a Spark checks against its own clock (host-helper
 grants, node certificates). A check that refuses anything issued in the
 Spark's future, with no allowance, refuses fresh documents on a Spark whose
-clock is a fraction of a second behind: spark-2297 refused three fresh grants
+clock is a fraction of a second behind: spark-aaaa refused three fresh grants
 on 2026-10-16 (``helper_grant_unauthorized``) and each retry passed.
 
 Each such check is listed here with the test that proves its allowance. A new

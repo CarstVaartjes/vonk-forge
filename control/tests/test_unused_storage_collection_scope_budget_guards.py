@@ -619,7 +619,7 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
     keeps waiting while it lands, the run is recorded stopped, the next pass
     uninstalls, and the load fits.
 
-    Below the low-space line (production spark-3542: 73 GB free of 4 TB, a
+    Below the low-space line (production spark-bbbb: 73 GB free of 4 TB, a
     178 GB installation, a load short by 29 GB) catches the pass that measured
     the load against the line instead of its own gap: it judged everything
     removable "insufficient" and removed nothing while relief told the load
@@ -654,7 +654,7 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
     _report_disk(sessions, free, at=_REAL_CLOCK, node=nodes[0])
     # Above the line any other Spark of the run is short on its own, so one
     # sweep relieves two Sparks: neither may remove more while the shared Stop
-    # lands. Below it the other Spark has room (production's spark-2297), so
+    # lands. Below it the other Spark has room (production's spark-aaaa), so
     # only the load's Spark can free the installation.
     for other in nodes[1:] if below_line else ():
         _report_disk(sessions, TOTAL // 2, at=_REAL_CLOCK, node=other)
