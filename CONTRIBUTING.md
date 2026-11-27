@@ -1,7 +1,15 @@
-# Contributors
+# Contributing
 
 Thank you to everyone who contributes improvements, fixes, documentation, and
 feedback to Vonk Forge.
+
+Open an issue for a bug or an idea, or a pull request for a fix. Recipe
+changes belong in
+[vonk-forge-recipes](https://github.com/CarstVaartjes/vonk-forge-recipes).
+Report security problems privately as [SECURITY.md](SECURITY.md) describes.
+Everyone follows the [code of conduct](CODE_OF_CONDUCT.md). The rules for
+changes are in [AGENTS.md](AGENTS.md) and the
+[engineering principles](docs/engineering-principles.md).
 
 ## External contributors
 
@@ -9,6 +17,12 @@ feedback to Vonk Forge.
 
 Additional contributors should be added here when their contributions are
 merged into the repository.
+
+## Release notes
+
+There is no hand-kept changelog. Each stable release's notes are its GitHub
+Release body, generated from the merged pull request titles; deprecations are
+announced there ([Stable release](docs/runbooks/stable-release.md#what-becomes-public-when)).
 
 ## Local checks
 

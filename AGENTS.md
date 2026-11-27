@@ -225,7 +225,7 @@ text of this section:
   targeted tests and fast guards. A Dependabot PR runs nothing; fold it into an
   integration PR. The integration PR runs the complete suites and proofs, and
   main's Release reuses its run for the identical tree. See
-  [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance).
+  [the contributor CI guide](CONTRIBUTING.md#ci-and-pre-merge-release-acceptance).
 - Before pushing, run `scripts/test changed`: the fast guards plus only the
   tests your diff edits or that import a touched module (`-n 2`). It is THE
   local check; full suites run in batch CI, not on the laptop.
