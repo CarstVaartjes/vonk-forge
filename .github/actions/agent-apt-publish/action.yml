@@ -275,6 +275,13 @@ runs:
           primary && $1 == "fpr" { print $10; exit }
         ' <<< "$secret_listing")
         test "$fingerprint" = "$APT_REPOSITORY_GPG_FINGERPRINT"
+        # Field 7 is the expiry (epoch seconds; empty when it never expires).
+        expires=$(awk -F: '($1 == "sec" || $1 == "ssb") && $7 != "" { print $7 }' \
+          <<< "$secret_listing" | sort -n | head -n 1)
+        if [[ -n "$expires" ]] && (( expires < $(date +%s) + 60 * 86400 )); then
+          printf '::warning title=APT signing key expires::%s\n' \
+            "The apt repository key expires $(date -u -d "@$expires" +%F); extend it (gpg --quick-set-expire) and update the secret"
+        fi
         printf 'fingerprint=%s\n' "$fingerprint" >> "$GITHUB_OUTPUT"
 
     - name: Generate missing aptly state or public tree

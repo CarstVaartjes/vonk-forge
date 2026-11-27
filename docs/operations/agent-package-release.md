@@ -121,6 +121,15 @@ Stable releases use three more environments, all restricted to tag `v*`:
 | `apt-release` | `APT_REPOSITORY_GPG_FINGERPRINT`, `R2_APT_PUBLIC_BUCKET`, `R2_APT_STATE_BUCKET` | `APT_GPG_PASSPHRASE`, `APT_REPOSITORY_GPG_PRIVATE_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
 | `platform-release` | none | none |
 
+The `apt` job signs the public apt repository with the key in
+`APT_REPOSITORY_GPG_PRIVATE_KEY`. Nothing on a Spark or the Controller reads that
+repository (Sparks install the digest-verified package directly), so its key
+expiry breaks only the `apt` job itself. The job warns when the key or a
+subkey expires within 60 days; extend it with `gpg --quick-set-expire
+<fingerprint> <period>` (the same `<fingerprint>`, so
+`APT_REPOSITORY_GPG_FINGERPRINT` stays) and store the re-exported private key in
+the secret.
+
 Each stable environment carries a deployment policy; the owner is a required
 reviewer (`prevent_self_review` off) on `apt-release` and
 `installer-acceptance-stable`, and nowhere else:
