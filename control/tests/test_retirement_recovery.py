@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
@@ -18,7 +19,6 @@ from vonk_control.agent_jobs.contracts import (
     StaleAgentAttempt,
 )
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.auth import TokenCodec
 from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,

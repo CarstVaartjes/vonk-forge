@@ -25,7 +25,7 @@ from vonk_control.api.routes_jobs import register_job_routes
 from vonk_control.api.routes_platform import register_platform_routes
 from vonk_control.artifact_jobs.api import install_artifact_job_routes
 from vonk_control.artifact_jobs.service import ArtifactJobService
-from vonk_control.auth import CursorCodec, TokenCodec
+from vonk_control.auth import BearerTokens, CursorCodec
 from vonk_control.auth_api import install_auth_routes
 from vonk_control.capabilities import RecoveringService
 from vonk_control.catalog.api import install_catalog_routes
@@ -61,7 +61,7 @@ from vonk_control.security.browser_auth import BrowserAuthService
 def create_app(
     *,
     jobs: JobQueue,
-    tokens: TokenCodec,
+    tokens: BearerTokens,
     fleet_projection: Any | None = None,
     fleet_services: FleetOperatorServices | None = None,
     failure_evidence: FailureEvidenceService | None = None,
@@ -138,13 +138,7 @@ def create_app(
     authenticated_actor = Depends(actor)
 
     if browser_auth is not None:
-        install_auth_routes(
-            app,
-            browser_auth,
-            authenticated_actor,
-            tokens=tokens,
-            now=now,
-        )
+        install_auth_routes(app, browser_auth, authenticated_actor)
 
     install_catalog_routes(
         app,

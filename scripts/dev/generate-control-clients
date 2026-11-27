@@ -72,9 +72,6 @@ from vonk_control import (  # noqa: E402 -- the project imports follow run_in_co
 from vonk_control.api.application import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     create_app,
 )
-from vonk_control.auth import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
-    TokenCodec,
-)
 from vonk_control.cache_removal_review import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     CacheAssetDisposition,
 )
@@ -104,6 +101,7 @@ from vonk_control.runs.readiness import (  # noqa: E402 -- the project imports f
 )
 from vonk_control.security.browser_auth import (  # noqa: E402 -- the project imports follow run_in_control, which re-executes in the control environment
     BrowserAuthService,
+    SessionBearerTokens,
 )
 
 OPENAPI = ROOT / "control/openapi.json"
@@ -123,18 +121,15 @@ class _SchemaJobs:
 
 def _schema(*, include_browser_auth: bool) -> dict[str, object]:
     signing_key = b"schema-only-signing-key-32-bytes!"
+    service = BrowserAuthService(
+        sessionmaker(),
+        token_signing_key=signing_key,
+        clock=lambda: datetime.now(UTC),
+    )
     app = create_app(
         jobs=_SchemaJobs(),
-        tokens=TokenCodec(signing_key),
-        browser_auth=(
-            BrowserAuthService(
-                sessionmaker(),
-                token_signing_key=signing_key,
-                clock=lambda: datetime.now(UTC),
-            )
-            if include_browser_auth
-            else None
-        ),
+        tokens=SessionBearerTokens(service, signing_key),
+        browser_auth=service if include_browser_auth else None,
     )
     return admin_openapi_schema(app)
 

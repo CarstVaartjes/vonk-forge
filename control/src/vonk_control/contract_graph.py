@@ -17,9 +17,8 @@ from sqlalchemy.orm import sessionmaker
 from starlette.routing import Mount, Route
 
 from vonk_control.api.application import create_app
-from vonk_control.auth import TokenCodec
 from vonk_control.jobs.queue import JobService
-from vonk_control.security.browser_auth import BrowserAuthService
+from vonk_control.security.browser_auth import BrowserAuthService, SessionBearerTokens
 from vonk_control.strict_json import route_endpoint
 
 
@@ -40,16 +39,15 @@ def _declared_parameters(dependant: Dependant, location: str):
 def schema_application(*, browser_auth: bool = True) -> FastAPI:
 
     key = b"schema-test-signing-key-32-bytes!"
+    service = BrowserAuthService(
+        sessionmaker(),
+        token_signing_key=key,
+        clock=lambda: datetime(2026, 9, 7, tzinfo=UTC),
+    )
     return create_app(
         jobs=JobService(sessionmaker(), clock=lambda: datetime(2026, 9, 7, tzinfo=UTC)),
-        tokens=TokenCodec(key),
-        browser_auth=BrowserAuthService(
-            sessionmaker(),
-            token_signing_key=key,
-            clock=lambda: datetime(2026, 9, 7, tzinfo=UTC),
-        )
-        if browser_auth
-        else None,
+        tokens=SessionBearerTokens(service, key),
+        browser_auth=service if browser_auth else None,
     )
 
 

@@ -15,6 +15,7 @@ from sqlalchemy import event, func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
@@ -28,7 +29,6 @@ from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.service import ArtifactJobService
-from vonk_control.auth import TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild

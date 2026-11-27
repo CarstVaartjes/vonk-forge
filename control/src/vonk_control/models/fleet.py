@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
 from pydantic import JsonValue, TypeAdapter
@@ -62,8 +63,21 @@ class User(Base):
     password_verifier: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
+class SessionKind(StrEnum):
+    """What a session row authorizes: a browser cookie or a CLI bearer token."""
+
+    BROWSER = "browser"
+    CLI = "cli"
+
+
 class LoginSession(Base):
     __tablename__ = "sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN (" + ",".join(f"'{kind.value}'" for kind in SessionKind) + ")",
+            name="ck_sessions_kind",
+        ),
+    )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
@@ -75,6 +89,11 @@ class LoginSession(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Rows from before CLI tokens became rows were all browser sessions; the
+    # scalar default backfills them when startup reconciliation adds the column.
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=SessionKind.BROWSER.value
+    )
 
 
 class AgentNode(Base):

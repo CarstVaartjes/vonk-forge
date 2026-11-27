@@ -32,8 +32,9 @@ from cluster_profiles.cli_json_contract import (
     document_kind,
 )
 from cluster_profiles.control_client.transfers import ControlClient
+from tests.token_support import TokenCodec
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.jobs.queue import JobService

@@ -15,10 +15,10 @@ from sqlalchemy import event, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.api.application import create_app
-from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.gateway.keys import GatewayKeyService

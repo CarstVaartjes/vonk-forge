@@ -23,10 +23,11 @@ from sqlalchemy.orm import sessionmaker
 from cluster_profiles.control_client.errors import ControlClientError
 from cluster_profiles.control_client.schema import source_schema_validator
 from cluster_profiles.control_client.transfers import ControlClient
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api import routes_platform as api
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.fleet_events.stream_contract import FleetRefreshEvent
 from vonk_control.fleet_projection.common import (

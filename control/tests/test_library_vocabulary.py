@@ -15,7 +15,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, update
 from vonk_forge_contracts import catalog_vocabulary
 
-from vonk_control.auth import Actor, TokenCodec
+from tests.token_support import TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.library.api import install_library_routes
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.models.cache import RecipeLibrarySyncRun

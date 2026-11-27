@@ -13,9 +13,9 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.artifact_reference_scan.model_sets import model_set_objects
-from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.distribution.sources import verified_model_receipts
 from vonk_control.execution_plan.compiled import (

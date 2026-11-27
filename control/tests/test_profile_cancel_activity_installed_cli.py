@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from vonk_control.auth import TokenCodec
+from tests.token_support import TokenCodec
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.jobs import Job

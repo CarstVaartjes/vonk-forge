@@ -5,10 +5,10 @@ from typing import Any, Literal
 
 from fastapi.testclient import TestClient
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.reason_codes.evidence import NodeOfflineReason
 from vonk_agent_protocol.state_machines import CertificateState
 from vonk_control.api.application import create_app
-from vonk_control.auth import TokenCodec
 from vonk_control.fleet_projection.common import (
     CapacityReservations,
     FleetNode,

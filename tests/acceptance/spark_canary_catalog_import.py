@@ -32,7 +32,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
-from vonk_control.auth import TokenCodec
+from vonk_control.auth import CursorCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import (
     CatalogSyncError,
@@ -207,7 +207,9 @@ def main() -> None:
     catalog = CatalogService(
         sessions,
         clock=clock,
-        cursors=TokenCodec(settings.token_signing_key).cursor_codec(),
+        # An import never pages, so any 32-byte cursor key serves; the
+        # constructor is the one every release ships.
+        cursors=CursorCodec(os.urandom(32)),
         source_bundles=DatabaseSourceBundleStore(sessions),
     )
     sync = ManagedRecipeCatalogSyncService(

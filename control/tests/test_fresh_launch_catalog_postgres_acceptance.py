@@ -30,7 +30,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import read_model, read_recipe
 
-from vonk_control.auth import Actor, AuthError, TokenCodec
+from tests.token_support import TokenCodec
+from vonk_control.auth import Actor, AuthError
 from vonk_control.catalog.api import CATALOG_OPERATION_IDS, install_catalog_routes
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService

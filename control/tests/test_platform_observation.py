@@ -15,9 +15,10 @@ from sqlalchemy.orm import sessionmaker
 
 from cluster_profiles import cli
 from cluster_profiles.control_client.transfers import ControlClient
+from tests.token_support import TokenCodec
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.build_identity import RuntimeBuildIdentity
 from vonk_control.cli_update_contract import summarize_cli_update_contract
 from vonk_control.model_primitives import Base

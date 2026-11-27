@@ -30,10 +30,10 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts.model import ModelReference
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelAccessReason
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.auth import TokenCodec
 from vonk_control.library.contract import (
     LibraryLocalProgress,
     LibraryLocalState,

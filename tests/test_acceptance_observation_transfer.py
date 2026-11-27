@@ -17,10 +17,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from control.tests.observation_transfer_peer import fleet_authority
+from control.tests.token_support import TokenCodec
 from tests.acceptance.controller_contract import ContractSkew, ControllerContract
 from tests.acceptance.test_spark_lifecycle import LifecycleError, LocalBrowserController
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.fleet_projection.common import FleetSnapshot
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.model_primitives import Base

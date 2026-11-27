@@ -11,8 +11,8 @@ import pytest
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 import vonk_control.catalog.revision_contract as contract
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
-from vonk_control.auth import TokenCodec
 from vonk_control.catalog.entities import CatalogEntityService, CatalogValidationError
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,

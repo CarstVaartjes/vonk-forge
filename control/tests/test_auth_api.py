@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import secrets
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import cast
@@ -14,17 +15,20 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.auth_api import install_auth_routes
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
 from vonk_control.security.browser_auth import (
     BrowserAuthService,
     BrowserIdentity,
+    IssuedCliToken,
     LoginRateLimiter,
+    SessionBearerTokens,
 )
 from vonk_control.security.passwords import hash_password
 
@@ -70,13 +74,13 @@ def _client(*, maximum_subject_failures: int = 5) -> tuple[TestClient, str]:
                 password_verifier=ADMIN_VERIFIER,
             )
         )
-    tokens = iter((SESSION_TOKEN, CSRF_TOKEN))
+    first = iter((SESSION_TOKEN, CSRF_TOKEN))
     signing_key = b"test-token-signing-key-for-auth-api"
     service = BrowserAuthService(
         sessions,
         token_signing_key=signing_key,
         clock=lambda: NOW,
-        token_source=lambda: next(tokens),
+        token_source=lambda: next(first, None) or secrets.token_urlsafe(32),
         rate_limiter=LoginRateLimiter(
             token_signing_key=signing_key,
             maximum_subject_failures=maximum_subject_failures,
@@ -84,7 +88,7 @@ def _client(*, maximum_subject_failures: int = 5) -> tuple[TestClient, str]:
     )
     app = create_app(
         jobs=Jobs(),
-        tokens=TokenCodec(signing_key),
+        tokens=SessionBearerTokens(service, signing_key),
         now=lambda: int(NOW.timestamp()),
         browser_auth=service,
     )
@@ -205,14 +209,8 @@ def test_login_returns_only_a_session_summary_and_exact_secure_cookies() -> None
         f"vonk_csrf={CSRF_TOKEN}; Max-Age=43200; Path=/; SameSite=strict; Secure",
     ]
     serialized = repr((response.headers.items(), response.content))
-    bearer = TokenCodec(b"test-token-signing-key-for-auth-api").issue(
-        Actor("admin", "administrator"),
-        ttl_seconds=60,
-        now=0,
-    )
     assert ADMIN_PASSWORD not in serialized
     assert verifier not in serialized
-    assert bearer not in serialized
 
 
 @pytest.mark.parametrize(
@@ -348,11 +346,7 @@ def test_session_status_and_logout_use_the_durable_cookie_session() -> None:
     }
     assert status.headers["cache-control"] == "no-store"
 
-    bearer = TokenCodec(b"test-token-signing-key-for-auth-api").issue(
-        Actor("bearer-operator", "operator"),
-        ttl_seconds=60,
-        now=int(NOW.timestamp()),
-    )
+    bearer = _mint(client)
     bypass = client.post(
         "/api/auth/logout",
         headers={"authorization": f"Bearer {bearer}"},
@@ -401,19 +395,99 @@ def test_cli_token_is_a_browser_session_only_download_with_expiry() -> None:
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-vonk-token-expires-at"] == "2026-09-12T09:30:00Z"
     token = response.text.strip()
-    assert token
-    assert TokenCodec(b"test-token-signing-key-for-auth-api").verify(
-        token, now=int(NOW.timestamp())
-    ) == Actor("admin", "administrator")
+    listed = client.get(
+        "/api/auth/cli-tokens", headers={"authorization": f"Bearer {token}"}
+    )
+    assert listed.status_code == 200
+    [summary] = listed.json()["tokens"]
+    assert summary["presented"] is True
+    assert summary["revoked"] is False
+    assert token not in listed.text
+
+
+def _mint(client: TestClient) -> str:
+    if "vonk_session" not in client.cookies:
+        assert _login(client).status_code == 200
+    response = client.post("/api/auth/cli-token", headers={"x-csrf-token": CSRF_TOKEN})
+    assert response.status_code == 200
+    return response.text.strip()
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"authorization": f"Bearer {token}"}
+
+
+def test_revoking_one_cli_token_leaves_the_others_working() -> None:
+    # Break caught: revocation that is not looked up per request (a stateless
+    # bearer) keeps a stolen laptop's token valid for its whole 30 days.
+    client, _verifier = _client()
+    stolen, kept = _mint(client), _mint(client)
+    listed = client.get("/api/auth/cli-tokens", headers=_bearer(kept)).json()["tokens"]
+    stolen_id = next(item["id"] for item in listed if not item["presented"])
+
+    revoked = client.post(
+        f"/api/auth/cli-tokens/{stolen_id}/revoke", headers=_bearer(kept)
+    )
+
+    assert revoked.status_code == 204
+    assert (
+        client.get("/api/auth/cli-tokens", headers=_bearer(stolen)).status_code == 401
+    )
+    after = client.get("/api/auth/cli-tokens", headers=_bearer(kept))
+    assert after.status_code == 200
+    flags = {item["id"]: item["revoked"] for item in after.json()["tokens"]}
+    assert flags[stolen_id]
+    unknown = "00000000-0000-4000-8000-000000000000"
+    assert (
+        client.post(
+            f"/api/auth/cli-tokens/{unknown}/revoke", headers=_bearer(kept)
+        ).status_code
+        == 404
+    )
+
+
+def test_revoke_all_ends_every_cli_token_and_browser_session() -> None:
+    client, _verifier = _client()
+    first, second = _mint(client), _mint(client)
+
+    response = client.post("/api/auth/cli-tokens/revoke-all", headers=_bearer(first))
+
+    assert response.status_code == 204
+    for token in (first, second):
+        assert (
+            client.get("/api/auth/cli-tokens", headers=_bearer(token)).status_code
+            == 401
+        )
+    assert client.get("/api/auth/session").status_code == 401
+
+
+def test_token_kinds_never_cross_and_stateless_tokens_are_refused() -> None:
+    # Break caught: a resolver that ignores the row kind lets a CLI token act
+    # as a browser cookie (and mint more tokens), or a session cookie value act
+    # as a 30-day bearer; a leftover signature check accepts pre-row tokens.
+    client, _verifier = _client()
+    cli_token = _mint(client)
+    stateless = TokenCodec(b"test-token-signing-key-for-auth-api").issue(
+        Actor("admin", "administrator"), ttl_seconds=60, now=int(NOW.timestamp())
+    )
+
+    assert (
+        client.get("/api/auth/cli-tokens", headers=_bearer(SESSION_TOKEN)).status_code
+        == 401
+    )
+    assert (
+        client.get("/api/auth/cli-tokens", headers=_bearer(stateless)).status_code
+        == 401
+    )
+    cookie_only = TestClient(client.app, base_url=ORIGIN)
+    cookie_only.cookies.set("vonk_session", cli_token)
+    assert cookie_only.get("/api/auth/session").status_code == 401
 
 
 def test_cli_token_cannot_be_minted_with_a_bearer_or_without_csrf() -> None:
     client, _verifier = _client()
-    bearer = TokenCodec(b"test-token-signing-key-for-auth-api").issue(
-        Actor("admin", "administrator"),
-        ttl_seconds=60,
-        now=int(NOW.timestamp()),
-    )
+    bearer = _mint(client)
+    client.cookies.clear()
     assert (
         client.post(
             "/api/auth/cli-token",
@@ -433,13 +507,12 @@ def test_cli_token_checks_csrf_even_when_actor_dependency_already_authenticated(
     service.resolve.return_value = BrowserIdentity(
         Actor("admin", "administrator"), NOW, "session"
     )
+    service.issue_cli_token.return_value = IssuedCliToken("cli", NOW, "token")
     app = FastAPI()
     install_auth_routes(
         app,
         cast(BrowserAuthService, service),
         Depends(lambda: Actor("admin", "administrator")),
-        TokenCodec(b"test-token-signing-key-for-auth-api"),
-        lambda: int(NOW.timestamp()),
     )
     client = TestClient(app, base_url=ORIGIN)
     client.cookies.set("vonk_session", SESSION_TOKEN)

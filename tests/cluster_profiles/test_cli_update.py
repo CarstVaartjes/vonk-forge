@@ -40,11 +40,12 @@ from cluster_profiles.runtime_identity import (
     verified_wheel_identity,
 )
 from control.tests.consumer_outcomes import not_adopted
+from control.tests.token_support import TokenCodec
 from tools import cli_dependencies
 from vonk_control import api as api_module
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.model_primitives import Base
 from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObservation, PlatformObserver

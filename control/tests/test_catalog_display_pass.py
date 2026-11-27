@@ -24,8 +24,8 @@ from vonk_forge_contracts import (
     RecipeDisplay,
 )
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.state_machines import CatalogSyncState
-from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.catalog.sync import _controller_marker as controller_marker

@@ -1,9 +1,12 @@
-"""``vonkctl auth``: log in once, check the login, or forget it.
+"""``vonkctl auth``: log in once, check the login, list or revoke tokens, or log out.
 
 Login types the admin password into a no-echo prompt (or stdin), uses it for
 one browser-style session, mints the usual CLI token through the Controller's
 own routes, ends the session, and keeps only the token. The password is never
-stored, put in argv or environment, or printed; neither is the token.
+stored, put in argv or environment, or printed; neither is the token. Every
+CLI token is a revocable Controller row: ``logout`` revokes this login's token,
+``tokens`` lists them and revokes one by id or all of them (browser sessions
+included).
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import sys
 import urllib.parse
 import urllib.request
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from email.message import Message
 from enum import StrEnum
@@ -25,6 +28,7 @@ from cluster_profiles.control_client.client import ControlClient
 from cluster_profiles.control_client.connection import (
     TOKEN_FILE_ENV,
     URL_ENV,
+    Credential,
     StoredConnection,
     connection_path,
     days_until,
@@ -44,7 +48,10 @@ from cluster_profiles.control_client.errors import (
     ControlUnauthorized,
     LocalInputError,
 )
-from cluster_profiles.control_client.transport import _read_control_response
+from cluster_profiles.control_client.transport import (
+    _read_control_response,
+    _read_token_file,
+)
 from cluster_profiles.control_transport import open_https
 
 _TIMEOUT_SECONDS = 15
@@ -56,6 +63,7 @@ class AuthAction(StrEnum):
     LOGIN = "login"
     STATUS = "status"
     LOGOUT = "logout"
+    TOKENS = "tokens"
 
 
 class _Unknown(StrEnum):
@@ -112,8 +120,37 @@ class StatusResult:
 
 @dataclass(frozen=True)
 class LogoutResult:
+    #: Whether the Controller confirmed this login's token is revoked.
+    token_revoked: bool
+
+    def document(self) -> dict[str, bool]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class TokenEntry:
+    id: str
+    expires_at: str
+    revoked: bool
+    #: The token this vonkctl login presented.
+    presented: bool
+
+
+@dataclass(frozen=True)
+class TokensResult:
+    tokens: tuple[TokenEntry, ...]
+
+    def document(self) -> dict[str, list[dict[str, str | bool]]]:
+        return {"tokens": [asdict(entry) for entry in self.tokens]}
+
+
+@dataclass(frozen=True)
+class RevokeResult:
+    #: The revoked token id, or ``all``.
+    revoked_token: str
+
     def document(self) -> dict[str, str]:
-        return {}
+        return asdict(self)
 
 
 class LoginFailed(LocalInputError):
@@ -297,25 +334,106 @@ def _status() -> StatusResult:
     )
 
 
+def _bearer_request(
+    credential: Credential, method: str, path: str
+) -> tuple[int, bytes]:
+    """One authenticated call to the Controller's own CLI-token routes."""
+
+    token = _read_token_file(credential.token_file)
+    request = urllib.request.Request(
+        credential.url.rstrip("/") + path,
+        data=b"" if method == "POST" else None,
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        method=method,
+    )
+    status, content, _headers = _read_control_response(
+        open_https, request, _TIMEOUT_SECONDS
+    )
+    return status, content
+
+
+def _list_tokens(credential: Credential) -> TokensResult:
+    status, content = _bearer_request(credential, "GET", "/api/auth/cli-tokens")
+    if status != 200:
+        raise LoginFailed(f"the Controller token list answered {status}")
+    try:
+        document = json.loads(content)
+        entries = tuple(
+            TokenEntry(
+                id=str(item["id"]),
+                expires_at=str(item["expires_at"]),
+                revoked=item["revoked"] is True,
+                presented=item["presented"] is True,
+            )
+            for item in document["tokens"]
+        )
+    except ValueError, KeyError, TypeError:
+        raise LoginFailed("the Controller sent an unreadable token list") from None
+    return TokensResult(entries)
+
+
+def _revoke(token_id: str | None, *, everything: bool) -> RevokeResult:
+    if everything and token_id is not None:
+        raise LoginFailed("give one token id with --revoke, or --revoke-all")
+    credential = resolve_credential()
+    path = (
+        "/api/auth/cli-tokens/revoke-all"
+        if everything
+        else f"/api/auth/cli-tokens/{urllib.parse.quote(token_id or '', safe='')}/revoke"
+    )
+    status, _content = _bearer_request(credential, "POST", path)
+    if status == 404:
+        raise LoginFailed("the Controller has no CLI token with that id")
+    if status != 204:
+        raise LoginFailed(f"the Controller revocation answered {status}")
+    return RevokeResult("all" if everything else str(token_id))
+
+
 def _logout() -> LogoutResult:
+    revoked = False
+    # Best effort: the local files go regardless, but a reachable Controller
+    # also revokes this login's token, so a copied token file stops working.
+    with suppress(ControlClientError, LocalInputError, OSError):
+        credential = resolve_credential()
+        if not credential.token_from_environment:
+            current = next(
+                (entry for entry in _list_tokens(credential).tokens if entry.presented),
+                None,
+            )
+            if current is not None:
+                status, _content = _bearer_request(
+                    credential, "POST", f"/api/auth/cli-tokens/{current.id}/revoke"
+                )
+                revoked = status == 204
     for path in (login_token_path(), connection_path()):
         path.unlink(missing_ok=True)
-    return LogoutResult()
+    return LogoutResult(revoked)
 
 
 def run_auth(
-    action: str | None, *, url: str | None, password_stdin: bool
-) -> LoginResult | StatusResult | LogoutResult:
+    action: str | None,
+    *,
+    url: str | None,
+    password_stdin: bool,
+    token_id: str | None = None,
+    revoke_all: bool = False,
+) -> LoginResult | StatusResult | LogoutResult | TokensResult | RevokeResult:
     if action == AuthAction.LOGIN:
         return _login(url, password_stdin=password_stdin)
     if action == AuthAction.STATUS:
         return _status()
     if action == AuthAction.LOGOUT:
         return _logout()
+    if action == AuthAction.TOKENS:
+        if token_id is None and not revoke_all:
+            return _list_tokens(resolve_credential())
+        return _revoke(token_id, everything=revoke_all)
     raise ValueError(f"unknown auth action {action!r}")
 
 
-def render(result: LoginResult | StatusResult | LogoutResult) -> str:
+def render(
+    result: LoginResult | StatusResult | LogoutResult | TokensResult | RevokeResult,
+) -> str:
     if isinstance(result, LoginResult):
         text = (
             f"Logged in to {result.controller_url}; token expires "
@@ -336,7 +454,24 @@ def render(result: LoginResult | StatusResult | LogoutResult) -> str:
                 f"Check: GET /api/fleet {result.check}",
             )
         )
+    if isinstance(result, TokensResult):
+        if not result.tokens:
+            return "No CLI tokens."
+        return "\n".join(
+            f"{entry.id}  expires {entry.expires_at[:10]}"
+            + ("  revoked" if entry.revoked else "")
+            + ("  (this login)" if entry.presented else "")
+            for entry in result.tokens
+        )
+    if isinstance(result, RevokeResult):
+        if result.revoked_token == "all":
+            return "Revoked every CLI token and browser session."
+        return f"Revoked CLI token {result.revoked_token}."
+    if result.token_revoked:
+        return (
+            "Revoked this login's token on the Controller and removed the local login."
+        )
     return (
-        "Removed the local login. The token itself stays valid until it "
-        "expires; the Controller has no revocation."
+        "Removed the local login. The Controller was not reached, so the token "
+        "stays valid until it expires or is revoked (vonkctl auth tokens --revoke ID)."
     )

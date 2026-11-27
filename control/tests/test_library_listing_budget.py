@@ -31,9 +31,10 @@ from sqlalchemy import event, select, update
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles.cli_render.dispatch import render_payload
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.api.production import LibraryObservations
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.library.api import install_library_routes
 from vonk_control.library.assessment import LibraryAssessment, unavailable
 from vonk_control.library.contract import (

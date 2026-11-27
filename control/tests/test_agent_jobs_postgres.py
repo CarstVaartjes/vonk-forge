@@ -14,6 +14,7 @@ from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.agent_operations import (
     AgentFailureKind,
     ArtifactDistributionResult,
@@ -49,7 +50,6 @@ from vonk_control.agent_jobs.contracts import StaleAgentAttempt
 from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_operation_facts import AGENT_ORDER_RECOVERY_BUDGET
-from vonk_control.auth import TokenCodec
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,

@@ -13,8 +13,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base

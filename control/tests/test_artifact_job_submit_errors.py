@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,
     RequestValidationProblem,
@@ -24,7 +25,7 @@ from vonk_agent_protocol.outcome import (
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.categorized_errors import InvalidType, SecurityRefused
 from vonk_control.models.execution import ArtifactJob, RecipeRun
 from vonk_control.models.operations import AgentOperation

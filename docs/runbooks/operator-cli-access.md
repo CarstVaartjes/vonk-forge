@@ -91,6 +91,11 @@ not extend lifetimes or broaden grants to conceal an authentication dependency.
 The configured Vonk token-renewal helper preserves the Controller's normal
 lifetime, validates a new token before replacing the old one, and fails visibly
 if its scoped source credential or Controller authorization is refused.
+A Controller CLI token is a revocable Controller row: a lost or copied token
+file is revoked with `vonkctl auth tokens --revoke ID` (see `vonkctl auth tokens`), or
+with `vonkctl auth tokens --revoke-all`, which also ends every browser session. A
+revoked or pre-row token answers 401; only `vonkctl auth login` by the owner
+mints a new one.
 
 Verify a locked but awake user session separately from logout, sleep, shutdown,
 or pre-login disk unlock. A user LaunchAgent does not establish pre-login

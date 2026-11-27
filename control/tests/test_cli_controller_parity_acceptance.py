@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 
 from cluster_profiles import cli
-from vonk_control.auth import TokenCodec
+from tests.token_support import TokenCodec
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileDefinition,
     FleetProfileInput,

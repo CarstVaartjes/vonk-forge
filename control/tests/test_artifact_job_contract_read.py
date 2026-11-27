@@ -19,6 +19,7 @@ from cluster_profiles.control_client.schema import validate_control_document
 from cluster_profiles.generated_control.models.artifact_job_contract_response import (
     ArtifactJobContractResponse as ClientArtifactJobContractResponse,
 )
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.api.application import create_app
 from vonk_control.artifact_jobs.api import install_artifact_job_routes
@@ -34,7 +35,7 @@ from vonk_control.artifact_jobs.job_contract import (
     JobContractState,
 )
 from vonk_control.artifact_jobs.service import ArtifactJobService
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.compiled_artifact_contract import CompiledArtifactContract
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.execution import RecipeInstallation, RecipeRun

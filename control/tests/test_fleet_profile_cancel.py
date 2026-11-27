@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -27,7 +28,7 @@ from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import ReservationState, RunState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs.evidence import read_result_evidence
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput

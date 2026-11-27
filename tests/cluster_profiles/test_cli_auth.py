@@ -144,3 +144,62 @@ def test_a_bad_stdin_password_fails_without_echoing_its_bytes(
 
     assert "secret" not in str(failure.value)
     assert "\xff" not in str(failure.value)
+
+
+_LISTED = (
+    b'{"tokens":[{"id":"a","expires_at":"2026-12-21T12:00:00Z","revoked":false,'
+    b'"presented":false},{"id":"b","expires_at":"2026-12-21T12:00:00Z",'
+    b'"revoked":false,"presented":true}]}'
+)
+
+
+def test_logout_revokes_only_this_logins_token_then_deletes_the_files(
+    login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Break caught: a logout that only deletes files leaves a copied token
+    # file valid for 30 days; one that revokes the wrong row logs out another
+    # machine.
+    login(_NOW + timedelta(days=30))
+    calls: list[tuple[str, str]] = []
+
+    def controller(_credential, method: str, path: str) -> tuple[int, bytes]:
+        calls.append((method, path))
+        return (200, _LISTED) if method == "GET" else (204, b"")
+
+    monkeypatch.setattr(cli_auth, "_bearer_request", controller)
+
+    result = cli_auth.run_auth("logout", url=None, password_stdin=False)
+
+    assert result.document() == {"token_revoked": True}
+    assert calls[-1] == ("POST", "/api/auth/cli-tokens/b/revoke")
+    assert not login_token_path().exists()
+    assert not connection_path().exists()
+
+
+def test_logout_without_a_controller_still_removes_the_local_login(
+    login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login(_NOW + timedelta(days=30))
+
+    def unreachable(_credential, _method: str, _path: str) -> tuple[int, bytes]:
+        raise OSError("no route to host")
+
+    monkeypatch.setattr(cli_auth, "_bearer_request", unreachable)
+
+    result = cli_auth.run_auth("logout", url=None, password_stdin=False)
+
+    assert result.document() == {"token_revoked": False}
+    assert not login_token_path().exists()
+
+
+def test_revoke_takes_one_id_or_everything_not_both(login) -> None:
+    login(_NOW + timedelta(days=30))
+
+    with pytest.raises(cli_auth.LoginFailed):
+        cli_auth.run_auth(
+            "tokens",
+            url=None,
+            password_stdin=False,
+            token_id="b",
+            revoke_all=True,
+        )
