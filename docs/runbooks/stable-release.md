@@ -48,6 +48,15 @@ the tagged commit.
   this against the published stable contract (`docs/testing-and-ci.md`).
 - The dev channel has no compatibility promise.
 - Rollback is fix-forward. The previous minor's tables survive the newer one.
+  Rolling back to the previous minor (N → N-1 → N) loses nothing: schema
+  reconciliation keeps undeclared columns with their data and undeclared tables
+  for one minor, and reinstalls the foreign keys it dropped from a kept table
+  (`NOT VALID` when old rows violate them) once the table is declared again.
+  Skipping a minor is outside the promise: 1.2 → 1.0 → 1.1 drops the tables 1.2
+  added, because 1.0 stamps them and 1.1 retires them. The dev channel keeps no
+  undeclared table, so stable → dev → stable loses the data of tables dev no
+  longer declares. There is deliberately no schema-version guard at boot: a
+  refusing guard would block the rollbacks reconciliation already handles.
 
 ## Before the tag
 
