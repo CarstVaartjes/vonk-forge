@@ -111,7 +111,7 @@ def test_auth_openapi_documents_every_runtime_error_status() -> None:
     schema = app.openapi()
     paths = schema["paths"]
     expected = {
-        "/api/auth/login": {"401", "403", "422"},
+        "/api/auth/login": {"401", "403", "422", "503"},
         "/api/auth/session": {"401"},
         "/api/auth/logout": {"401", "403"},
         "/api/auth/cli-token": {"401", "403"},
@@ -120,7 +120,7 @@ def test_auth_openapi_documents_every_runtime_error_status() -> None:
         for method in ("post",) if path != "/api/auth/session" else ("get",):
             responses = paths[path][method]["responses"]
             assert statuses <= set(responses)
-            for status_code in statuses - {"422"}:
+            for status_code in statuses - {"422", "503"}:
                 response_schema = responses[status_code]["content"]["application/json"][
                     "schema"
                 ]

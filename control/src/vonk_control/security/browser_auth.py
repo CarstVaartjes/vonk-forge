@@ -41,6 +41,10 @@ MIN_ADMIN_PASSWORD_CHARACTERS = 12
 # login behind it. There is no lockout: no failure count can refuse the
 # correct password.
 FAILED_LOGIN_DELAY_SECONDS = 1.0
+# A login waits at most this long for its turn on the verification lock. A
+# waiter past it gets a temporary answer and its retry takes a fresh turn, so
+# a flood bounds every wait instead of queueing it without end.
+LOGIN_LOCK_WAIT_SECONDS = 10.0
 
 
 class BrowserAuthenticationError(ValueError):
@@ -48,6 +52,10 @@ class BrowserAuthenticationError(ValueError):
 
     def __init__(self) -> None:
         super().__init__("authentication failed")
+
+
+class BrowserLoginBusyError(Exception):
+    """The verification lock stayed taken past the wait deadline; retry heals."""
 
 
 @dataclass(frozen=True)
@@ -104,6 +112,7 @@ class BrowserAuthService:
         token_source: Callable[[], object] | None = None,
         password_check: Callable[[str, str], bool] | None = None,
         failure_delay: Callable[[], Awaitable[None]] | None = None,
+        lock_wait_seconds: float = LOGIN_LOCK_WAIT_SECONDS,
     ) -> None:
         self._sessions = sessions
         self._clock = clock
@@ -114,18 +123,27 @@ class BrowserAuthService:
         # logins wait here, on the event loop: they hold no worker thread and
         # no database connection.
         self._verification = asyncio.Lock()
+        self._lock_wait_seconds = lock_wait_seconds
 
     async def admit(self, subject: str, password: str) -> IssuedBrowserSession:
         """The HTTP login: serialized verification, then a delay on failure only.
 
         No failure count ever refuses a login, so the correct password succeeds
-        during a flood once its turn on the lock comes.
+        during a flood once its turn on the lock comes. A turn that does not
+        come within the wait deadline raises BrowserLoginBusyError, which the
+        boundary answers as a temporary 503; the retry waits again.
         """
-        async with self._verification:
-            try:
-                return await asyncio.to_thread(self.login, subject, password)
-            except BrowserAuthenticationError:
-                pass
+        try:
+            async with asyncio.timeout(self._lock_wait_seconds):
+                await self._verification.acquire()
+        except TimeoutError:
+            raise BrowserLoginBusyError from None
+        try:
+            return await asyncio.to_thread(self.login, subject, password)
+        except BrowserAuthenticationError:
+            pass
+        finally:
+            self._verification.release()
         await self._failure_delay()
         raise BrowserAuthenticationError
 

@@ -20,6 +20,7 @@ from vonk_control.security.browser_auth import (
     BootstrapOutcome,
     BrowserAuthenticationError,
     BrowserAuthService,
+    BrowserLoginBusyError,
     bootstrap_administrator,
 )
 from vonk_control.security.passwords import hash_password, verify_password
@@ -327,6 +328,7 @@ def _admitting_service(
     *,
     password_check: Callable[[str, str], bool] | None = None,
     failure_delay: Callable[[], Awaitable[None]] | None = None,
+    lock_wait_seconds: float = 30.0,
 ) -> BrowserAuthService:
     tokens = iter(opaque(byte) for byte in range(40, 60))
     return BrowserAuthService(
@@ -335,6 +337,7 @@ def _admitting_service(
         token_source=lambda: next(tokens),
         password_check=password_check,
         failure_delay=failure_delay,
+        lock_wait_seconds=lock_wait_seconds,
     )
 
 
@@ -446,5 +449,41 @@ def test_a_pending_failure_delay_does_not_queue_the_next_login() -> None:
         finish.set()
         with pytest.raises(BrowserAuthenticationError):
             await failed
+
+    asyncio.run(scenario())
+
+
+def test_a_login_waiting_past_the_deadline_is_busy_and_its_retry_succeeds() -> None:
+    """An unbounded wait queues the owner behind a flood; a refusal must heal."""
+    sessions = _threaded_sessions()
+    add_admin(sessions)
+    release = threading.Event()
+    entered = threading.Event()
+
+    def held_check(_verifier: str, password: str) -> bool:
+        entered.set()
+        assert release.wait(timeout=30)
+        return password == ADMIN_PASSWORD
+
+    async def no_delay() -> None:
+        return None
+
+    service = _admitting_service(
+        sessions,
+        password_check=held_check,
+        failure_delay=no_delay,
+        lock_wait_seconds=0.05,
+    )
+
+    async def scenario() -> None:
+        holder = asyncio.create_task(service.admit("admin", "wrong password"))
+        await _until(entered.is_set)
+        with pytest.raises(BrowserLoginBusyError):
+            await service.admit("admin", ADMIN_PASSWORD)
+        release.set()
+        with pytest.raises(BrowserAuthenticationError):
+            await holder
+        issued = await service.admit("admin", ADMIN_PASSWORD)
+        assert service.resolve(issued.token).actor == Actor("admin", "administrator")
 
     asyncio.run(scenario())

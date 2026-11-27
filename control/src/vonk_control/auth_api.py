@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 from fastapi import FastAPI, HTTPException, Path, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
+from vonk_agent_protocol.http_failure import TransientReason
 from vonk_control.auth import (
     ADMIN_ROLE,
     CSRF_COOKIE,
@@ -16,6 +17,7 @@ from vonk_control.auth import (
     Actor,
     AdministratorRole,
 )
+from vonk_control.http_errors import temporary_http_answer
 from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
@@ -25,6 +27,7 @@ from vonk_control.security.browser_auth import (
     BrowserAuthenticationError,
     BrowserAuthService,
     BrowserIdentity,
+    BrowserLoginBusyError,
 )
 
 _COOKIE_MAX_AGE = 43_200
@@ -141,7 +144,7 @@ def install_auth_routes(
         "/api/auth/login",
         response_model=AuthSession,
         responses={
-            **bounded_error_responses(401, 403),
+            **bounded_error_responses(401, 403, 503),
             422: {
                 "description": "Invalid login request",
                 "model": LoginRequestInvalid,
@@ -158,6 +161,8 @@ def install_auth_routes(
             raise HTTPException(status_code=403, detail="origin validation failed")
         try:
             issued = await service.admit(body.subject, body.password)
+        except BrowserLoginBusyError:
+            temporary_http_answer(TransientReason.ADMISSION_BUSY)
         except BrowserAuthenticationError:
             raise HTTPException(
                 status_code=401, detail="authentication failed"
