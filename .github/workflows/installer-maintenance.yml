@@ -193,7 +193,9 @@ jobs:
             else
               gh issue create --title "$TITLE" --body "$body"
             fi
-          elif [[ -n "$issue" ]]; then
+          elif [[ -n "$issue" && "$RESULTS" == "success success" ]]; then
+            # Only a run where both jobs succeeded proves the refresh works
+            # again; cancelled or skipped runs leave the issue open.
             gh issue close "$issue" --comment "Scheduled run succeeded: $RUN_URL"
           fi
 

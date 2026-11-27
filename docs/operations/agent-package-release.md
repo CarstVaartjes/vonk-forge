@@ -109,7 +109,7 @@ refreshes both channels.
 
 Every scheduled run re-enables the workflow, which prevents that 60-day
 disable, and a failed scheduled run opens or comments on the issue "Installer
-maintenance is failing" (it closes when a scheduled run succeeds). That issue
+maintenance is failing" (it closes only when a scheduled run fully succeeds). That issue
 means the refresh is failing, for example because of a rotated R2 or signing
 secret: fix the cause, then rerun the failed run.
 
