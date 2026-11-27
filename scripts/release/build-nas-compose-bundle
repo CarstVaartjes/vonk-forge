@@ -287,7 +287,7 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
         "preflight": [
             "Use the operator tailnet only; define and advertise only the exact Services listed below.",
             "Enable MagicDNS and HTTPS certificates in the Tailscale DNS settings.",
-            "Define svc:vonk-forge with endpoint tcp:443.",
+            "Define svc:vonk-forge and svc:vonk-forge-litellm (the LiteLLM admin UI origin), each with endpoint tcp:443.",
             "Merge the reviewed grants.example.hujson policy, including gateway self-access and exact Service auto-approval.",
             "Create a machine OAuth client with only auth_keys write scope and only tag:vonk-gateway.",
             "Keep the raw OAuth client ID and secret ready; the secret is entered with hidden input.",

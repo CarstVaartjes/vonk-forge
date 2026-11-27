@@ -108,7 +108,15 @@ verify the controller from a LAN client.
 Do not add host-path overrides. Persistent data belongs to the named Docker
 volumes declared by the generated project. Caddy publishes 8443 on all NAS
 interfaces and serves the browser UI with the generated local CA certificate;
-Secure remote additionally enables the Tailscale gateway. PostgreSQL is the
+Secure remote additionally enables the Tailscale gateway. The LiteLLM admin
+UI has its own origin, the control hostname with `-litellm` appended to its
+first label (`vonk-forge-litellm.<tailnet>.ts.net`, the `svc:vonk-forge-litellm`
+Service, in Secure remote; `vonk-forge-litellm.local:8443` in Lab mode), so its
+scripts never reach the Controller's cookies. The Controller host keeps `/v1`
+and the `/litellm/*` API for clients and sandboxes every LiteLLM response there;
+no LiteLLM route receives a browser Cookie. The installer adds the name to the
+controller certificate, so rerun it once after upgrading to this release for
+the LAN listener to present it. PostgreSQL is the
 control authority and Step CA is the agent identity authority. There is no
 runtime Git checkout, host updater, migration helper, or A/B agent supervisor.
 The one setup service is `runtime-init` (below); like every service it stays

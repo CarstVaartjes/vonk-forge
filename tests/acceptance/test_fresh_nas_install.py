@@ -1188,16 +1188,17 @@ def _expected_tailnet_serve_status(
     tailnet_suffix: str,
     control_service: str = "svc:vonk-forge",
 ) -> dict[str, object]:
-    control_hostname = tailscale_service_hostname(control_service, tailnet_suffix)
+    # The control Service and its LiteLLM admin UI origin (configure.sh).
     services: dict[str, object] = {
-        control_service: {
+        service: {
             "TCP": {"443": {"HTTPS": True}},
             "Web": {
-                f"{control_hostname}:443": {
+                f"{tailscale_service_hostname(service, tailnet_suffix)}:443": {
                     "Handlers": {"/": {"Proxy": "http://caddy:8080"}}
                 }
             },
         }
+        for service in (control_service, f"{control_service}-litellm")
     }
     return {"Services": services}
 
@@ -1207,7 +1208,8 @@ def _expected_tailnet_serve_configuration(
     control_service: str = "svc:vonk-forge",
 ) -> dict[str, object]:
     services: dict[str, object] = {
-        control_service: {"endpoints": {"tcp:443": "http://caddy:8080"}}
+        service: {"endpoints": {"tcp:443": "http://caddy:8080"}}
+        for service in (control_service, f"{control_service}-litellm")
     }
     return {"version": "0.0.1", "services": services}
 

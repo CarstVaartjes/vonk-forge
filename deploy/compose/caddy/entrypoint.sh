@@ -42,6 +42,15 @@ control_hostname=$(normalize_hostname "$VONK_CONTROL_HOSTNAME")
 export VONK_CONTROL_HOSTNAME="$control_hostname"
 export VONK_AGENT_ENROLL_HOSTNAME="enroll.$control_hostname"
 export VONK_AGENT_HOSTNAME="agents.$control_hostname"
+# The LiteLLM admin UI gets its own origin: the control hostname with
+# "-litellm" appended to its first label, a sibling name (never a subdomain)
+# so it is also a Tailscale Service name. The installer's certificate and the
+# Tailscale configurator derive the same name.
+case "$control_hostname" in
+  *.*) litellm_hostname="${control_hostname%%.*}-litellm.${control_hostname#*.}" ;;
+  *) litellm_hostname="${control_hostname}-litellm" ;;
+esac
+export VONK_LITELLM_HOSTNAME="$litellm_hostname"
 
 for required_file in \
   /run/secrets/controller-server-certificate \
