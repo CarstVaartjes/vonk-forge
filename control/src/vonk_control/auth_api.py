@@ -9,7 +9,6 @@ from typing import Annotated, Any, Literal
 from fastapi import FastAPI, HTTPException, Path, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from vonk_agent_protocol.http_failure import TransientReason
 from vonk_control.auth import (
     ADMIN_ROLE,
     CSRF_COOKIE,
@@ -17,7 +16,6 @@ from vonk_control.auth import (
     Actor,
     AdministratorRole,
 )
-from vonk_control.http_errors import temporary_http_answer
 from vonk_control.identifiers import UUID_PATTERN
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS
 from vonk_control.operation_api.contracts import bounded_error_responses
@@ -25,7 +23,6 @@ from vonk_control.operator_acceptance.receipt_contract import SecurityEdge
 from vonk_control.operator_acceptance.resolution import security_edge
 from vonk_control.security.browser_auth import (
     BrowserAuthenticationError,
-    BrowserAuthenticationThrottledError,
     BrowserAuthService,
     BrowserIdentity,
 )
@@ -144,7 +141,7 @@ def install_auth_routes(
         "/api/auth/login",
         response_model=AuthSession,
         responses={
-            **bounded_error_responses(401, 403, 429),
+            **bounded_error_responses(401, 403),
             422: {
                 "description": "Invalid login request",
                 "model": LoginRequestInvalid,
@@ -153,14 +150,14 @@ def install_auth_routes(
         operation_id="loginBrowser",
     )
     @security_edge(SecurityEdge.LOGIN)
-    def login(body: LoginRequest, request: Request, response: Response) -> AuthSession:
+    async def login(
+        body: LoginRequest, request: Request, response: Response
+    ) -> AuthSession:
         host = request.headers.get("host")
         if host is None or request.headers.get("origin") != f"https://{host}":
             raise HTTPException(status_code=403, detail="origin validation failed")
         try:
-            issued = service.login(body.subject, body.password)
-        except BrowserAuthenticationThrottledError:
-            temporary_http_answer(TransientReason.RATE_LIMITED)
+            issued = await service.admit(body.subject, body.password)
         except BrowserAuthenticationError:
             raise HTTPException(
                 status_code=401, detail="authentication failed"

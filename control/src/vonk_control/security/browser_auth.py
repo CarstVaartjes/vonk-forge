@@ -6,19 +6,15 @@ either can be revoked one by one or all together.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import secrets
-import time
-from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
-from hmac import new as hmac_new
-from itertools import count
-from threading import Lock
 
 from sqlalchemy import delete, or_, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -37,13 +33,14 @@ CLI_TOKEN_LIFETIME = timedelta(days=30)
 _OPAQUE_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 _EXPIRED_CLEANUP_LIMIT = 100
 _CLI_TOKEN_LIST_LIMIT = 100
-_LOGIN_WINDOW_SECONDS = 300.0
-_MAX_SUBJECT_FAILURES = 5
-_MAX_GLOBAL_FAILURES = 20
-_MAX_TRACKED_SUBJECTS = 1_024
 # The staged administrator password the bootstrap adopts. Only the bootstrap
 # enforces it: login verification accepts whatever verifier is stored.
 MIN_ADMIN_PASSWORD_CHARACTERS = 12
+# A failed login answers only after this delay. It slows a sequential guesser
+# and is awaited outside the verification lock, so it never queues an honest
+# login behind it. There is no lockout: no failure count can refuse the
+# correct password.
+FAILED_LOGIN_DELAY_SECONDS = 1.0
 
 
 class BrowserAuthenticationError(ValueError):
@@ -51,13 +48,6 @@ class BrowserAuthenticationError(ValueError):
 
     def __init__(self) -> None:
         super().__init__("authentication failed")
-
-
-class BrowserAuthenticationThrottledError(BrowserAuthenticationError):
-    """A generic temporary failure used when login work must be throttled."""
-
-    def __init__(self) -> None:
-        ValueError.__init__(self, "authentication temporarily unavailable")
 
 
 @dataclass(frozen=True)
@@ -103,141 +93,6 @@ class BootstrapOutcome(StrEnum):
     REFUSED = "refused"
 
 
-@dataclass(frozen=True)
-class LoginAttempt:
-    """An opaque admission reservation finalized exactly once by the caller."""
-
-    _owner: object = field(repr=False, compare=False)
-    _id: int = field(repr=False)
-
-
-@dataclass
-class _AttemptState:
-    identifier: str
-    id: int
-    attempted_at: float
-    failed: bool = False
-
-
-class LoginRateLimiter:
-    """A bounded, process-local failure limiter with opaque subject identifiers."""
-
-    def __init__(
-        self,
-        *,
-        token_signing_key: object,
-        clock: Callable[[], float] = time.monotonic,
-        maximum_tracked_subjects: object = _MAX_TRACKED_SUBJECTS,
-        maximum_subject_failures: object = _MAX_SUBJECT_FAILURES,
-        maximum_global_failures: object = _MAX_GLOBAL_FAILURES,
-        window_seconds: float = _LOGIN_WINDOW_SECONDS,
-    ) -> None:
-        if not isinstance(token_signing_key, bytes) or not token_signing_key:
-            raise ValueError("token signing key is invalid")
-        if (
-            not isinstance(maximum_tracked_subjects, int)
-            or not isinstance(maximum_subject_failures, int)
-            or not isinstance(maximum_global_failures, int)
-            or maximum_tracked_subjects < 1
-            or maximum_subject_failures < 1
-            or maximum_global_failures < 1
-            or window_seconds <= 0
-        ):
-            raise ValueError("login rate limit is invalid")
-        self._token_signing_key = token_signing_key
-        self._clock = clock
-        self._maximum_tracked_subjects = maximum_tracked_subjects
-        self._maximum_subject_failures = maximum_subject_failures
-        self._maximum_global_failures = maximum_global_failures
-        self._window_seconds = window_seconds
-        self._subjects: dict[str, deque[_AttemptState]] = {}
-        self._global: deque[_AttemptState] = deque()
-        self._attempts: dict[int, _AttemptState] = {}
-        self._owner = object()
-        self._ids = count()
-        self._lock = Lock()
-
-    def reserve(self, subject: str) -> LoginAttempt | None:
-        identifier = self._identifier(subject)
-        now = self._clock()
-        with self._lock:
-            self._evict(now)
-            attempts = self._subjects.get(identifier)
-            if (
-                len(self._global) >= self._maximum_global_failures
-                or (
-                    attempts is not None
-                    and len(attempts) >= self._maximum_subject_failures
-                )
-                or (
-                    attempts is None
-                    and len(self._subjects) >= self._maximum_tracked_subjects
-                )
-            ):
-                return None
-            if attempts is None:
-                attempts = deque()
-                self._subjects[identifier] = attempts
-            attempt_id = next(self._ids)
-            state = _AttemptState(identifier, attempt_id, now)
-            attempts.append(state)
-            self._global.append(state)
-            self._attempts[attempt_id] = state
-            return LoginAttempt(self._owner, attempt_id)
-
-    def fail(self, attempt: object) -> None:
-        if not isinstance(attempt, LoginAttempt) or attempt._owner is not self._owner:
-            raise ValueError("login attempt is invalid")
-        now = self._clock()
-        with self._lock:
-            self._evict(now)
-            state = self._attempts.pop(attempt._id, None)
-            if state is not None:
-                state.failed = True
-
-    def succeed(self, attempt: object) -> None:
-        if not isinstance(attempt, LoginAttempt) or attempt._owner is not self._owner:
-            raise ValueError("login attempt is invalid")
-        now = self._clock()
-        with self._lock:
-            self._evict(now)
-            state = self._attempts.pop(attempt._id, None)
-            if state is None:
-                return
-            self._global.remove(state)
-            attempts = self._subjects.get(state.identifier)
-            if attempts is None:
-                return
-            retained = deque(
-                candidate
-                for candidate in attempts
-                if candidate is not state and not candidate.failed
-            )
-            if retained:
-                self._subjects[state.identifier] = retained
-            else:
-                del self._subjects[state.identifier]
-
-    def _identifier(self, subject: object) -> str:
-        if not isinstance(subject, str):
-            return ""
-        return hmac_new(
-            self._token_signing_key, subject.encode("utf-8"), sha256
-        ).hexdigest()
-
-    def _evict(self, now: float) -> None:
-        cutoff = now - self._window_seconds
-        while self._global and self._global[0].attempted_at <= cutoff:
-            state = self._global.popleft()
-            self._attempts.pop(state.id, None)
-            attempts = self._subjects.get(state.identifier)
-            if attempts is None:
-                continue
-            attempts.remove(state)
-            if not attempts:
-                del self._subjects[state.identifier]
-
-
 class BrowserAuthService:
     """Own browser-session lifecycle operations backed by SQLAlchemy rows."""
 
@@ -247,69 +102,71 @@ class BrowserAuthService:
         *,
         clock: Callable[[], object],
         token_source: Callable[[], object] | None = None,
-        rate_limiter: LoginRateLimiter | None = None,
+        password_check: Callable[[str, str], bool] | None = None,
+        failure_delay: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._sessions = sessions
         self._clock = clock
         self._token_source = token_source or _new_token
-        # The limiter's key only keeps its in-memory subject identifiers
-        # opaque; a process-local random key does that.
-        self._rate_limiter = rate_limiter or LoginRateLimiter(
-            token_signing_key=secrets.token_bytes(32)
-        )
+        self._password_check = password_check or _password_matches
+        self._failure_delay = failure_delay or _failed_login_delay
+        # One Argon2 verification (64 MiB) at a time per process. Waiting
+        # logins wait here, on the event loop: they hold no worker thread and
+        # no database connection.
+        self._verification = asyncio.Lock()
+
+    async def admit(self, subject: str, password: str) -> IssuedBrowserSession:
+        """The HTTP login: serialized verification, then a delay on failure only.
+
+        No failure count ever refuses a login, so the correct password succeeds
+        during a flood once its turn on the lock comes.
+        """
+        async with self._verification:
+            try:
+                return await asyncio.to_thread(self.login, subject, password)
+            except BrowserAuthenticationError:
+                pass
+        await self._failure_delay()
+        raise BrowserAuthenticationError
 
     def login(self, subject: str, password: str) -> IssuedBrowserSession:
-        attempt = self._rate_limiter.reserve(subject)
-        if attempt is None:
-            raise BrowserAuthenticationThrottledError
+        """Verify outside any transaction, then issue the session under the row lock."""
         now = self._now()
-        issued: IssuedBrowserSession | None = None
-        authenticated = False
-        try:
-            with self._sessions.begin() as db:
-                self._cleanup_expired(db, now)
-                user = db.scalar(
-                    select(User).where(User.subject == subject).with_for_update()
-                )
-                authenticated = not (
-                    subject != _ADMIN_SUBJECT
-                    or user is None
-                    or user.role != _ADMIN_ROLE
-                    or user.disabled_at is not None
-                    or user.password_verifier is None
-                    or not verify_password(user.password_verifier, password).valid
-                )
-                if authenticated and user is not None:
-                    token = self._opaque_token()
-                    csrf = self._opaque_token()
-                    expires_at = now + _SESSION_LIFETIME
-                    row = LoginSession(
-                        user_id=user.id,
-                        digest=_digest(token),
-                        expires_at=expires_at,
-                        kind=SessionKind.BROWSER,
-                    )
-                    db.add(row)
-                    db.flush()
-                    issued = IssuedBrowserSession(
-                        identity=BrowserIdentity(
-                            actor=Actor(user.subject, user.role),
-                            expires_at=expires_at,
-                            session_id=row.id,
-                        ),
-                        token=token,
-                        csrf=csrf,
-                    )
-        except BaseException:
-            self._rate_limiter.fail(attempt)
-            raise
-        if not authenticated:
-            self._rate_limiter.fail(attempt)
+        with self._sessions() as db:
+            verifier = _eligible_verifier(
+                db.scalar(select(User).where(User.subject == subject)), subject
+            )
+        if verifier is None or not self._password_check(verifier, password):
             raise BrowserAuthenticationError
-        self._rate_limiter.succeed(attempt)
-        if issued is None:
-            raise RuntimeError("authenticated login did not issue a session")
-        return issued
+        with self._sessions.begin() as db:
+            self._cleanup_expired(db, now)
+            user = db.scalar(
+                select(User).where(User.subject == subject).with_for_update()
+            )
+            # The verifier just checked must still be the stored one: a reset
+            # that committed meanwhile wins, and its revocation stands.
+            if user is None or _eligible_verifier(user, subject) != verifier:
+                raise BrowserAuthenticationError
+            token = self._opaque_token()
+            csrf = self._opaque_token()
+            expires_at = now + _SESSION_LIFETIME
+            row = LoginSession(
+                user_id=user.id,
+                digest=_digest(token),
+                expires_at=expires_at,
+                kind=SessionKind.BROWSER,
+            )
+            db.add(row)
+            db.flush()
+            return IssuedBrowserSession(
+                identity=BrowserIdentity(
+                    actor=Actor(user.subject, user.role),
+                    expires_at=expires_at,
+                    session_id=row.id,
+                ),
+                token=token,
+                csrf=csrf,
+            )
 
     def resolve(self, token: str) -> BrowserIdentity:
         """Resolve a browser cookie; a CLI token is never a cookie."""
@@ -511,6 +368,25 @@ class SessionBearerTokens:
 
     def cursor_codec(self) -> CursorCodec:
         return self._cursors
+
+
+def _eligible_verifier(user: User | None, subject: str) -> str | None:
+    if (
+        subject != _ADMIN_SUBJECT
+        or user is None
+        or user.role != _ADMIN_ROLE
+        or user.disabled_at is not None
+    ):
+        return None
+    return user.password_verifier
+
+
+def _password_matches(verifier: str, password: str) -> bool:
+    return verify_password(verifier, password).valid
+
+
+async def _failed_login_delay() -> None:
+    await asyncio.sleep(FAILED_LOGIN_DELAY_SECONDS)
 
 
 def _new_token() -> str:

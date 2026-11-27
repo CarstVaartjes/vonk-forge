@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import secrets
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import cast
 from unittest.mock import Mock
@@ -17,7 +17,6 @@ from sqlalchemy.pool import StaticPool
 
 from tests.token_support import TokenCodec
 from vonk_agent_protocol.error_response import BoundedErrorResponse
-from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.api.application import create_app
 from vonk_control.auth import SESSION_COOKIE, Actor
 from vonk_control.auth_api import install_auth_routes
@@ -27,7 +26,6 @@ from vonk_control.security.browser_auth import (
     BrowserAuthService,
     BrowserIdentity,
     IssuedCliToken,
-    LoginRateLimiter,
     SessionBearerTokens,
 )
 from vonk_control.security.passwords import hash_password
@@ -57,7 +55,13 @@ class Jobs:
         raise KeyError(job_id)
 
 
-def _client(*, maximum_subject_failures: int = 5) -> tuple[TestClient, str]:
+async def _no_delay() -> None:
+    return None
+
+
+def _client(
+    *, failure_delay: Callable[[], Awaitable[None]] = _no_delay
+) -> tuple[TestClient, str]:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -80,10 +84,7 @@ def _client(*, maximum_subject_failures: int = 5) -> tuple[TestClient, str]:
         sessions,
         clock=lambda: NOW,
         token_source=lambda: next(first, None) or secrets.token_urlsafe(32),
-        rate_limiter=LoginRateLimiter(
-            token_signing_key=signing_key,
-            maximum_subject_failures=maximum_subject_failures,
-        ),
+        failure_delay=failure_delay,
     )
     app = create_app(
         jobs=Jobs(),
@@ -110,7 +111,7 @@ def test_auth_openapi_documents_every_runtime_error_status() -> None:
     schema = app.openapi()
     paths = schema["paths"]
     expected = {
-        "/api/auth/login": {"401", "403", "422", "429"},
+        "/api/auth/login": {"401", "403", "422"},
         "/api/auth/session": {"401"},
         "/api/auth/logout": {"401", "403"},
         "/api/auth/cli-token": {"401", "403"},
@@ -123,8 +124,7 @@ def test_auth_openapi_documents_every_runtime_error_status() -> None:
                 response_schema = responses[status_code]["content"]["application/json"][
                     "schema"
                 ]
-                model = HttpTransient if status_code == "429" else BoundedErrorResponse
-                assert response_schema["$ref"].endswith(model.__name__)
+                assert response_schema["$ref"].endswith(BoundedErrorResponse.__name__)
 
 
 def _chunked_asgi_login(
@@ -314,20 +314,21 @@ def test_login_uses_generic_credential_failure() -> None:
     assert verifier not in serialized
 
 
-def test_login_uses_generic_throttle_response() -> None:
-    """Rate limiting must be a generic 429 with no credential disclosure."""
-    client, _verifier = _client(maximum_subject_failures=1)
-    assert _login(client, "first wrong password").status_code == 401
+def test_failed_logins_never_lock_out_the_correct_password() -> None:
+    """A failure count that answers 429 would let any peer lock the owner out."""
+    delays: list[None] = []
 
-    response = _login(client, "second wrong password")
+    async def delay() -> None:
+        delays.append(None)
 
-    assert response.status_code == 429
-    answer = HttpTransient.model_validate_json(response.content)
-    assert answer.reason == TransientReason.RATE_LIMITED
-    assert int(response.headers["retry-after"]) == answer.retry_after
-    assert "second wrong password" not in repr(
-        (response.headers.items(), response.content)
-    )
+    client, _verifier = _client(failure_delay=delay)
+
+    assert [_login(client, f"wrong {index}").status_code for index in range(8)] == [
+        401
+    ] * 8
+    assert len(delays) == 8
+    assert _login(client).status_code == 200
+    assert len(delays) == 8
 
 
 def test_session_status_and_logout_use_the_durable_cookie_session() -> None:
