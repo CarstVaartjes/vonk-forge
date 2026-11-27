@@ -25,8 +25,16 @@ the invoking user's ownership. Completed dumps are returned to that owner with
 mode `0600`; do not create the directory as root or replace it with a broader
 shared-permission directory.
 
-The Controller CA journals share PostgreSQL. Back up the installed authority
-secrets separately and preserve the same intermediate when restoring.
+The dump holds only PostgreSQL. The backup unit for a restore is the dump plus
+`.env` and the whole `secrets/` directory beside `docker-compose.yaml`:
+`secrets/step-ca/` (the agent CA certificate and intermediate key),
+`token-signing-key`, `host-runtime-grant-private-key.pem` and every other file
+there. Copy `.env` and `secrets/` after every installer run, and keep that copy
+as private as the dumps. The CA journals in the dump only match the same
+intermediate. `secrets/step-ca/` holds the agent CA: on new installs also the
+encrypted root key (`step-ca/root-key`), with which the installer renews the
+intermediate; earlier installs have no root key. Without a backup of
+`secrets/step-ca/`, every Spark must be enrolled again.
 
 ## Backup scope
 
@@ -48,20 +56,22 @@ Do not remove that volume. Container replacement is different from data loss.
 
 ## Restoring after data loss
 
-Restore configuration and secrets first. Keep the original data volume untouched
+Restore `.env` and `secrets/` first. Keep the original data volume untouched
 until recovery is verified. On the NAS, from the project directory, select a
-completed dump and create a separate recovery volume. Use the same PostgreSQL
-major version as the backup (currently 18). These commands require Docker access.
+completed dump and create a separate recovery volume. The restore uses the exact
+PostgreSQL image the project's Compose file pins. These commands require Docker
+access.
 
 ```sh
 docker compose stop
+postgres_image=$(docker compose config --images postgres)
 docker volume create vonk-forge-postgres-recovered
 docker run -d --name vonk-postgres-restore \
   -e POSTGRES_USER=vonk_restore_admin \
   -e POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password \
   -v "$PWD/secrets/postgres-password:/run/secrets/postgres-password:ro" \
   --network none \
-  -v vonk-forge-postgres-recovered:/var/lib/postgresql postgres:18
+  -v vonk-forge-postgres-recovered:/var/lib/postgresql "$postgres_image"
 # Wait until this reports accepting connections:
 docker exec vonk-postgres-restore pg_isready -U vonk_restore_admin -d postgres
 # Substitute your actual backup filename. Check gzip before piping it.
@@ -98,6 +108,7 @@ Start with both files and retain this override for subsequent redeployments:
 docker compose -f docker-compose.yaml -f compose.recovery.yaml up -d
 ```
 
-Keep generated authority secrets and the offline root in protected backups.
+Keep the generated authority secrets, which include the encrypted root and
+intermediate CA keys, in protected backups.
 Restore the matching secrets and PostgreSQL state, then verify Controller
 health, login, Fleet, Library and enrollment before resuming workloads.

@@ -13,17 +13,15 @@ services:
     logging: *tailscale-logging
     read_only: true
     # Userspace networking (TS_USERSPACE=true) needs no TUN device and no
-    # capability from the default set. The installer writes the OAuth secrets
-    # 0640 with group 64400 (the NAS installer derives that
-    # list from group_add); group_add lets
-    # the container's root read them without DAC_OVERRIDE. Compose file
-    # secrets are bind mounts that keep the host owner, group and mode.
+    # capability from the default set. runtime-init copies the OAuth secrets
+    # into the tailscale-oauth volume owned by root, mode 0400: the
+    # container's root reads them without DAC_OVERRIDE, whatever owner and
+    # mode the installer's files have on the host.
     cap_drop: [ALL]
-    group_add: ["64400"]
     security_opt: [no-new-privileges:true]
     environment:
       TS_AUTH_ONCE: "true"
-      TS_CLIENT_ID: file:/run/secrets/tailscale-oauth-client-id
+      TS_CLIENT_ID: file:/run/vonk-tailscale-oauth/tailscale-oauth-client-id
       TS_EXTRA_ARGS: --advertise-tags=tag:vonk-gateway
       TS_HOSTNAME: vonk-forge-gateway
       TS_SOCKET: /var/run/tailscale/tailscaled.sock
@@ -35,12 +33,12 @@ services:
       - -eu
       - -c
       - |
-        if grep -q '?' /run/secrets/tailscale-oauth-client-secret; then
+        if grep -q '?' /run/vonk-tailscale-oauth/tailscale-oauth-client-secret; then
           printf '%s\n' 'Tailscale OAuth client secret input is invalid' >&2
           exit 1
         fi
         umask 077
-        tr -d '\r\n' < /run/secrets/tailscale-oauth-client-secret \
+        tr -d '\r\n' < /run/vonk-tailscale-oauth/tailscale-oauth-client-secret \
           > /tmp/tailscale-oauth-client-secret
         test -s /tmp/tailscale-oauth-client-secret
         printf '?ephemeral=false&preauthorized=true' \
@@ -49,17 +47,21 @@ services:
         exec env \
           TS_CLIENT_SECRET=file:/tmp/tailscale-oauth-client-secret \
           /usr/local/bin/containerboot
-    secrets:
-      - tailscale-oauth-client-id
-      - tailscale-oauth-client-secret
     volumes:
       - tailscale-state:/var/lib/tailscale
       - tailscale-socket:/var/run/tailscale
+      - tailscale-oauth:/run/vonk-tailscale-oauth:ro
     tmpfs:
       - /tmp:size=64m,mode=1777
     networks:
       - tailnet-control-plane
       - tailnet-web-edge
+    # Orders, never gates: before the first staging the secret is absent, the
+    # command exits and the restart policy runs it again. containerboot reads
+    # the secrets only to log in once (TS_AUTH_ONCE), so a Controller release
+    # does not restart the gateway.
+    depends_on:
+      runtime-init: {condition: service_healthy, required: false}
     healthcheck:
       test: [CMD-SHELL, "tailscale --socket=/var/run/tailscale/tailscaled.sock status --json | tr -d '[:space:]' | grep -Fq '\"BackendState\":\"Running\"'"]
       interval: 10s
@@ -97,12 +99,6 @@ services:
       interval: 15s
       timeout: 8s
       retries: 12
-
-secrets:
-  tailscale-oauth-client-id:
-    file: ../secrets/tailscale-oauth-client-id
-  tailscale-oauth-client-secret:
-    file: ../secrets/tailscale-oauth-client-secret
 
 networks:
   tailnet-control-plane: {}

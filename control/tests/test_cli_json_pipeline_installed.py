@@ -15,9 +15,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
 from tests.subprocess_environment import isolated_environment
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base

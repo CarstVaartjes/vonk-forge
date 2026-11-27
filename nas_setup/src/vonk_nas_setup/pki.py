@@ -10,6 +10,7 @@ import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import ClassVar
 
 from asn1crypto import core, keys, pem
@@ -25,12 +26,27 @@ from vonk_agent_protocol.installer_setup import NasStepCaControllerRequest
 
 _VALIDITY = timedelta(days=397)
 _RENEWAL_THRESHOLD = timedelta(days=30)
+_INTERMEDIATE_VALIDITY = timedelta(days=1825)
+# Agents present the intermediate in their chain and replace that chain at each
+# 30-day certificate renewal, so a renewed intermediate reaches every Spark
+# long before the old one expires.
+_INTERMEDIATE_RENEWAL_THRESHOLD = timedelta(days=365)
 _PBKDF2_ITERATIONS = 600_000
+
+
+class IntermediateRenewal(StrEnum):
+    """Whether the installer renews the agent intermediate on this run."""
+
+    NOT_DUE = "not_due"
+    DUE = "due"
+    #: Due, but the install kept no root key: only a new PKI replaces it.
+    NO_ROOT_KEY = "no_root_key"
 
 
 @dataclass(frozen=True)
 class ValidatedPkiMaterial:
     controller_needs_renewal: bool
+    intermediate_renewal: IntermediateRenewal
 
 
 def _invalid(message: str) -> ValueError:
@@ -47,9 +63,13 @@ def pki_hostnames(
     ):
         raise _invalid(f"hostname value for {request.hostname_env} is invalid")
     hostname = hostname.lower()
+    # The LiteLLM admin UI's own origin: "-litellm" appended to the first
+    # label (caddy/entrypoint.sh and tailscale/configure.sh derive the same).
+    first, dot, rest = hostname.partition(".")
     return [
         hostname,
         *(f"{prefix}.{hostname}" for prefix in ("enroll", "agents")),
+        f"{first}-litellm{dot}{rest}",
     ]
 
 
@@ -69,7 +89,7 @@ def _private_der(key: ed25519.Ed25519PrivateKey) -> bytes:
     )
 
 
-def _encrypt_intermediate(key: ed25519.Ed25519PrivateKey, password: bytes) -> bytes:
+def _encrypt_key(key: ed25519.Ed25519PrivateKey, password: bytes) -> bytes:
     # BestAvailableEncryption deliberately has no fixed KDF policy. Encode the
     # PKCS#8 envelope with ASN1crypto; all crypto operations use cryptography.
     salt, iv = secrets.token_bytes(16), secrets.token_bytes(16)
@@ -115,14 +135,14 @@ def _pem_der(value: bytes, label: str) -> bytes:
     return der
 
 
-def _decrypt_intermediate(value: bytes, password: bytes) -> bytes:
+def _decrypt_key(value: bytes, password: bytes) -> bytes:
     try:
         envelope = keys.EncryptedPrivateKeyInfo.load(
             _pem_der(value, "ENCRYPTED PRIVATE KEY"), strict=True
         )
         algorithm = envelope["encryption_algorithm"]
         if algorithm["algorithm"].native != "pbes2":
-            raise _invalid("intermediate key encryption is not PBES2")
+            raise _invalid("CA key encryption is not PBES2")
         parameters = algorithm["parameters"]
         kdf, cipher = parameters["key_derivation_func"], parameters["encryption_scheme"]
         params = kdf["parameters"]
@@ -134,10 +154,10 @@ def _decrypt_intermediate(value: bytes, password: bytes) -> bytes:
             or params["salt"].name != "specified"
             or params["key_length"].native not in (None, 32)
         ):
-            raise _invalid("intermediate key encryption policy is invalid")
+            raise _invalid("CA key encryption policy is invalid")
         salt, iv = params["salt"].native, cipher["parameters"].native
         if len(salt) < 16 or len(iv) != 16:
-            raise _invalid("intermediate key encryption parameters are invalid")
+            raise _invalid("CA key encryption parameters are invalid")
         derived = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -151,7 +171,7 @@ def _decrypt_intermediate(value: bytes, password: bytes) -> bytes:
         unpadder = padding.PKCS7(128).unpadder()
         return unpadder.update(padded) + unpadder.finalize()
     except ValueError, TypeError, KeyError, UnsupportedAlgorithm:
-        raise _invalid("intermediate private key cannot be decrypted") from None
+        raise _invalid("CA private key cannot be decrypted") from None
 
 
 class _Ed25519KeyInfo(keys.PrivateKeyInfo):
@@ -200,10 +220,10 @@ def load_ed25519_private_key(content: bytes) -> ed25519.Ed25519PrivateKey:
     return _load_ed25519_der(_pem_der(content, "PRIVATE KEY"))
 
 
-def _intermediate_key(
+def _encrypted_key(
     value: bytes, password: bytes
 ) -> tuple[ed25519.Ed25519PrivateKey, bytes]:
-    plaintext = _decrypt_intermediate(value, password)
+    plaintext = _decrypt_key(value, password)
     return _load_ed25519_der(plaintext), plaintext
 
 
@@ -358,9 +378,7 @@ def generate_pki(
         paths.intermediate_certificate: intermediate.public_bytes(
             serialization.Encoding.PEM
         ),
-        paths.intermediate_private_key: _encrypt_intermediate(
-            intermediate_key, password
-        ),
+        paths.intermediate_private_key: _encrypt_key(intermediate_key, password),
         paths.controller_server_certificate: server.public_bytes(
             serialization.Encoding.PEM
         )
@@ -368,6 +386,7 @@ def generate_pki(
         paths.controller_server_private_key: _private_pem(server_key),
         paths.provisioner_public_jwk: _public_jwk(),
         paths.password: password,
+        paths.root_private_key: _encrypt_key(root_key, password),
     }
     validate_pki_material(request, environment, files, now=now)
     return files
@@ -444,6 +463,12 @@ def validate_pki_material(
             (server, intermediate),
         ):
             _check_authority(child, issuer)
+        # An empty member is an install that kept no root key: still valid.
+        root_key_pem = files.get(paths.root_private_key, b"")
+        if root_key_pem:
+            root_key, _ = _encrypted_key(root_key_pem, _password(files[paths.password]))
+            if root_key.public_key() != root.public_key():
+                raise _invalid("root private key does not match root certificate")
         for certificate, length in ((root, 1), (intermediate, 0)):
             constraints = certificate.extensions.get_extension_for_class(
                 x509.BasicConstraints
@@ -456,8 +481,15 @@ def validate_pki_material(
                 or not usage.value.key_cert_sign
             ):
                 raise _invalid("CA certificate constraints are invalid")
-            if (
-                not certificate.not_valid_before_utc
+            # With the root key, the upgrade renews an expired intermediate.
+            heals = (
+                certificate is intermediate
+                and allow_expired_controller
+                and bool(root_key_pem)
+                and certificate.not_valid_before_utc <= now
+            )
+            if not heals and not (
+                certificate.not_valid_before_utc
                 <= now
                 <= certificate.not_valid_after_utc
             ):
@@ -500,7 +532,7 @@ def validate_pki_material(
             raise _invalid(
                 "controller private key does not match controller certificate"
             )
-        intermediate_key, _ = _intermediate_key(
+        intermediate_key, _ = _encrypted_key(
             files[paths.intermediate_private_key], _password(files[paths.password])
         )
         if intermediate_key.public_key() != intermediate.public_key():
@@ -518,9 +550,19 @@ def validate_pki_material(
         if str(error).startswith("Step CA/controller PKI "):
             raise
         raise _invalid("certificate or key encoding is invalid") from None
+    intermediate_renewal = IntermediateRenewal.NOT_DUE
+    # Renewal never outlives the root, so it is due only while it extends.
+    if (
+        intermediate.not_valid_after_utc <= now + _INTERMEDIATE_RENEWAL_THRESHOLD
+        and intermediate.not_valid_after_utc < root.not_valid_after_utc
+    ):
+        intermediate_renewal = (
+            IntermediateRenewal.DUE if root_key_pem else IntermediateRenewal.NO_ROOT_KEY
+        )
     return ValidatedPkiMaterial(
         controller_needs_renewal=hostnames_changed
-        or server.not_valid_after_utc <= now + _RENEWAL_THRESHOLD
+        or server.not_valid_after_utc <= now + _RENEWAL_THRESHOLD,
+        intermediate_renewal=intermediate_renewal,
     )
 
 
@@ -529,7 +571,7 @@ def normalize_intermediate_key(
 ) -> dict[str, bytes]:
     paths = request.files
     password = _password(files[paths.password])
-    key, plaintext = _intermediate_key(files[paths.intermediate_private_key], password)
+    key, plaintext = _encrypted_key(files[paths.intermediate_private_key], password)
     certificate = _certificates(files[paths.intermediate_certificate], 1)[0]
     if key.public_key() != certificate.public_key():
         raise _invalid(
@@ -537,7 +579,7 @@ def normalize_intermediate_key(
         )
     if plaintext == _private_der(key):
         return {}
-    return {paths.intermediate_private_key: _encrypt_intermediate(key, password)}
+    return {paths.intermediate_private_key: _encrypt_key(key, password)}
 
 
 def normalize_controller_key(
@@ -572,7 +614,7 @@ def renew_controller_leaf(
     if not validated.controller_needs_renewal:
         return {}
     paths = request.files
-    intermediate_key, _ = _intermediate_key(
+    intermediate_key, _ = _encrypted_key(
         files[paths.intermediate_private_key], _password(files[paths.password])
     )
     intermediate = _certificates(files[paths.intermediate_certificate], 1)[0]
@@ -588,4 +630,60 @@ def renew_controller_leaf(
         paths.controller_server_private_key: _private_pem(key),
     }
     validate_pki_material(request, environment, {**files, **replacement}, now=now)
+    return replacement
+
+
+def renew_intermediate(
+    request: NasStepCaControllerRequest,
+    environment: Mapping[str, str],
+    files: Mapping[str, bytes],
+    *,
+    now: datetime | None = None,
+) -> dict[str, bytes]:
+    """Re-sign the same intermediate key with the root key when renewal is due.
+
+    Subject, key and every extension (the SKI among them) are kept, so agent and
+    controller certificates the intermediate already issued keep verifying.
+    The controller leaf bundle carries the intermediate, so it is rebuilt too.
+    """
+    now = now or datetime.now(UTC)
+    validated = validate_pki_material(
+        request, environment, files, now=now, allow_expired_controller=True
+    )
+    if validated.intermediate_renewal is not IntermediateRenewal.DUE:
+        return {}
+    paths = request.files
+    password = _password(files[paths.password])
+    root_key, _ = _encrypted_key(files[paths.root_private_key], password)
+    root = _certificates(files[paths.root_certificate], 1)[0]
+    previous = _certificates(files[paths.intermediate_certificate], 1)[0]
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(previous.subject)
+        .issuer_name(root.subject)
+        .public_key(previous.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(hours=1))
+        .not_valid_after(min(now + _INTERMEDIATE_VALIDITY, root.not_valid_after_utc))
+    )
+    for extension in previous.extensions:
+        builder = builder.add_extension(extension.value, extension.critical)
+    intermediate = builder.sign(root_key, algorithm=None).public_bytes(
+        serialization.Encoding.PEM
+    )
+    leaf = _certificates(files[paths.controller_server_certificate], 2)[0]
+    replacement = {
+        paths.intermediate_certificate: intermediate,
+        paths.controller_server_certificate: leaf.public_bytes(
+            serialization.Encoding.PEM
+        )
+        + intermediate,
+    }
+    validate_pki_material(
+        request,
+        environment,
+        {**files, **replacement},
+        now=now,
+        allow_expired_controller=True,
+    )
     return replacement

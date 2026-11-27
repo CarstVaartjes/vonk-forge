@@ -199,16 +199,25 @@ PY
         fail "cannot download the accepted CLI wheel"
     [ "$(wc -c <"$wheel" | tr -d ' ')" = "$cli_size" ] || fail "the CLI wheel size is invalid"
     [ "$(sha256 "$wheel")" = "$cli_digest" ] || fail "the CLI wheel digest is invalid"
-    python3 - "$wheel" "$cli_version" "$cli_source" <<'PY' || fail "the CLI wheel identity is invalid"
+    # The wheel's own code needs its own Python (3.15), not the system python3.
+    cli_cutoff=$(uv run --isolated --no-project --python 3.15 python - "$wheel" "$cli_version" "$cli_source" <<'PY'
 import sys, zipfile
 # The wheel has already passed signed-descriptor digest and size verification.
 # Use its pure standard-library validator, shared with native signed updates.
 sys.path.insert(0, sys.argv[1])
-from cluster_profiles.runtime_identity import verified_wheel_identity
+from cluster_profiles.runtime_identity import dependency_cutoff, verified_wheel_identity
 with zipfile.ZipFile(sys.argv[1]) as archive:
     verified_wheel_identity(archive, version=sys.argv[2], source_sha=sys.argv[3])
+    print(dependency_cutoff(archive) or "")
 PY
-    uv tool install --force --python 3.15 "$wheel" || fail "uv could not install the verified CLI wheel"
+) || fail "the CLI wheel identity is invalid"
+    # Resolve dependencies as they were when the release was built.
+    if [ -n "$cli_cutoff" ]; then
+        uv tool install --force --python 3.15 --exclude-newer "$cli_cutoff" "$wheel" ||
+            fail "uv could not install the verified CLI wheel"
+    else
+        uv tool install --force --python 3.15 "$wheel" || fail "uv could not install the verified CLI wheel"
+    fi
     printf '%s\n' "vonkctl $cli_version is installed. Run 'vonkctl --version' to confirm."
     printf '%s\n' "For signed updates, run: vonkctl update --apply"
     exit 0

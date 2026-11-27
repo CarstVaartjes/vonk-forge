@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
-from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_nas_setup import publication
 from vonk_nas_setup.compose import resolve_compose
 from vonk_nas_setup.environment import (
@@ -35,15 +35,16 @@ from vonk_nas_setup.filesystem import (
     write_member,
 )
 from vonk_nas_setup.pki import (
+    IntermediateRenewal,
     generate_pki,
     normalize_controller_key,
     normalize_intermediate_key,
     renew_controller_leaf,
+    renew_intermediate,
     validate_pki_material,
 )
 from vonk_nas_setup.prompts import PromptIo
 from vonk_nas_setup.secrets import (
-    apply_secret_group,
     generate_missing,
     generated,
     load_members,
@@ -58,14 +59,6 @@ from vonk_nas_setup.secrets import (
 class SetupOutcome:
     root: Path
     dropped_environment: tuple[str, ...] = ()
-
-
-def permission_note(payload: NasInstallTemplate, root: Path, prompt: PromptIo) -> None:
-    pending = apply_secret_group(payload, root)
-    if pending and payload.group_readable_secrets:
-        prompt.note(
-            f"{SecurityRefusalReason.PERMISSION_DENIED.value}: group {payload.group_readable_secrets.gid}: {', '.join(pending)}"
-        )
 
 
 def fresh(
@@ -122,7 +115,6 @@ def fresh(
         atomic_replace(staging / ".env", render_environment(environment))
         for name, value in members.items():
             write_member(staging / "secrets", name, value)
-        permission_note(payload, staging / "secrets", prompt)
         publication.remember_verified(payload, staging)
         publication.sync_tree(staging)
         staging.replace(bundle)
@@ -175,6 +167,12 @@ def upgrade_credentials(
     retained = load_members(bundle / publication.VERIFIED, payload)
     for name, value in retained.items():
         members.setdefault(name, value)
+    if payload.step_ca_controller:
+        # load_members reads an absent root key as the empty default; a key the
+        # verified generation still holds replaces it instead of being lost.
+        root_key = payload.step_ca_controller.files.root_private_key
+        if not members[root_key] and retained.get(root_key):
+            members[root_key] = retained[root_key]
     repair_stored_members(payload, members, retained)
     for item in payload.secrets:
         if item.file in members:
@@ -201,6 +199,14 @@ def upgrade_credentials(
         )
         members.update(normalize_intermediate_key(request, members))
         members.update(normalize_controller_key(request, members))
+        if validated.intermediate_renewal is IntermediateRenewal.DUE:
+            members.update(renew_intermediate(request, environment, members))
+        elif validated.intermediate_renewal is IntermediateRenewal.NO_ROOT_KEY:
+            prompt.note(
+                "The agent intermediate CA expires within a year and this install "
+                "kept no root CA key to renew it; plan a new PKI and Spark "
+                "re-enrollment (docs/runbooks/agent-pki.md)."
+            )
         if validated.controller_needs_renewal:
             members.update(renew_controller_leaf(request, environment, members))
     if set(members) != set(secret_paths(payload)):
@@ -213,7 +219,6 @@ def upgrade_credentials(
     # bundle. Every run rewrites Compose, so a rerun repairs an interruption.
     publication.publish(payload, bundle, members, environment)
     atomic_replace(bundle / "docker-compose.yaml", compose, 0o644)
-    permission_note(payload, root, prompt)
     retired = root / "runtime-configs"
     if metadata(retired):
         try:

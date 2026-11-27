@@ -14,6 +14,7 @@ from vonk_forge_contracts import RecipeDefinition
 from tests.artifact_jobs_support import _mapping, running_artifact_service
 from tests.recipe_operations_support import NOW
 from tests.test_platform_observation import Jobs
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.artifact_jobs.api import ArtifactJobCreate
@@ -22,7 +23,7 @@ from vonk_control.artifact_jobs.job_contract import (
     ArtifactJobContractResponse,
     JobContractState,
 )
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.fleet_projection.common import RunPresence
 from vonk_control.fleet_projection.service import FleetProjection

@@ -38,7 +38,7 @@ command to each Spark. The command includes the reserved NAS LAN address when
 the private service hostnames do not resolve directly:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=<CONTROLLER_LAN_IP> sh
 ```
 
 The installer verifies the controller CA before trusting its bootstrap data and
@@ -50,7 +50,7 @@ address comes from the generated command. Tailscale remains on the NAS gateway;
 it is not required on the Sparks.
 
 Rerun the NAS command from the existing bundle's parent directory to prepare a
-NAS upgrade, then follow the [NAS Compose redeployment procedure](operator-cli-access.md#nas-compose-redeployment).
+NAS upgrade, then follow the [NAS Compose redeployment procedure](../maintainers/operator-cli-access.md#nas-compose-redeployment).
 An approved headless host CLI can apply the bundle without a NAS browser session.
 After the NAS is running the accepted release, use Fleet's signed
 one-at-a-time upgrade action for routine Spark package rollouts; it uses the

@@ -246,7 +246,7 @@ impl CallerIdentity {
 
     pub(super) fn require_unprivileged(self) -> Result<u32, SetupError> {
         if self.effective_uid == 0 || self.sudo_uid.is_some() {
-            return Err(SetupError::CallerPhase);
+            return Err(SetupError::RunAsRoot);
         }
         Ok(self.effective_uid)
     }

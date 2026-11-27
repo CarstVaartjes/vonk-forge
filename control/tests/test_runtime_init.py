@@ -3,16 +3,24 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import NameOID
 
 from vonk_control import runtime_init
 from vonk_control.gateway.keys import MASTER_KEY_FILE
+from vonk_control.pki.controller_leaf import LeafPair, mint_leaf
 from vonk_control.runtime_init import (
     SharedRuntimePaths,
     prepare_shared_volumes,
     stage_compose_secrets,
+    stage_controller_tls,
     stage_private_key,
     stage_runtime_assets,
     stage_runtime_file,
@@ -359,12 +367,13 @@ def test_gateway_master_key_is_staged_only_outside_worker_volume(
     assert MASTER_KEY_FILE == runtime_init.GATEWAY_MASTER_KEY_PATH
 
 
-@pytest.mark.parametrize("supplied", [True, False])
+@pytest.mark.parametrize("supplied", ["usable", "absent", "empty"])
 def test_admin_password_is_staged_for_the_api_when_compose_supplies_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, supplied: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, supplied: str
 ) -> None:
-    # Catches the non-root API losing its administrator password, or an older
-    # Compose file (no such secret for runtime-init) failing the whole run.
+    # Catches the non-root API losing its administrator password, an older
+    # Compose file (no such secret for runtime-init) failing the whole run, and
+    # a hand-emptied file crash-looping runtime-init or dropping the previous copy.
     source, shared, gateway = tmp_path / "source", tmp_path / "shared", tmp_path / "gw"
     for directory in (source, shared, gateway):
         directory.mkdir()
@@ -381,32 +390,92 @@ def test_admin_password_is_staged_for_the_api_when_compose_supplies_it(
         "litellm-database-url",
     ):
         (source / name).write_bytes(b"secret\n")
-    if supplied:
+    staged = shared / "admin-password"
+    if supplied == "usable":
         (source / "admin-password").write_bytes(b"administrator password\n")
+    elif supplied == "empty":
+        (source / "admin-password").write_bytes(b"")
+        staged.write_bytes(b"previous password\n")
     # This host test cannot assign the consumers' owners; the built-image
     # test exercises the real uid/gid boundary.
     monkeypatch.setattr(os, "fchown", lambda *_args: None)
-    order: list[str] = []
-    stage = runtime_init.stage_private_key
-
-    def observe(source_path, destination, **kwargs):
-        order.append(destination.name)
-        return stage(source_path, destination, **kwargs)
-
-    monkeypatch.setattr(runtime_init, "stage_private_key", observe)
 
     stage_compose_secrets(
         source, shared, gateway_master_key=gateway / "authority" / "master-key"
     )
 
-    staged = shared / "admin-password"
-    if supplied:
+    if supplied == "usable":
         assert staged.read_bytes() == b"administrator password\n"
         assert stat.S_IMODE(staged.stat().st_mode) == 0o400
-        # First: a failure leaves a fresh install without its database URL too.
-        assert order.index("admin-password") < order.index("database-url")
+    elif supplied == "empty":
+        assert staged.read_bytes() == b"previous password\n"
     else:
         assert not staged.exists()
+    assert (shared / "database-url").read_bytes() == b"secret\n"
+
+
+def test_tailscale_oauth_secrets_get_a_root_owned_copy_whatever_the_host_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches the capability-free gateway (root, no DAC_OVERRIDE) reading the
+    # installer's 0600 files of another host user: it reads only this copy.
+    source, shared, gateway = tmp_path / "source", tmp_path / "shared", tmp_path / "gw"
+    tailscale = tmp_path / "tailscale-oauth"
+    for directory in (source, shared, gateway):
+        directory.mkdir()
+    for name in (
+        "host-runtime-grant-private-key",
+        "database-url",
+        "token-signing-key",
+        "metrics-token",
+        "agent-client-ca",
+        "agent-intermediate-certificate",
+        "controller-ca",
+        "agent-proxy-auth",
+        "litellm-master-key",
+        "litellm-database-url",
+    ):
+        (source / name).write_bytes(b"secret\n")
+    names = ("tailscale-oauth-client-id", "tailscale-oauth-client-secret")
+    for name in names:
+        (source / name).write_bytes(f"{name}-value\n".encode())
+        (source / name).chmod(0o600)
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
+
+    def stage() -> None:
+        stage_compose_secrets(
+            source,
+            shared,
+            gateway_master_key=gateway / "authority" / "master-key",
+            tailscale_root=tailscale,
+        )
+
+    staged: list[tuple[Path, int, int, int]] = []
+    original = runtime_init.stage_private_key
+
+    def observe(source_path, destination, **kwargs):
+        if destination.parent == tailscale:
+            staged.append(
+                (
+                    destination,
+                    kwargs.get("owner_uid", 0),
+                    kwargs.get("owner_gid", 0),
+                    kwargs["mode"],
+                )
+            )
+        return original(source_path, destination, **kwargs)
+
+    monkeypatch.setattr(runtime_init, "stage_private_key", observe)
+    stage()
+    assert staged == [(tailscale / name, 0, 0, 0o400) for name in names]
+    for name in names:
+        assert (tailscale / name).read_bytes() == f"{name}-value\n".encode()
+        assert stat.S_IMODE((tailscale / name).stat().st_mode) == 0o400
+    # Lab mode writes the files empty: the copy goes, the rest still stages.
+    for name in names:
+        (source / name).write_bytes(b"")
+    stage()
+    assert not any((tailscale / name).exists() for name in names)
     assert (shared / "database-url").read_bytes() == b"secret\n"
 
 
@@ -643,3 +712,234 @@ def test_runtime_init_marks_only_a_completed_run_healthy_then_idles(
     runtime_init.main(marker=marker, idle=lambda: idles.append("idle"))
     assert marker.read_text() == "staged\n"
     assert idles == ["idle"]
+
+
+# Controller TLS leaf renewal ------------------------------------------------
+
+_NAMES = ["vonk-forge.local", "enroll.vonk-forge.local", "agents.vonk-forge.local"]
+_NOW = datetime.now(UTC)
+
+
+def _pki(
+    secrets: Path, *, password: bytes = b"intermediate-password"
+) -> Callable[[list[str], datetime], LeafPair]:
+    """Write the installer's CA material; returns a leaf writer for its pair."""
+    root_key, key = (
+        ed25519.Ed25519PrivateKey.generate(),
+        (ed25519.Ed25519PrivateKey.generate()),
+    )
+
+    def ca(subject_key, name, issuer, issuer_key, length):
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
+        ski = x509.SubjectKeyIdentifier.from_public_key(subject_key.public_key())
+        return (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer.subject if issuer else subject)
+            .public_key(subject_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(_NOW - timedelta(days=400))
+            .not_valid_after(_NOW + timedelta(days=1000))
+            .add_extension(ski, False)
+            .add_extension(x509.BasicConstraints(ca=True, path_length=length), True)
+            .sign(issuer_key, algorithm=None)
+        )
+
+    root = ca(root_key, "Root", None, root_key, 1)
+    intermediate = ca(key, "Intermediate", root, root_key, 0)
+    secrets.mkdir(exist_ok=True)
+    (secrets / "agent-intermediate-certificate").write_bytes(
+        intermediate.public_bytes(serialization.Encoding.PEM)
+    )
+    (secrets / "step-ca-intermediate-key").write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.BestAvailableEncryption(password),
+        )
+    )
+    (secrets / "step-ca-password").write_bytes(password + b"\n")
+
+    def installer_leaf(names: list[str], issued: datetime) -> LeafPair:
+        pair = mint_leaf(names, intermediate, key, issued)
+        for name, content in (
+            ("controller-server-certificate", pair.certificate),
+            ("controller-server-key", pair.key),
+        ):
+            (secrets / name).unlink(missing_ok=True)
+            (secrets / name).write_bytes(content)
+        return pair
+
+    return installer_leaf
+
+
+def _served(volume: Path) -> tuple[x509.Certificate, bytes]:
+    certificate = LeafPair.from_served_file(
+        (volume / "controller-server.pem").read_bytes()
+    ).certificate
+    return x509.load_pem_x509_certificates(certificate)[0], certificate
+
+
+def _names(leaf: x509.Certificate) -> list[str]:
+    return leaf.extensions.get_extension_for_class(
+        x509.SubjectAlternativeName
+    ).value.get_values_for_type(x509.DNSName)
+
+
+@pytest.fixture
+def tls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
+    volume = tmp_path / "controller-tls"
+    volume.mkdir()
+    return tmp_path / "secrets", volume
+
+
+def test_a_leaf_near_expiry_is_renewed_with_the_installer_names(
+    tls: tuple[Path, Path],
+) -> None:
+    """Catches a redeploy that keeps serving the installer leaf until it expires."""
+    secrets, volume = tls
+    installer = _pki(secrets)(_NAMES, _NOW - timedelta(days=340))  # 57 days left
+
+    stage_controller_tls(secrets, volume)
+
+    leaf, certificate = _served(volume)
+    assert certificate != installer.certificate
+    assert leaf.not_valid_after_utc - _NOW > timedelta(days=390)
+    assert _names(leaf) == _NAMES
+    intermediate = x509.load_pem_x509_certificate(
+        (secrets / "agent-intermediate-certificate").read_bytes()
+    )
+    leaf.verify_directly_issued_by(intermediate)
+    assert (
+        leaf.extensions.get_extension_for_class(
+            x509.AuthorityKeyIdentifier
+        ).value.key_identifier
+        == intermediate.extensions.get_extension_for_class(
+            x509.SubjectKeyIdentifier
+        ).value.digest
+    )
+    served = volume / "controller-server.pem"
+    key = LeafPair.from_served_file(served.read_bytes()).key
+    assert (
+        serialization.load_pem_private_key(key, None).public_key() == leaf.public_key()
+    )
+    assert stat.S_IMODE(served.stat().st_mode) == 0o440
+
+
+def test_a_valid_staged_leaf_is_served_again_unchanged(
+    tls: tuple[Path, Path],
+) -> None:
+    """Catches minting a new leaf (and key) on every start."""
+    secrets, volume = tls
+    _pki(secrets)(_NAMES, _NOW - timedelta(days=340))
+    stage_controller_tls(secrets, volume)
+    first = _served(volume)[1]
+
+    stage_controller_tls(secrets, volume)
+
+    assert _served(volume)[1] == first
+
+
+def test_a_damaged_staged_file_is_replaced(
+    tls: tuple[Path, Path],
+) -> None:
+    """Catches a corrupt staged file that Caddy keeps loading and never heals."""
+    secrets, volume = tls
+    _pki(secrets)(_NAMES, _NOW - timedelta(days=340))
+    stage_controller_tls(secrets, volume)
+    served = volume / "controller-server.pem"
+    served.chmod(0o600)
+    served.write_bytes(b"not a certificate chain")
+
+    stage_controller_tls(secrets, volume)
+
+    LeafPair.from_served_file(served.read_bytes())
+
+
+def test_an_installer_name_change_wins_over_a_newer_staged_leaf(
+    tls: tuple[Path, Path],
+) -> None:
+    """Catches a renewed leaf that masks the installer's new host name."""
+    secrets, volume = tls
+    installer_leaf = _pki(secrets)
+    installer_leaf(_NAMES, _NOW - timedelta(days=340))
+    stage_controller_tls(secrets, volume)  # staged: 397 days, old names
+    renamed = [*_NAMES, "vonk-forge-litellm.local"]
+    installer = installer_leaf(renamed, _NOW - timedelta(days=10))
+
+    stage_controller_tls(secrets, volume)
+
+    leaf, certificate = _served(volume)
+    assert _names(leaf) == renamed
+    assert certificate == installer.certificate
+
+
+def test_a_renewal_fault_is_logged_and_staging_still_completes(
+    monkeypatch: pytest.MonkeyPatch, tls: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Catches a renewal fault that keeps runtime-init (and every reader) unhealthy."""
+    secrets, volume = tls
+    _pki(secrets)(_NAMES, _NOW - timedelta(days=340))
+    (secrets / "step-ca-password").write_bytes(b"wrong\n")
+    for step in (
+        "stage_compose_secrets",
+        "stage_runtime_assets",
+        "prepare_shared_volumes",
+    ):
+        monkeypatch.setattr(runtime_init, step, lambda: None)
+    real = runtime_init.stage_controller_tls
+    monkeypatch.setattr(
+        runtime_init, "stage_controller_tls", lambda: real(secrets, volume)
+    )
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(runtime_init.signal, "signal", lambda *_args: None)
+    marker = tmp_path / "runtime-staged"
+
+    runtime_init.main(marker=marker, idle=lambda: None)
+
+    assert marker.read_text() == "staged\n"
+    assert not (volume / "controller-server.pem").exists()
+
+
+def test_an_older_compose_file_without_the_volume_renews_nothing(
+    tls: tuple[Path, Path],
+) -> None:
+    secrets, volume = tls
+    _pki(secrets)(_NAMES, _NOW - timedelta(days=340))
+    volume.rmdir()
+
+    stage_controller_tls(secrets, volume)
+
+    assert not volume.exists()
+
+
+def test_a_crash_while_publishing_a_renewal_leaves_a_matching_pair(
+    monkeypatch: pytest.MonkeyPatch, tls: tuple[Path, Path]
+) -> None:
+    """Catches a key published without its leaf: Caddy would refuse the pair
+    and restart-loop, taking every agent and browser listener down. The crash
+    hits the second rename, the point where a two-file publication splits."""
+    secrets, volume = tls
+    installer_leaf = _pki(secrets)
+    installer_leaf(_NAMES, _NOW - timedelta(days=10))
+    stage_controller_tls(secrets, volume)  # the installer's pair is staged
+    installer_leaf(_NAMES, _NOW - timedelta(days=340))  # due: a renewal is minted
+    real_replace = Path.replace
+    renames: list[Path] = []
+
+    def crash_on_second(self: Path, target: Path) -> Path:
+        renames.append(self)
+        if len(renames) == 2:
+            raise OSError("power lost during publication")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", crash_on_second)
+    stage_controller_tls(secrets, volume)
+
+    pair = LeafPair.from_served_file((volume / "controller-server.pem").read_bytes())
+    leaf = x509.load_pem_x509_certificates(pair.certificate)[0]
+    assert (
+        serialization.load_pem_private_key(pair.key, None).public_key()
+        == leaf.public_key()
+    )

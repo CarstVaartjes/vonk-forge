@@ -244,14 +244,16 @@ project and stays until you delete it.
 
 Removing the project stops the gateway but does not remove it from your
 tailnet. In the Tailscale admin console remove the `vonk-forge-gateway` machine
-and the `svc:vonk-forge` Service, the grants and auto-approvers added for the
+and the `svc:vonk-forge` and `svc:vonk-forge-litellm` Services, the grants and auto-approvers added for the
 install, and the scoped OAuth client. See the
 [Tailscale runbook](../runbooks/tailscale.md).
 
 ### 2e. Lab mode only: LAN names and trust
 
-Remove the DNS or hosts entries for `vonk-forge.local`, `enroll.vonk-forge.local`,
-`agents.vonk-forge.local` (older installs also `registry.vonk-forge.local`), and delete the
+Remove the DNS or hosts entries for the `VONK_CONTROL_HOSTNAME` in `.env`
+(`vonk-forge.internal`, or `vonk-forge.local` on earlier installs), its
+`enroll.` and `agents.` names (older installs also `registry.`) and its
+`-litellm` name (`vonk-forge-litellm.internal`), and delete the
 `secrets/step-ca/root-certificate` you imported into browsers and clients.
 
 ## 3. Remove `vonkctl`

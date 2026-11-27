@@ -17,11 +17,12 @@ from starlette.routing import Route
 
 from cluster_profiles import cli
 from cluster_profiles.control_client.transfers import ControlClient
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_control.api.application import create_app
 from vonk_control.api.common import _bounded_error_content
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.catalog.api import CatalogProblem
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import User
@@ -122,7 +123,6 @@ def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
     tokens = iter((_opaque(1), _opaque(2)))
     service = BrowserAuthService(
         sessions,
-        token_signing_key=b"k" * 32,
         clock=clock,
         token_source=lambda: next(tokens),
     )
@@ -314,7 +314,7 @@ def test_generic_job_submission_route_is_retired() -> None:
 def test_cookie_authentication_resolves_only_through_browser_sessions() -> None:
     """Opaque browser tokens must work without being signed bearer tokens."""
     client, issued, _service, _sessions, _clock, _codec, _jobs = _browser_client()
-    client.cookies.set("vonk_session", issued.token)
+    client.cookies.set("__Host-vonk_session", issued.token)
 
     response = client.get("/api/fleet")
 
@@ -324,11 +324,11 @@ def test_cookie_authentication_resolves_only_through_browser_sessions() -> None:
 
 def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
     client, issued, _service, _sessions, _clock, _codec, jobs = _browser_client()
-    client.cookies.set("vonk_session", issued.token)
+    client.cookies.set("__Host-vonk_session", issued.token)
     document = {"name": "CSRF test", "assignments": []}
 
     assert client.put("/api/profile/1", json=document).status_code == 403
-    client.cookies.set("vonk_csrf", issued.csrf)
+    client.cookies.set("__Host-vonk_csrf", issued.csrf)
     assert (
         client.put(
             "/api/profile/1",
@@ -348,10 +348,28 @@ def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
     )
 
 
+def test_unprefixed_cookies_neither_authenticate_nor_satisfy_csrf() -> None:
+    """A sibling host can toss a plain vonk_* cookie; only __Host- names count."""
+    client, issued, _service, _sessions, _clock, _codec, jobs = _browser_client()
+    client.cookies.set("vonk_session", issued.token)
+    assert client.get("/api/fleet").status_code == 401
+
+    client.cookies.set("__Host-vonk_session", issued.token)
+    client.cookies.set("vonk_csrf", "tossed")
+    document = {"name": "CSRF test", "assignments": []}
+    response = client.put(
+        "/api/profile/1", headers={"x-csrf-token": "tossed"}, json=document
+    )
+    assert response.status_code == 403
+    assert jobs.calls == []
+
+
 def test_cookie_authentication_is_unavailable_without_browser_service() -> None:
     """A signed bearer token in a cookie must not restore legacy cookie auth."""
     client, headers, _jobs = _client("administrator")
-    client.cookies.set("vonk_session", headers["Authorization"].removeprefix("Bearer "))
+    client.cookies.set(
+        "__Host-vonk_session", headers["Authorization"].removeprefix("Bearer ")
+    )
 
     assert client.get("/api/fleet").status_code == 401
 
@@ -359,14 +377,14 @@ def test_cookie_authentication_is_unavailable_without_browser_service() -> None:
 def test_signed_bearer_authentication_remains_unchanged_and_takes_precedence() -> None:
     """Bearer clients must remain valid and must not be resolved as cookies."""
     client, issued, _service, _sessions, _clock, codec, _jobs = _browser_client()
-    client.cookies.set("vonk_session", "not-an-opaque-session")
+    client.cookies.set("__Host-vonk_session", "not-an-opaque-session")
     bearer = codec.issue(Actor("operator", "operator"), ttl_seconds=1000, now=0)
 
     response = client.get("/api/fleet", headers={"authorization": f"Bearer {bearer}"})
 
     # Authenticated; the fleet projection itself is not wired in this fixture.
     assert response.status_code == 503
-    client.cookies.set("vonk_session", issued.token)
+    client.cookies.set("__Host-vonk_session", issued.token)
     assert (
         client.get(
             "/api/fleet", headers={"authorization": f"Bearer {issued.token}"}
@@ -379,7 +397,7 @@ def test_cookie_sessions_reflect_revocation_disablement_and_expiry() -> None:
     """Durable session and current-user state changes must take effect immediately."""
     for state in ("revoked", "disabled", "expired"):
         client, issued, service, sessions, clock, _codec, _jobs = _browser_client()
-        client.cookies.set("vonk_session", issued.token)
+        client.cookies.set("__Host-vonk_session", issued.token)
         if state == "revoked":
             service.logout(issued.token)
         elif state == "disabled":

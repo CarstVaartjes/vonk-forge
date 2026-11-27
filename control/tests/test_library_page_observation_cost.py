@@ -18,7 +18,7 @@ from collections.abc import Callable, Sequence
 
 import pytest
 
-from vonk_control.auth import TokenCodec
+from tests.token_support import TokenCodec
 from vonk_control.library.contract import (
     LibraryModelProjection,
     LibraryRecipeProjection,

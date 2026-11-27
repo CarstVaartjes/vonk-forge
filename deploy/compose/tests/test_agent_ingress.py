@@ -10,11 +10,16 @@ import sys
 import tarfile
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatchcase
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import NameOID
 from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
 
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
@@ -192,34 +197,58 @@ def _routes_with_handlers(value: object) -> list[dict]:
     return routes
 
 
+def _proxies_with_preceding_handlers(
+    routes: list[dict], preceding: list[dict]
+) -> list[tuple[dict, list[dict]]]:
+    """Each reverse_proxy below ``routes`` with every handler that runs before it.
+
+    A route list runs in order, so the handlers of an earlier unmatched sibling
+    precede a later route (a ``route`` block adapts to one route per line).
+    """
+
+    found: list[tuple[dict, list[dict]]] = []
+    running = list(preceding)
+    for route in routes:
+        within = list(running)
+        for handler in route.get("handle", []):
+            if handler.get("handler") == "reverse_proxy":
+                found.append((handler, list(within)))
+            if handler.get("handler") == "subroute":
+                found.extend(
+                    _proxies_with_preceding_handlers(handler["routes"], within)
+                )
+                within.extend(
+                    inner
+                    for subroute in handler["routes"]
+                    if "match" not in subroute
+                    for inner in subroute.get("handle", [])
+                )
+            within.append(handler)
+        if "match" not in route:
+            running = within
+    return found
+
+
 def _assert_browser_sanitizer_precedes_each_upstream(value: object) -> None:
     expected_deletes = ["Forwarded", "X-Forwarded-*", "X-Vonk-Agent-*"]
+    # LiteLLM: /v1/*, the large-body key check inside it, and /litellm/*.
     expected_upstreams = {
-        "litellm:4000": 2,
+        "litellm:4000": 3,
         "control-api:8000": 1,
     }
-
+    assert isinstance(value, list)
+    proxies = _proxies_with_preceding_handlers(value, [])
     for upstream, expected_count in expected_upstreams.items():
-        sequences: list[list[dict]] = []
-        for route in _routes_with_handlers(value):
-            handlers = route["handle"]
-            if any(
-                handler.get("handler") == "reverse_proxy"
-                and handler.get("upstreams") == [{"dial": upstream}]
-                for handler in handlers
-            ):
-                sequences.append(handlers)
+        sequences = [
+            preceding
+            for handler, preceding in proxies
+            if handler.get("upstreams") == [{"dial": upstream}]
+        ]
         assert len(sequences) == expected_count, (upstream, sequences)
-        for handlers in sequences:
-            proxy_index = next(
-                index
-                for index, handler in enumerate(handlers)
-                if handler.get("handler") == "reverse_proxy"
-                and handler.get("upstreams") == [{"dial": upstream}]
-            )
+        for preceding in sequences:
             deleted_headers = [
                 header
-                for handler in handlers[:proxy_index]
+                for handler in preceding
                 if handler.get("handler") == "headers"
                 for header in handler.get("request", {}).get("delete", [])
             ]
@@ -411,8 +440,14 @@ def test_agent_bootstrap_uses_the_normalized_public_ca() -> None:
         volume["target"] == "/run/vonk-normalized-secrets" and volume["read_only"]
         for volume in api["volumes"]
     )
-    assert "controller-server-key" not in staged
     assert "agent-intermediate-key" not in staged
+    # runtime-init renews the served leaf, but the API reads only its
+    # certificate: the key it stages there is root-only (test_runtime_init).
+    assert {
+        (volume["source"], volume["target"], volume.get("read_only"))
+        for volume in api["volumes"]
+        if volume["source"] == "controller-tls"
+    } == {("controller-tls", "/run/vonk-controller-tls", True)}
 
 
 def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
@@ -1080,19 +1115,21 @@ def test_caddy_proxy_auth_is_one_canonical_base64url_like_line(tmp_path: Path) -
             "/bin/sh",
             "-c",
             (
-                'printf "%s %s %s %s" "$VONK_AGENT_PROXY_AUTH" '
+                'printf "%s %s %s %s %s" "$VONK_AGENT_PROXY_AUTH" '
                 '"$VONK_CONTROL_HOSTNAME" "$VONK_AGENT_ENROLL_HOSTNAME" '
-                '"$VONK_AGENT_HOSTNAME"'
+                '"$VONK_AGENT_HOSTNAME" "$VONK_LITELLM_HOSTNAME"'
             ),
         ),
     )
     assert result.returncode == 0, result.stderr
-    # One normalized control hostname names every SNI boundary.
+    # One normalized control hostname names every SNI boundary; the LiteLLM
+    # UI origin is a sibling name, so it can also be a Tailscale Service.
     assert result.stdout.split() == [
         token,
         "control.test.example",
         "enroll.control.test.example",
         "agents.control.test.example",
+        "control-litellm.test.example",
     ]
 
     invalid_values = (
@@ -1592,4 +1629,453 @@ def test_edge_body_limit_errors_are_distinct_from_proxied_controller_limits(tmp_
     finally:
         subprocess.run(
             ["docker", "stop", container], check=True, capture_output=True, timeout=10
+        )
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(30)
+def test_only_the_controller_pages_carry_the_controller_page_policy(tmp_path):
+    """The browser host's own routes get the SPA policy; LiteLLM's never do."""
+
+    text = DEV_CADDYFILE.read_text()
+    blocks = []
+    for name in (
+        "edge_headers",
+        "edge_guards",
+        "browser_edge_guards",
+        "litellm_large_body_gate",
+        "browser_proxy_headers",
+        "controller_page_policy",
+        "litellm_upstream",
+        "litellm_browser_routes",
+        "browser_control_proxy",
+    ):
+        match = re.search(
+            rf"^\({name}\) \{{\n.*?^\}}\n", text, re.DOTALL | re.MULTILINE
+        )
+        assert match is not None
+        blocks.append(match.group(0))
+    browser = re.search(r"^:8080 \{\n.*?^\}\n", text, re.DOTALL | re.MULTILINE)
+    assert browser is not None
+    blocks.append(browser.group(0))
+    # Stand-ins for both upstreams; the Controller one sets its own policy,
+    # which the edge must replace rather than merge with.
+    caddyfile = tmp_path / "Caddyfile"
+    caddyfile.write_text(
+        "{\n admin off\n auto_https off\n}\n"
+        + "\n".join(blocks)
+        + ":8000 {\n header Content-Security-Policy upstream\n respond 200\n}\n"
+        + ":4000 {\n respond 200\n}\n"
+    )
+    container = f"vonk-page-policy-{uuid4().hex[:12]}"
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            container,
+            "--add-host",
+            "control-api:127.0.0.1",
+            "--add-host",
+            "litellm:127.0.0.1",
+            "-e",
+            "VONK_CONTROL_HOSTNAME=control.test.example",
+            "-p",
+            "127.0.0.1::8080",
+            "-v",
+            f"{caddyfile}:/etc/caddy/Caddyfile:ro",
+            DEV_CADDY_IMAGE,
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    try:
+        port = int(
+            subprocess.run(
+                ["docker", "port", container, "8080/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            .stdout.strip()
+            .rsplit(":", 1)[1]
+        )
+        deadline = time.monotonic() + 10
+
+        def headers(path: str) -> http.client.HTTPResponse:
+            while True:
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+                try:
+                    connection.request(
+                        "GET", path, headers={"Host": "control.test.example"}
+                    )
+                    response = connection.getresponse()
+                    response.read()
+                    assert response.status == 200
+                    return response
+                except (ConnectionError, http.client.RemoteDisconnected):
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.1)
+                finally:
+                    connection.close()
+
+        for path in ("/", "/fleet", "/api/auth/session"):
+            response = headers(path)
+            policies = response.headers.get_all("Content-Security-Policy") or []
+            assert len(policies) == 1
+            directives = {
+                part.strip().split(" ", 1)[0]: part.strip()
+                for part in policies[0].split(";")
+            }
+            assert directives["default-src"] == "default-src 'self'"
+            assert directives["frame-ancestors"] == "frame-ancestors 'none'"
+            assert directives["object-src"] == "object-src 'none'"
+            assert "'unsafe-inline'" not in policies[0]
+            assert "'unsafe-eval'" not in policies[0]
+            assert "camera=()" in response.getheader("Permissions-Policy", "")
+            assert "microphone=()" in response.getheader("Permissions-Policy", "")
+        for path in ("/v1/models", "/litellm/ui/"):
+            response = headers(path)
+            assert response.getheader("Permissions-Policy") is None
+            for policy in response.headers.get_all("Content-Security-Policy") or []:
+                assert "default-src" not in policy
+    finally:
+        subprocess.run(
+            ["docker", "stop", container], check=True, capture_output=True, timeout=10
+        )
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(30)
+def test_a_large_inference_body_waits_for_a_key_litellm_accepts(tmp_path: Path) -> None:
+    """The real gate snippet in front of a stub LiteLLM.
+
+    Catches: a large or unsized body reaching LiteLLM without a key it accepts
+    (LiteLLM reads the body before its own key check), a key check that sends
+    the body, another method or a browser cookie, a key header other than
+    Authorization that is not passed, and an ordinary small body that pays
+    the extra round trip.
+    """
+
+    # Every path the edge admits a large body on is gated, on the real site.
+    browser = _server_on_port(_adapted_caddy(_environment()), 8080)
+    large = {
+        path
+        for route in _request_body_routes(browser)
+        if route["max_size"] == _INFERENCE_BODY_BYTES
+        for matcher in route["match"]
+        for path in matcher["path"]
+    }
+    gated = {
+        path
+        for route in _routes_with_handlers(browser)
+        if any(
+            handler.get("rewrite", {}).get("uri") == "/v1/models?"
+            for handler in route["handle"]
+        )
+        for matcher in route["match"]
+        for path in matcher["path"]
+    }
+    assert large == gated == set(_INFERENCE_POSTS)
+
+    match = re.search(
+        r"^\(litellm_large_body_gate\) \{\n.*?^\}\n",
+        DEV_CADDYFILE.read_text(),
+        re.DOTALL | re.MULTILINE,
+    )
+    assert match is not None
+    caddyfile = tmp_path / "Caddyfile"
+    caddyfile.write_text(
+        "{\n admin off\n auto_https off\n}\n"
+        + match.group(0)
+        + ":8080 {\n route {\n  import litellm_large_body_gate 127.0.0.1:9000\n"
+        + "  reverse_proxy 127.0.0.1:9000\n }\n}\n"
+        # Stub LiteLLM: the key check passes only as a bodyless GET with a
+        # known key; any other request is the real route and says so.
+        + ":9000 {\n @key_check {\n  method GET\n  path /v1/models\n"
+        + "  not header Content-Length *\n  not header Transfer-Encoding *\n"
+        + "  not header Cookie *\n }\n"
+        + ' @known {\n  header Authorization "Bearer known"\n }\n'
+        + " @known_anthropic {\n  header x-api-key known\n }\n"
+        + " handle @key_check {\n  handle @known {\n   respond 200\n  }\n"
+        + "  handle @known_anthropic {\n   respond 200\n  }\n  respond 401\n }\n"
+        + " handle /v1/models {\n  respond 400\n }\n"
+        + " handle {\n  header X-Stub-Route reached\n  respond 200\n }\n}\n"
+    )
+    container = f"vonk-body-gate-{uuid4().hex[:12]}"
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            container,
+            "-p",
+            "127.0.0.1::8080",
+            "-v",
+            f"{caddyfile}:/etc/caddy/Caddyfile:ro",
+            DEV_CADDY_IMAGE,
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    try:
+        port = int(
+            subprocess.run(
+                ["docker", "port", container, "8080/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            .stdout.splitlines()[0]
+            .rsplit(":", 1)[1]
+        )
+
+        def declared_unsent(path: str) -> bytes:
+            # A declared 256 MiB body that is never sent, from inside the
+            # container (the host port forwarder holds a reply to a request
+            # whose body is still owed). The server sends 100 Continue only
+            # once a handler reads the body, so a final answer with none
+            # means not one byte of it was read.
+            request = (
+                f"POST {path} HTTP/1.1\\r\\nHost: gate\\r\\n"
+                "Content-Length: 268435456\\r\\nExpect: 100-continue\\r\\n\\r\\n"
+            )
+            deadline = time.monotonic() + 10
+            while True:
+                answer = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        container,
+                        "sh",
+                        "-c",
+                        f'printf "{request}" | timeout 5 nc 127.0.0.1 8080',
+                    ],
+                    capture_output=True,
+                    timeout=15,
+                    check=False,
+                ).stdout
+                if answer or time.monotonic() >= deadline:
+                    return answer
+                time.sleep(0.1)
+
+        def post(
+            path: str, headers: dict[str, str], body: bytes
+        ) -> tuple[int, str | None]:
+            deadline = time.monotonic() + 10
+            while True:
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                try:
+                    # Chunked: no declared length, so the gate applies.
+                    connection.request(
+                        "POST",
+                        path,
+                        body=iter([body]),
+                        headers=headers,
+                        encode_chunked=True,
+                    )
+                    response = connection.getresponse()
+                    response.read()
+                    return response.status, response.getheader("X-Stub-Route")
+                except (ConnectionError, http.client.RemoteDisconnected):
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.1)
+                finally:
+                    connection.close()
+
+        for path in _INFERENCE_POSTS:
+            assert declared_unsent(path).startswith(b"HTTP/1.1 401 "), path
+            assert post(path, {}, b"{}") == (401, None), path
+            assert post(path, {"Authorization": "Bearer guess"}, b"{}") == (
+                401,
+                None,
+            ), path
+            assert post(path, {"Authorization": "Bearer known"}, b"{}") == (
+                200,
+                "reached",
+            ), path
+        assert post("/v1/messages", {"x-api-key": "known"}, b"{}") == (200, "reached")
+        # Controller browser cookies never reach the key check.
+        assert post(
+            "/v1/chat/completions",
+            {"Authorization": "Bearer known", "Cookie": "vonk_session=s; vonk_csrf=c"},
+            b"{}",
+        ) == (200, "reached")
+        # A small declared body goes straight to LiteLLM's own key check.
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            connection.request("POST", "/v1/chat/completions", body=b"{}")
+            response = connection.getresponse()
+            response.read()
+            assert (response.status, response.getheader("X-Stub-Route")) == (
+                200,
+                "reached",
+            )
+        finally:
+            connection.close()
+    finally:
+        subprocess.run(
+            ["docker", "stop", container], check=True, capture_output=True, timeout=10
+        )
+
+
+def _self_signed_pem(hostnames: tuple[str, ...]) -> tuple[bytes, bytes]:
+    key = ed25519.Ed25519PrivateKey.generate()
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostnames[0])])
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(hours=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName(host) for host in hostnames]),
+            False,
+        )
+        .sign(key, algorithm=None)
+    )
+    return (
+        certificate.public_bytes(serialization.Encoding.PEM),
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ),
+    )
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(30)
+def test_litellm_ui_has_its_own_origin_and_never_sees_controller_cookies(
+    tmp_path: Path,
+) -> None:
+    """The real Caddyfile in front of stub LiteLLM and Controller upstreams.
+
+    Catches: the LiteLLM UI still executing on the Controller's origin (no
+    sandbox), a Cookie header reaching LiteLLM from either host, and a LiteLLM
+    host that does not serve the UI or that falls through to the Controller.
+    """
+    _require_docker_runtime()
+    control, litellm = "control.test.example", "control-litellm.test.example"
+    certificate, key = _self_signed_pem((control, litellm))
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    (secrets_dir / "controller-server-certificate").write_bytes(certificate)
+    (secrets_dir / "controller-server-key").write_bytes(key)
+    (secrets_dir / "agent-client-ca").write_bytes(certificate)
+    caddyfile = tmp_path / "Caddyfile"
+    caddyfile.write_text(
+        (ROOT / "deploy/compose/Caddyfile").read_text(encoding="utf-8")
+        # Stub LiteLLM: echoes the Cookie it received and sets its own CSP.
+        + ":4000 {\n\theader Content-Security-Policy \"default-src 'self'\"\n"
+        '\trespond "cookie=[{http.request.header.Cookie}] uri={http.request.uri}" 200\n}\n'
+        + ':8000 {\n\trespond "controller" 200\n}\n',
+        encoding="utf-8",
+    )
+    for path in (*secrets_dir.iterdir(), caddyfile):
+        path.chmod(0o644)
+    container = f"vonk-litellm-origin-{os.getpid()}"
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            container,
+            "-p",
+            "127.0.0.1::8080",
+            "--add-host",
+            "litellm:127.0.0.1",
+            "--add-host",
+            "control-api:127.0.0.1",
+            "-e",
+            f"VONK_CONTROL_HOSTNAME={control}",
+            "-e",
+            f"VONK_LITELLM_HOSTNAME={litellm}",
+            "-e",
+            "VONK_AGENT_PROXY_AUTH=test-proxy-secret",
+            "-v",
+            f"{caddyfile}:/etc/caddy/Caddyfile:ro",
+            "-v",
+            f"{secrets_dir}:/run/secrets:ro",
+            DEV_CADDY_IMAGE,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        port = int(
+            subprocess.run(
+                ["docker", "port", container, "8080/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            .stdout.splitlines()[0]
+            .rsplit(":", 1)[1]
+        )
+
+        def request(
+            method: str, host: str, path: str
+        ) -> tuple[int, dict[str, str], str]:
+            for _ in range(50):
+                try:
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", port, timeout=5
+                    )
+                    connection.request(
+                        method,
+                        path,
+                        body=b"{}" if method == "POST" else None,
+                        headers={
+                            "Host": host,
+                            "Cookie": "__Host-vonk_session=s; vonk_csrf=c",
+                        },
+                    )
+                    response = connection.getresponse()
+                    body = response.read().decode()
+                    headers = {k.lower(): v for k, v in response.getheaders()}
+                    return response.status, headers, body
+                except (ConnectionError, http.client.RemoteDisconnected):
+                    time.sleep(0.1)
+            raise AssertionError("caddy did not start")
+
+        status, headers, body = request("GET", litellm, "/litellm/ui/")
+        assert (status, body) == (200, "cookie=[] uri=/ui/")
+        # On its own origin the UI keeps LiteLLM's own policy and can run.
+        assert headers["content-security-policy"] == "default-src 'self'"
+        status, headers, _ = request("GET", litellm, "/")
+        assert (status, headers["location"]) == (302, "/litellm/ui/")
+        assert request("GET", litellm, "/api/fleet")[0] == 404
+        assert request("POST", litellm, "/litellm/config/update")[0] == 403
+        assert request("GET", litellm, "/litellm/metrics")[0] == 404
+
+        for method, path, uri in (
+            ("GET", "/litellm/ui/", "/ui/"),
+            ("POST", "/v1/chat/completions", "/v1/chat/completions"),
+        ):
+            status, headers, body = request(method, control, path)
+            assert (status, body) == (200, f"cookie=[] uri={uri}")
+            assert headers["content-security-policy"] == "sandbox"
+        status, headers, body = request("GET", control, "/api/fleet")
+        assert (status, body) == (200, "controller")
+        # The Controller's own routes carry its page policy, never the sandbox.
+        assert headers["content-security-policy"].startswith("default-src 'self'")
+    finally:
+        subprocess.run(
+            ["docker", "rm", "-f", container], capture_output=True, check=False
         )

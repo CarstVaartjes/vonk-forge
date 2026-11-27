@@ -293,9 +293,9 @@ jobs:
   producers:
     name: Record accepted development producers
     # Later releases reuse what this run produced (scripts/ci/resolve-publication-
-    # producer). An agent counts only once apt dev also published it, so a
-    # failed apt publication is healed by the next release building again.
-    needs: [changes, agent, apt, images, setups]
+    # producer). Nothing reads the apt repository, so apt is no producer
+    # input: its failure never withholds a package or blocks promotion.
+    needs: [changes, agent, images, setups]
     if: ${{ !cancelled() && needs.changes.outputs.channel == 'dev' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -305,7 +305,7 @@ jobs:
         shell: bash
         run: printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/release-producer-source"
       - name: Record the accepted agent package
-        if: needs.agent.result == 'success' && needs.apt.result == 'success'
+        if: needs.agent.result == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-producer-agent
@@ -336,7 +336,7 @@ jobs:
   authority:
     name: Accept one complete source generation
     # needs: makes every producer that supplies evidence settle first. apt and
-    # producers publish nothing this job consumes; promote waits for them.
+    # producers publish nothing this job consumes; promote waits for producers.
     needs: [changes, ci, agent, images, setups]
     if: >-
       ${{ !cancelled() &&
@@ -546,9 +546,10 @@ jobs:
 
   promote:
     name: Promote accepted ${{ needs.authority.outputs.channel }} installer generation
-    # Nothing is promoted before apt dev and the producer records settled; a
-    # failed or superseded (cancelled) one publishes nothing.
-    needs: [authority, candidate, release-acceptance, apt, producers]
+    # Nothing is promoted before the producer records settled; a failed or
+    # superseded (cancelled) one publishes nothing. apt runs beside it and
+    # never blocks: nothing on a Spark or the Controller reads that repository.
+    needs: [authority, candidate, release-acceptance, producers]
     if: >-
       !cancelled() && needs.authority.result == 'success' &&
       !contains(needs.*.result, 'failure') &&

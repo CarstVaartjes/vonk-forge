@@ -13,10 +13,17 @@ import signal
 import stat
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+
+from cryptography import x509
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control.categorized_errors import UnsettledOutcome
+from vonk_control.pki.controller_leaf import LeafPair, served_leaf, staged_pair
 from vonk_control.runtime.asset_contract import RuntimeAssetInventory
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +37,17 @@ class RuntimeSecretError(RuntimeError):
 
 # A private child preserves the operator-owned gateway bind directory.
 GATEWAY_MASTER_KEY_PATH = Path("/gateway-secrets/authority/master-key")
+# The capability-free Tailscale gateway's root-owned copy of its OAuth secrets.
+TAILSCALE_OAUTH_ROOT = Path("/tailscale-oauth")
+
+# Caddy serves the controller leaf from this volume (read-only). The chain and
+# the key share one file, so one rename publishes a matching pair. Group 10001
+# lets the API read its certificate for the expiry metric; the API already
+# holds the intermediate that issues this leaf.
+CONTROLLER_TLS = Path("/controller-tls")
+CONTROLLER_TLS_FILE = "controller-server.pem"
+CONTROLLER_CERTIFICATE = "controller-server-certificate"
+CONTROLLER_KEY = "controller-server-key"
 
 
 @dataclass(frozen=True)
@@ -121,9 +139,27 @@ def _stage_runtime_file_once(
     maximum_bytes: int = _MAX_RUNTIME_FILE_BYTES,
 ) -> Path:
     """Copy file-backed runtime material into a Docker-managed volume atomically."""
-    content = _read_runtime_file(source, maximum_bytes=maximum_bytes)
-    destination = Path(destination)
+    return _replace_file(
+        _read_runtime_file(source, maximum_bytes=maximum_bytes),
+        destination,
+        owner_uid=owner_uid,
+        owner_gid=owner_gid,
+        mode=mode,
+        preserve_parent=preserve_parent,
+    )
 
+
+def _replace_file(
+    content: bytes,
+    destination: Path,
+    *,
+    owner_uid: int,
+    owner_gid: int,
+    mode: int,
+    preserve_parent: bool,
+) -> Path:
+    """Publish bytes at ``destination`` atomically; an I/O fault keeps the old file."""
+    destination = Path(destination)
     parent = destination.parent
     temporary = parent / f".{destination.name}.{secrets.token_hex(12)}.new"
     try:
@@ -395,13 +431,17 @@ def stage_compose_secrets(
     destination_root: Path = Path("/normalized"),
     *,
     gateway_master_key: Path = GATEWAY_MASTER_KEY_PATH,
+    tailscale_root: Path = TAILSCALE_OAUTH_ROOT,
 ) -> None:
     """Startup owns bounded retries, including optional projection cleanup."""
     last_error: BaseException | None = None
     for _attempt in range(3):
         try:
             _stage_compose_secrets_once(
-                source_root, destination_root, gateway_master_key=gateway_master_key
+                source_root,
+                destination_root,
+                gateway_master_key=gateway_master_key,
+                tailscale_root=tailscale_root,
             )
             return
         except (OSError, UnsettledOutcome) as error:
@@ -417,22 +457,30 @@ def _stage_compose_secrets_once(
     destination_root: Path = Path("/normalized"),
     *,
     gateway_master_key: Path = GATEWAY_MASTER_KEY_PATH,
+    tailscale_root: Path = TAILSCALE_OAUTH_ROOT,
 ) -> None:
     """Normalize all file-backed Compose secrets for their runtime consumers."""
     source_root = Path(source_root)
     destination_root = Path(destination_root)
-    # The non-root API bootstraps the administrator from this copy. Staged
-    # first: when it fails, a fresh install has no database URL either, so the
-    # API cannot start without its administrator. An older Compose file does
-    # not pass this secret to runtime-init.
+    # The non-root API bootstraps the administrator from this copy. An older
+    # Compose file does not pass this secret to runtime-init. The file is the
+    # operator's reset path, so a hand edit that makes it unusable (empty,
+    # oversize, not a regular file) is logged and skipped: the previous copy
+    # stays staged and every other secret is still staged.
     if (source_root / "admin-password").exists():
-        stage_private_key(
-            source_root / "admin-password",
-            destination_root / "admin-password",
-            owner_uid=10001,
-            owner_gid=10001,
-            mode=0o400,
-        )
+        try:
+            stage_private_key(
+                source_root / "admin-password",
+                destination_root / "admin-password",
+                owner_uid=10001,
+                owner_gid=10001,
+                mode=0o400,
+            )
+        except RuntimeSecretError:
+            _LOGGER.error(
+                "staged administrator password is unusable; the previous copy "
+                "is kept and the API keeps its stored password"
+            )
     stage_private_key(
         source_root / "host-runtime-grant-private-key",
         destination_root / "host-runtime-grant-private-key",
@@ -502,6 +550,9 @@ def _stage_compose_secrets_once(
         "step-ca-root-certificate",
         "step-ca-intermediate-key",
         "step-ca-password",
+        # The installer leaf Caddy serves until a renewed one is staged: the
+        # API reads it for the expiry metric then.
+        CONTROLLER_CERTIFICATE,
     ):
         source = source_root / name
         if source.exists():
@@ -519,6 +570,13 @@ def _stage_compose_secrets_once(
         owner_gid=10001,
         mode=0o400,
     )
+    # The gateway drops every capability and runs as root: a root-owned 0400
+    # copy is readable without DAC_OVERRIDE, whoever owns the installer's
+    # files. Lab mode writes them empty, which removes the copy.
+    for name in ("tailscale-oauth-client-id", "tailscale-oauth-client-secret"):
+        _stage_optional_private_key(
+            source_root / name, tailscale_root / name, mode=0o400
+        )
 
 
 def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
@@ -645,18 +703,89 @@ def _identity(value: os.stat_result) -> tuple[int, ...]:
     )
 
 
+def _intermediate_key(source_root: Path) -> ed25519.Ed25519PrivateKey:
+    key = serialization.load_pem_private_key(
+        read_runtime_secret(source_root / "step-ca-intermediate-key"),
+        password=read_runtime_secret(source_root / "step-ca-password").strip(),
+    )
+    if not isinstance(key, ed25519.Ed25519PrivateKey):
+        raise TypeError("intermediate key must be Ed25519")
+    return key
+
+
+def stage_controller_tls(
+    source_root: Path = Path("/run/secrets"),
+    destination: Path = CONTROLLER_TLS,
+    *,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> None:
+    """Keep a valid controller leaf in the volume Caddy serves from.
+
+    A renewal fault is logged and never fails staging: Caddy keeps serving the
+    leaf it has, and the next start tries again. An older Compose file mounts
+    no volume and passes no installer leaf, so there is nothing to renew.
+    """
+    installer_certificate = source_root / CONTROLLER_CERTIFICATE
+    if not destination.is_dir() or not installer_certificate.exists():
+        _LOGGER.info("controller TLS renewal is not configured by this Compose file")
+        return
+    try:
+        staged = None
+        if (destination / CONTROLLER_TLS_FILE).exists():
+            staged = staged_pair(read_runtime_secret(destination / CONTROLLER_TLS_FILE))
+        chosen = served_leaf(
+            installer=LeafPair(
+                read_runtime_secret(installer_certificate),
+                read_runtime_secret(source_root / CONTROLLER_KEY),
+            ),
+            staged=staged,
+            intermediate_certificate=read_runtime_secret(
+                source_root / "agent-intermediate-certificate"
+            ),
+            intermediate_key=lambda: _intermediate_key(source_root),
+            now=now(),
+        )
+        if chosen is None:
+            return
+        _directory(destination, 0, 0, 0o755)
+        # One file, one rename: a crash at any point leaves the previous pair
+        # or the new one, never a key with another leaf.
+        _replace_file(
+            chosen.served_file(),
+            destination / CONTROLLER_TLS_FILE,
+            owner_uid=0,
+            owner_gid=10001,
+            mode=0o440,
+            preserve_parent=True,
+        )
+        _LOGGER.info("controller TLS leaf staged")
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        InvalidSignature,
+        UnsupportedAlgorithm,
+        x509.ExtensionNotFound,
+        UnsettledOutcome,
+        RuntimeSecretError,
+    ) as error:
+        _LOGGER.warning("controller TLS leaf renewal failed: %s", error)
+
+
 def stage_runtime() -> None:
     """Stage everything other services read before they start.
 
     The ``runtime-init`` Compose helper runs this as root, without network or
     database, before its dependants start: private secrets for each consumer,
-    this release's runtime kit, and the ownership of the shared volume roots.
+    this release's runtime kit, the ownership of the shared volume roots, and
+    the controller TLS leaf Caddy serves.
     """
     if os.geteuid() != 0:
         raise RuntimeError("runtime-init must start as root")
     stage_compose_secrets()
     stage_runtime_assets()
     prepare_shared_volumes()
+    stage_controller_tls()
 
 
 # Per container start: the tmpfs begins empty, so a restart or a recreated

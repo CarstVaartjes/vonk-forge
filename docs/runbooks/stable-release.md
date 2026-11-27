@@ -18,13 +18,27 @@ the tagged commit.
 - Right after a tag, bump the patch at once, so a fix-forward `vX.Y.(Z+1)` stays
   possible.
 - A breaking response shape or a deprecation bumps the minor in the same PR.
+- `AGENT_PROTOCOL_VERSION` (`vonk_agent_protocol/claims.py` and the Rust
+  agent) changes only together with a minor or major bump of the workspace
+  version in the same change; the CI `lint` job runs
+  `scripts/dev/check-agent-protocol-bump` on the PR diff. The Controller accepts
+  only its own protocol, so the previous agents get no claims and no relay
+  upgrade after a bump: each Spark needs its `/spark` installer rerun. The
+  release notes say so.
 - Development builds are `X.Y.Z~dev.<seconds>+g<sha>` and sort below `X.Y.Z`:
   `0.1.1 < 1.0.0~dev.N < 1.0.0`.
 
 ## Support statement
 
 - From 1.0.0 the stable channel answers the previous stable `vonkctl` and agent
-  for one minor release (N-1).
+  for one minor release (N-1); for the agent, while `AGENT_PROTOCOL_VERSION` is
+  unchanged. What CI proves of this: the release acceptance's upgrade carry
+  installs the previously promoted release of the same channel, keeps a
+  workload serving across the Controller redeploy, then upgrades the agent
+  through the installer. It does not prove sustained N-1 operation (new claims
+  or loads on the old agent), the no-sudo relay upgrade (`vonkctl fleet
+  upgrade`) from N-1, or real Spark hardware (the lane uses synthetic arm
+  runners). The first stable carry is v1.0.0 from v0.1.1.
 - A deprecated API field or CLI flag keeps working for one minor and is announced
   in the release notes.
 - Database tables a release no longer declares are kept for one minor.
@@ -34,6 +48,15 @@ the tagged commit.
   this against the published stable contract (`docs/testing-and-ci.md`).
 - The dev channel has no compatibility promise.
 - Rollback is fix-forward. The previous minor's tables survive the newer one.
+  Rolling back to the previous minor (N → N-1 → N) loses nothing: schema
+  reconciliation keeps undeclared columns with their data and undeclared tables
+  for one minor, and reinstalls the foreign keys it dropped from a kept table
+  (`NOT VALID` when old rows violate them) once the table is declared again.
+  Skipping a minor is outside the promise: 1.2 → 1.0 → 1.1 drops the tables 1.2
+  added, because 1.0 stamps them and 1.1 retires them. The dev channel keeps no
+  undeclared table, so stable → dev → stable loses the data of tables dev no
+  longer declares. There is deliberately no schema-version guard at boot: a
+  refusing guard would block the rollbacks reconciliation already handles.
 
 ## Before the tag
 
@@ -55,30 +78,40 @@ the tagged commit.
 
    It checks the release switches, the stable environments and their deployment
    policies, name parity with the dev twins, the acceptance and agent key
-   fingerprints, the owner reviewer, that the workspace version at `<sha>`
-   equals the tag, that `<sha>` is on main with a successful Release, the three
-   image attestations, and the signers file. The reviewer is expected on
+   fingerprints, the owner reviewer, that the four workspace version files at
+   `<sha>` (the ones the tag run checks) agree and equal the tag (disagreeing
+   files are reported with their versions, beside every other gap), that `<sha>` is on main with a
+   successful Release, the three image attestations, and the signers file. The
+   reviewer is expected on
    `installer-acceptance-stable`; pass `--reviewer-environment` to name another.
 3. Fix whatever it reports. Environment settings are in
    [Agent package release](../operations/agent-package-release.md#one-time-publication-authority-setup).
 
 ## Tag and approvals
 
-Only the owner signs and pushes the tag. The tag must be signed with the allowed release signer: principal
-`cvaartjes@visualfabriq.com` in `.github/release-allowed-signers`. A plain
-`git tag -s` signs with the machine's default key, which is not that signer and
-fails the release's signature check. The release key lives in the 1Password SSH
-agent, so no key file is needed; 1Password asks for approval when it signs.
-`/Applications/1Password.app/Contents/MacOS/op-ssh-sign` is the signing program
-(present on this Mac; elsewhere 1Password places it in the `MacOS` folder of its
-app bundle).
+Only the owner signs and pushes the tag. The tag must be signed with the
+allowed release signer: principal `release@vonkforge.ai` in
+`.github/release-allowed-signers`. A plain `git tag -s` signs with the
+machine's default key, which is not that signer and fails the release's
+signature check.
+
+The principal is a label in that file: `verify-tag` finds it from the signing
+key and does not compare it with the tagger email. The tag object is public,
+though, and its tagger line shows `user.name` and `user.email`, so the command
+sets both to the project identity instead of a personal address.
+
+The release key lives in an SSH agent that signs through a signing program, so
+no key file is needed: set `SSH_SIGNING_PROGRAM` to that program before the
+command below. The maintainer's setup is in
+[Release signing](../maintainers/release-signing.md).
 
 From the root of an up-to-date main checkout (the signers file path is relative). `<sha>` is the full 40-character sha:
 
 ```sh
 git checkout main && git pull --ff-only origin main
-git -c gpg.format=ssh \
-  -c gpg.ssh.program=/Applications/1Password.app/Contents/MacOS/op-ssh-sign \
+git -c user.name="Vonk Forge release" -c user.email=release@vonkforge.ai \
+  -c gpg.format=ssh \
+  -c gpg.ssh.program="$SSH_SIGNING_PROGRAM" \
   -c user.signingkey="key::ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB8F2mAFzxnRmpCedoSC+acezPYg35X6sVUg8CP2IlgV" \
   tag -s vX.Y.Z <sha> -m "vX.Y.Z"
 git -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag vX.Y.Z \
@@ -86,7 +119,7 @@ git -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag vX.
 ```
 
 The `key::` value is the public key in `.github/release-allowed-signers` (check
-it still matches before signing); 1Password asks for approval when signing.
+it still matches before signing).
 `verify-tag` reads that file from the working tree, so run it on the up-to-date
 main checkout; it must print `Good "git" signature` for that principal, and the
 push only runs when it does. To retry, delete the local tag with
@@ -176,9 +209,10 @@ curl -fsSL https://install.vonkforge.ai/dev/nas | sh
 
 Then `.env` has `VONK_INSTALL_CHANNEL=dev`; redeploy, check `vonkctl --json
 platform` (its `api_source_tree` equals the tree of the commit you moved to;
-the channel is the one in `.env`), and run the fleet upgrade again. A Spark's apt source keeps the
-channel it was installed with; that only matters for a manual `apt upgrade`.
-Rerunning the `/spark` installer (`/dev/spark` for dev) on a Spark switches it
+the channel is the one in `.env`), and run the fleet upgrade again. Sparks
+have no apt source: the installer and the relay install a digest-verified
+agent package, so the Spark follows the Controller's channel at its next fleet
+upgrade. Rerunning the `/spark` installer (`/dev/spark` for dev) on a Spark switches it
 and needs that host's administrative rights.
 
 `vonkctl` follows `VONK_CLI_UPDATE_CHANNEL` (default `stable`; set `dev` for a

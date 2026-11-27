@@ -28,6 +28,10 @@ if [ "${require_service_host}" = "0" ] && [ "${ephemeral}" != "true" ]; then
 fi
 reconcile_interval=${TS_RECONCILE_INTERVAL_SECONDS:-30}
 control_service=${VONK_TAILSCALE_CONTROL_SERVICE:-svc:vonk-forge}
+# The LiteLLM admin UI has its own origin, so its scripts never share the
+# Controller's cookies. Its Service may be undefined in the tailnet: Tailscale
+# then keeps the local advertisement pending, and nothing below waits for it.
+litellm_service=${control_service}-litellm
 
 validate_service_name() {
     printf '%s\n' "$1" \
@@ -35,11 +39,12 @@ validate_service_name() {
 }
 
 validate_service_name "${control_service}" \
+    && validate_service_name "${litellm_service}" \
     || { echo "ERROR: Tailscale Service names are invalid." >&2; exit 64; }
 
 default_service_map=$(printf \
-    '{"version":"0.0.1","services":{"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}' \
-    "${control_service}")
+    '{"version":"0.0.1","services":{"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}},"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}' \
+    "${control_service}" "${litellm_service}")
 
 scratch_root=${TMPDIR:-/tmp}
 runtime_dir=$(mktemp -d "${scratch_root%/}/vonk-tailscale.XXXXXX")
@@ -63,6 +68,7 @@ withdraw_all_services() {
     # fixed Service VIPs. Drain first, then atomically clear the full map and
     # AdvertiseServices preference before tailscaled itself is stopped.
     ts serve drain "${control_service}" >/dev/null 2>&1 || true
+    ts serve drain "${litellm_service}" >/dev/null 2>&1 || true
     ts serve set-config --all "${empty_service_map}" >/dev/null 2>&1 || true
 }
 
@@ -146,6 +152,8 @@ serve_is_exact() {
             | sed -e 's/,"advertised":false//g' \
                 -e 's/"advertised":false,//g')
     fi
+    # The exact map covers both Services; the HTTPS listener of the control
+    # Service is the one readiness also proves from status.
     grep -Fq "\"${control_service}\":{\"TCP\":{\"443\":{\"HTTPS\":true}}" \
         "${runtime_dir}/tailscale-serve-status.compact" \
         && ! grep -Fq '"443":{"HTTP":true}' "${runtime_dir}/tailscale-serve-status.compact" \
@@ -181,11 +189,13 @@ configure_services() {
     # asynchronous implicit advertisement reaching control.
     ts serve set-config --all "${empty_service_map}" >/dev/null
     ts serve --service="${control_service}" --https=443 http://caddy:8080 >/dev/null
+    ts serve --service="${litellm_service}" --https=443 http://caddy:8080 >/dev/null
     advertise_services
 }
 
 advertise_services() {
     ts serve advertise "${control_service}" >/dev/null
+    ts serve advertise "${litellm_service}" >/dev/null
 }
 
 wait_for_exact_services() {

@@ -1,9 +1,13 @@
 # Tailscale gateway component
 
-This included Compose model exposes one named tailnet Service from one tagged,
+This included Compose model exposes two named tailnet Services from one tagged,
 userspace Tailscale node:
 
 - The `vonk-forge` service forwards tailnet TCP 443 to Caddy's private port 8080.
+- The `vonk-forge-litellm` service does the same for the LiteLLM admin UI,
+  which Caddy serves only on this separate origin. It is optional: when it is
+  undefined in the tailnet its advertisement stays pending, and readiness and
+  route repair follow only `vonk-forge`.
 
 It publishes no Docker host port, routes no LAN subnet, and receives no tunnel
 device or network capability. OAuth client ID and secret values are read from
@@ -14,13 +18,14 @@ a shell variable or output, and then starts the official `containerboot`. The
 tag-scoped preauthorization covers device enrollment only; tailnet grants and
 Service-host approval remain separate. State persists in
 `tailscale-state`; the configurator continuously reconciles and advertises only
-the one explicit Service. It uses the explicit `--https=443` CLI form and
+the two explicit Services. It uses the explicit `--https=443` CLI form and
 verifies that Serve status reports HTTPS, never plaintext HTTP, on port 443.
-The tailnet policy also grants `tag:vonk-gateway` TCP 443 access to that exact
+The tailnet policy also grants `tag:vonk-gateway` TCP 443 access to each exact
 Service. Tailscale uses that self-access when assigning the Service TailVIP
 `PrimaryRoutes`; omitting it can leave an approved, online host unroutable.
 
-Before use, define `svc:vonk-forge` in the Tailscale admin console. Apply a reviewed version of
+Before use, define `svc:vonk-forge` and `svc:vonk-forge-litellm` in the
+Tailscale admin console. Apply a reviewed version of
 `grants.example.hujson`, and replace the GitHub-login placeholder with the exact
 identity shown by Tailscale. Create an OAuth client
 with only `auth_keys` write scope for `tag:vonk-gateway`. The OAuth client is for
@@ -28,7 +33,7 @@ unattended gateway enrollment; it is not the operator's GitHub credential. Keep
 the captured client secret raw: Compose adds the non-ephemeral enrollment
 parameter only inside the gateway tmpfs.
 
-The gateway advertises only `svc:vonk-forge`. Operator
+The gateway advertises only `svc:vonk-forge` and `svc:vonk-forge-litellm`. Operator
 tailnets never contain test-only Services or acceptance policy. Full acceptance
 uses separate credentials and a
 dedicated disposable test tailnet; after the run, remove its nodes, Service

@@ -28,6 +28,7 @@ DIGEST = "a" * 64
 
 
 SOURCE_SHA = "b" * 40
+DEPENDENCIES_EXCLUDE_NEWER = "2026-11-26T22:21:19Z"
 
 
 SPARK_PLATFORMS = ("linux-arm64",)
@@ -240,6 +241,7 @@ def _inputs(
                     ),
                     "source_sha": SOURCE_SHA,
                     "release_version": version,
+                    "dependencies_exclude_newer": DEPENDENCIES_EXCLUDE_NEWER,
                 }
             ),
         )

@@ -17,7 +17,7 @@ from cluster_profiles import cli
 from cluster_profiles.control_client.transfers import ControlClient
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.build_identity import RuntimeBuildIdentity
 from vonk_control.cli_update_contract import summarize_cli_update_contract
 from vonk_control.model_primitives import Base
@@ -25,6 +25,8 @@ from vonk_control.models.jobs import ControlProcessHeartbeat
 from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObserver
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
+
+from .token_support import TokenCodec
 
 
 class Jobs:

@@ -13,6 +13,7 @@ from pydantic.json_schema import JsonSchemaMode, JsonSchemaValue, models_json_sc
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
 from vonk_agent_protocol.outcome import ErrorCatalog
 from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
+from vonk_control.auth import SESSION_COOKIE
 from vonk_control.auth_api import CliTokenDownload
 from vonk_control.operation_api.constants import _ADMIN_OPERATION_IDS, _HTTP_METHODS
 from vonk_control.stored.json_values import ExternalPassthrough, contract_models
@@ -24,17 +25,23 @@ type ExternalSchemaDocument = Annotated[
 ]
 
 
-def admin_openapi_schema(app: FastAPI) -> ExternalSchemaDocument:
-    """Return the deterministic authenticated admin surface without agent APIs."""
-
-    source = deepcopy(app.openapi())
-    paths: ExternalSchemaDocument = {}
-    browser_auth_paths = {
+#: The browser-cookie routes: a bearer client (vonkctl) never calls them as
+#: operations. The CLI-token routes under /api/auth/cli-tokens take a bearer.
+BROWSER_SESSION_PATHS = frozenset(
+    {
         "/api/auth/login",
         "/api/auth/logout",
         "/api/auth/session",
         "/api/auth/cli-token",
     }
+)
+
+
+def admin_openapi_schema(app: FastAPI) -> ExternalSchemaDocument:
+    """Return the deterministic authenticated admin surface without agent APIs."""
+
+    source = deepcopy(app.openapi())
+    paths: ExternalSchemaDocument = {}
     for path, path_item in source.get("paths", {}).items():
         if path in {"/api/healthz", "/api/readyz"}:
             continue
@@ -52,7 +59,7 @@ def admin_openapi_schema(app: FastAPI) -> ExternalSchemaDocument:
                 ) from error
             if path == "/api/auth/login":
                 operation["security"] = []
-            elif path in browser_auth_paths:
+            elif path in BROWSER_SESSION_PATHS:
                 operation["security"] = [{"BrowserSession": []}]
             else:
                 operation["security"] = [{"BearerAuth": []}, {"BrowserSession": []}]
@@ -62,7 +69,7 @@ def admin_openapi_schema(app: FastAPI) -> ExternalSchemaDocument:
     components["securitySchemes"] = {"BearerAuth": {"scheme": "bearer", "type": "http"}}
     components["securitySchemes"]["BrowserSession"] = {
         "in": "cookie",
-        "name": "vonk_session",
+        "name": SESSION_COOKIE,
         "type": "apiKey",
     }
 

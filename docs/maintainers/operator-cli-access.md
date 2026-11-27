@@ -36,7 +36,7 @@ GitHub API authentication, Git signing, and SSH authentication are separate.
 Keep commit signing enabled; use an approved machine signer when unattended
 signing is required. Never export a personal private key to avoid an unlock.
 For repository edits, first create the task's branch/worktree under the
-[development workflow](development-workflow.md#start-isolated-work).
+[development workflow](../runbooks/development-workflow.md#start-isolated-work).
 
 ## NAS Compose redeployment
 
@@ -55,8 +55,8 @@ bundle with the signed Python NAS setup wheel through the installer endpoint
 `secrets/`, and named
 volumes, and make the bound images available to the NAS. A floating image tag or
 a newly published image alone is not accepted-release evidence. Follow the
-[publication procedure](platform-release-publication.md) and
-[control-plane bootstrap](control-plane-bootstrap.md) for those stages.
+[publication procedure](../runbooks/platform-release-publication.md) and
+[control-plane bootstrap](../runbooks/control-plane-bootstrap.md) for those stages.
 
 On a host with the configured `vonk-nas-compose` helper:
 
@@ -88,9 +88,13 @@ Controller authorization, not through the NAS host session.
 
 Use approved credential lifetimes and unattended renewal where supported. Do
 not extend lifetimes or broaden grants to conceal an authentication dependency.
-The configured Vonk token-renewal helper preserves the Controller's normal
-lifetime, validates a new token before replacing the old one, and fails visibly
-if its scoped source credential or Controller authorization is refused.
+Nothing renews a Controller CLI token automatically: it lasts 30 days, and
+`vonkctl auth status` shows its expiry. A Controller CLI token is a revocable
+Controller row: a lost or copied token file is revoked with
+`vonkctl auth tokens --revoke ID` (see `vonkctl auth tokens`), or with
+`vonkctl auth tokens --revoke-all`, which also ends every browser session. An
+expired, revoked or pre-row token answers 401; only `vonkctl auth login` by the
+owner mints a new one.
 
 Verify a locked but awake user session separately from logout, sleep, shutdown,
 or pre-login disk unlock. A user LaunchAgent does not establish pre-login

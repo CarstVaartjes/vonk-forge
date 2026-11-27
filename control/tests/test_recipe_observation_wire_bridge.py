@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from tests.token_support import TokenCodec
 from tests.wire_probes import prebuilt_probe
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_observations import (
@@ -30,7 +31,6 @@ from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.common import RANK_UNREADY_GRACE, AgentApiServices
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
-from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distributed_recovery.common import _proves_fresh_absence
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator

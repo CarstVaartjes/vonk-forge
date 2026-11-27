@@ -4,7 +4,7 @@ import { LoginPage } from "./login";
 
 it.each([
   [401, "Sign in failed. Check your credentials and try again."],
-  [429, "Sign in is temporarily unavailable. Please try again."],
+  [503, "Sign in is busy. Please try again in a few seconds."],
 ])("uses a bounded non-secret message for login HTTP %i", async (status, message) => {
   // Break caught: the browser reflects credential/API details, or leaves the
   // submitted password resident after a failed administrator login.

@@ -15,11 +15,12 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette import status
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import SwapObservation
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.gateway.litellm import PROMETHEUS_EXCLUDE_METRICS
 from vonk_control.metrics.contract import (
     METRIC_SPECS,

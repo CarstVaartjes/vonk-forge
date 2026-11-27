@@ -5,7 +5,7 @@ command shown by the controller as the normal administrator account. A private
 NAS command looks like:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 VONK_ENROLLMENT_URL=https://enroll.example.test VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=<CONTROLLER_LAN_IP> VONK_ENROLLMENT_URL=https://enroll.example.test VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
 ```
 
 Do not prefix `curl` or the shell with `sudo`. The installer downloads the

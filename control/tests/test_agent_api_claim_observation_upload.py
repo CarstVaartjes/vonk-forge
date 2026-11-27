@@ -22,6 +22,7 @@ from sqlalchemy import event
 from starlette.types import Message
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
@@ -32,7 +33,6 @@ from vonk_control.agent_api.common import (
 )
 from vonk_control.agent_jobs.contracts import AgentContactIdentityMismatch
 from vonk_control.api.application import create_app
-from vonk_control.auth import TokenCodec
 from vonk_control.categorized_errors import BookkeepingUnknown
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.inventory.items import runtime_value

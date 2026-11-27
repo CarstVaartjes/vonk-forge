@@ -94,7 +94,6 @@ extend-exclude = [
     "scripts/release/reconcile-github-release",
     "scripts/images/reuse-pr-candidate-images",
     "scripts/images/reuse-pr-image-security",
-    "scripts/fleet/run-with-nas-secret-group",
     "scripts/dev/sync-cli-dependencies",
     "scripts/test",
     "scripts/agent/test-agent-package-native-lifecycle",

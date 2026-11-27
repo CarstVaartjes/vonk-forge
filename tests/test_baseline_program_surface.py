@@ -49,7 +49,7 @@ ENTRY_POINTS: dict[str, frozenset[str]] = {
     "vonk_agent_protocol.outcome": frozenset({"OutcomeDone", "outcome_body"}),
     "vonk_agent_protocol.reason_codes.catalog": frozenset({"CatalogSyncCode"}),
     "vonk_control.api.production": frozenset({"production_app"}),
-    "vonk_control.auth": frozenset({"TokenCodec"}),
+    "vonk_control.auth": frozenset({"CursorCodec"}),
     "vonk_control.catalog.service": frozenset({"CatalogService"}),
     "vonk_control.catalog.sync": frozenset(
         {"CatalogSyncError", "CatalogSyncView", "ManagedRecipeCatalogSyncService"}

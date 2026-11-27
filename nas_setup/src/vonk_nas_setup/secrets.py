@@ -118,6 +118,10 @@ def load_members(root: Path, payload: NasInstallTemplate) -> dict[str, bytes]:
         value = read_member(root, name)
         if value is not None:
             members[name] = value
+    if payload.step_ca_controller:
+        # Installs created before the root key was kept have none: an empty
+        # member, like an unset optional secret.
+        members.setdefault(payload.step_ca_controller.files.root_private_key, b"")
     return members
 
 
@@ -200,32 +204,3 @@ def repair_stored_members(
                 raise ObservationUnavailable from None
             members[paths.intermediate_private_key] = encrypted
             members[paths.password] = retained[paths.password]
-
-
-def apply_secret_group(payload: NasInstallTemplate, root: Path) -> tuple[str, ...]:
-    """Only explicitly named members receive group access; refusal is visible."""
-    group = payload.group_readable_secrets
-    if group is None:
-        return ()
-    pending = []
-    for name in group.files:
-        if read_member(root, name) is None:
-            raise SetupError(f"group-readable secret is unavailable: {name}")
-        path = root / name
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        try:
-            entry = os.fstat(descriptor)
-            if entry.st_nlink != 1:
-                raise SetupError(f"group-readable secret is multiply linked: {name}")
-            try:
-                if entry.st_gid != group.gid:
-                    os.fchown(descriptor, -1, group.gid)
-            except PermissionError:
-                os.fchmod(descriptor, 0o600)
-                pending.append(name)
-                continue
-            os.fchmod(descriptor, 0o640)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-    return tuple(pending)

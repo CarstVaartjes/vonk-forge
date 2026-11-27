@@ -17,10 +17,10 @@ from sqlalchemy.orm import sessionmaker
 from scripts.fleet.canary_package import canary_package_path
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.wire_model import canonical_message
-from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog.service import CatalogService
 from vonk_control.inventory.repository import (

@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import subprocess
 import sys
-import tempfile
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from vonk_agent_protocol.installer_setup import (
-    NasGroupReadableSecrets,
-    NasInstallTemplate,
-)
+from vonk_agent_protocol.installer_setup import NasInstallTemplate
 from vonk_nas_setup.cli import open_private_answers
 from vonk_nas_setup.filesystem import SetupError
+from vonk_nas_setup.prompts import PromptIo
 
 
 def invoke(
@@ -83,6 +80,19 @@ def test_cli_upgrade_uses_no_terminal_and_preserves_private_answers(
     ).read_text() == "private-hf-token\n"
 
 
+def test_prompt_without_terminal_fails_as_setup_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catch a headless run surfacing a raw OSError instead of the typed failure."""
+
+    def no_terminal(*_: object, **__: object) -> int:
+        raise OSError(errno.ENXIO, "No such device or address")
+
+    monkeypatch.setattr("vonk_nas_setup.prompts.os.open", no_terminal)
+    with pytest.raises(SetupError):
+        PromptIo().line("value")
+
+
 def test_cli_rejects_secret_arguments_and_conflicting_flags(
     tmp_path: Path, template: NasInstallTemplate
 ) -> None:
@@ -94,59 +104,3 @@ def test_cli_rejects_secret_arguments_and_conflicting_flags(
     result = invoke(template, tmp_path, "--enable-unknown")
     assert result.returncode != 0
     assert not (tmp_path / "vonk-forge").exists()
-
-
-def test_answers_file_permission_refusal_is_visible(
-    tmp_path: Path, template: NasInstallTemplate
-) -> None:
-    """Catch buffering the OS group refusal away while claiming bundle readiness."""
-
-    template = template.model_copy(
-        update={
-            "group_readable_secrets": NasGroupReadableSecrets(
-                gid=2**32 - 2, files=["hf-token"]
-            )
-        }
-    )
-    with tempfile.TemporaryDirectory(prefix="vonk-group-refusal-") as temporary:
-        output = Path(temporary)
-        output.chmod(0o777)
-        document, answers = output / "template.json", output / "answers"
-        document.write_text(template.model_dump_json(exclude_none=True))
-        answers.write_text("lab\n192.168.1.5\nprivate-answer\n")
-        answers.chmod(0o600)
-        preexec: Callable[[], None] | None = None
-        if os.geteuid() == 0:
-            os.chown(answers, 65534, 65534)
-
-            def drop_privileges() -> None:
-                os.setgroups([])
-                os.setgid(65534)
-                os.setuid(65534)
-
-            preexec = drop_privileges
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "vonk_nas_setup.cli",
-                "--template",
-                str(document),
-                "--output",
-                str(output),
-                "--answers-file",
-                str(answers),
-            ],
-            env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
-            preexec_fn=preexec,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-        assert result.returncode == 0, result.stderr
-        assert "permission_denied" in result.stdout
-        assert "hf-token" in result.stdout
-        assert "private-answer" not in result.stdout + result.stderr
-        assert (output / "vonk-forge/secrets/hf-token").stat().st_mode & 0o077 == 0

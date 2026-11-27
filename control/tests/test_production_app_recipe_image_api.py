@@ -10,9 +10,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from tests.token_support import TokenCodec, stored_cli_token
 from vonk_control.api import production as api_production
 from vonk_control.api.production import production_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.availability_production import production as availability_production
 from vonk_control.gateway import route_runtime
 from vonk_control.model_primitives import Base
@@ -177,24 +178,22 @@ def test_production_app_recipe_download_auth_and_status(
     )
 
     app = production_app(settings)
-    codec = TokenCodec(signing_key.read_bytes())
-    operator = codec.issue(
-        Actor("operator", "operator"), ttl_seconds=3600, now=int(time.time())
-    )
-    viewer = codec.issue(
-        Actor("viewer", "viewer"), ttl_seconds=3600, now=int(time.time())
+    operator = stored_cli_token(sessions)
+    # Production accepts only a live CLI-token row, never a signed token.
+    stateless = TokenCodec(signing_key.read_bytes()).issue(
+        Actor("admin", "administrator"), ttl_seconds=3600, now=int(time.time())
     )
     headers = {"Authorization": f"Bearer {operator}"}
     with TestClient(app) as client:
         selector = f"{recipe.identity.publisher}/{recipe.identity.slug}"
         denied = client.post(
             f"/api/recipe/{selector}/download",
-            headers={"Authorization": f"Bearer {viewer}"},
+            headers={"Authorization": f"Bearer {stateless}"},
             json={
                 "request_key": "00000000-0000-4000-8000-000000000001",
             },
         )
-        assert denied.status_code == 403
+        assert denied.status_code == 401
 
         started = client.post(
             f"/api/recipe/{selector}/download",

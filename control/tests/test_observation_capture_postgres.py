@@ -22,9 +22,10 @@ from starlette.types import Message, Scope
 from cluster_profiles.observation_transfer_reader import receive_observation
 from tests.observation_transfer_peer import observation_document
 from tests.test_platform_observation import Jobs
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.cli_update_contract import CliUpdateContract
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.db import connections as connection_owner

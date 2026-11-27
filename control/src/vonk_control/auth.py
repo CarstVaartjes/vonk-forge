@@ -1,4 +1,4 @@
-"""Small signed-token authentication core for CLI and browser sessions."""
+"""Authentication core: actors, agent identity scope, bearer and cursor contracts."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, Protocol
 
 from starlette.responses import Response
 from starlette.types import Scope
@@ -24,6 +24,12 @@ from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
 # response contract both refer to it, so the set cannot drift.
 AdministratorRole = Literal["administrator"]
 ADMIN_ROLE: Final[AdministratorRole] = "administrator"
+# The browser session and CSRF cookie names. The __Host- prefix makes the browser
+# refuse a cookie with a Domain attribute, a non-root Path or no Secure flag, so a
+# same-site sibling host (the LiteLLM origin on the same tailnet) cannot plant or
+# shadow either cookie.
+SESSION_COOKIE: Final = "__Host-vonk_session"
+CSRF_COOKIE: Final = "__Host-vonk_csrf"
 _ROLES = frozenset({"viewer", "operator", "administrator"})
 _AGENT_NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _AGENT_IDENTITY_SCOPE_KEY = "vonk.agent_identity"
@@ -321,46 +327,16 @@ def _decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-class TokenCodec:
-    def __init__(self, signing_key: bytes) -> None:
-        if len(signing_key) < 32:
-            raise ValueError("token signing key must be at least 32 bytes")
-        self._key = signing_key
+class BearerTokens(Protocol):
+    """Verify a presented bearer token and derive the cursor signer.
 
-    def issue(self, actor: Actor, *, ttl_seconds: int, now: int) -> str:
-        if ttl_seconds <= 0:
-            raise ValueError("token lifetime must be positive")
-        payload = json.dumps(
-            {"sub": actor.subject, "role": actor.role, "exp": now + ttl_seconds},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-        body = _encode(payload)
-        signature = _encode(hmac.new(self._key, body.encode(), hashlib.sha256).digest())
-        return f"{body}.{signature}"
+    Production resolves a bearer to a revocable CLI-token session row
+    (``SessionBearerTokens``); nothing verifies a self-contained token.
+    """
 
-    def verify(self, token: str, *, now: int) -> Actor:
-        try:
-            body, signature = token.split(".", 1)
-            expected = hmac.new(self._key, body.encode(), hashlib.sha256).digest()
-            if not hmac.compare_digest(_decode(signature), expected):
-                raise AuthError("token signature is invalid")
-            payload = json.loads(_decode(body))
-            if not isinstance(payload, dict):
-                raise AuthError("token payload is invalid")
-            if not isinstance(payload.get("exp"), int) or payload["exp"] < now:
-                raise AuthError("token is expired")
-            return Actor(str(payload["sub"]), str(payload["role"]))
-        except AuthError:
-            raise
-        except Exception as error:
-            raise AuthError("token is malformed") from error
+    def verify(self, token: str, *, now: int) -> Actor: ...
 
-    def cursor_codec(self) -> CursorCodec:
-        """Derive an isolated cursor signer from the configured durable key."""
-
-        key = hmac.new(self._key, _CURSOR_DOMAIN + b"key", hashlib.sha256).digest()
-        return CursorCodec(key)
+    def cursor_codec(self) -> CursorCodec: ...
 
 
 class CursorError(InvalidRequestError, ValueError):
@@ -390,6 +366,16 @@ class CursorCodec:
         if len(derived_key) != hashlib.sha256().digest_size:
             raise ValueError("cursor signing key is invalid")
         self._key = derived_key
+
+    @classmethod
+    def from_signing_key(cls, signing_key: bytes) -> CursorCodec:
+        """Derive the isolated cursor signer from the durable token-signing key."""
+
+        if len(signing_key) < 32:
+            raise ValueError("token signing key must be at least 32 bytes")
+        return cls(
+            hmac.new(signing_key, _CURSOR_DOMAIN + b"key", hashlib.sha256).digest()
+        )
 
     def encode(
         self,

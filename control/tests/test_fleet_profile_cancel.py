@@ -11,9 +11,11 @@ from threading import Event
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -27,7 +29,7 @@ from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import ReservationState, RunState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs.evidence import read_result_evidence
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
@@ -1038,9 +1040,10 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
         headers=_headers(tokens, "administrator"),
     )
     assert wrong_profile.status_code == 404
-    route = api.get("/openapi.json").json()["paths"][
-        path.replace(application.id, "{application_id}")
-    ]["post"]
+    app = api.app
+    assert isinstance(app, FastAPI)
+    schema = app.openapi()
+    route = schema["paths"][path.replace(application.id, "{application_id}")]["post"]
     assert route["operationId"] == "cancelProfileApplication"
     assert "requestBody" in route
 
@@ -1056,7 +1059,7 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
     assert lookup.status_code == 200, lookup.text
     assert lookup.json()["cancellation"]["request_key"] == key
     assert lookup.json()["cancellation"]["actor"] == "administrator"
-    lookup_openapi = api.get("/openapi.json").json()["paths"][
+    lookup_openapi = schema["paths"][
         "/api/profile/applications/{application_id}/cancellations/{request_key}"
     ]["get"]
     assert lookup_openapi["operationId"] == "getProfileApplicationCancellation"

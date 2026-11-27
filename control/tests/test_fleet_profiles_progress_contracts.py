@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select, text, update
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import ObservedAssignmentState
-from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,

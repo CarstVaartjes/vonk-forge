@@ -7,8 +7,10 @@ GPU node backend at the reserved NAS address.
 
 ## Names and environments: do not mix them
 
-An operator tailnet contains only the canonical, unsuffixed Service name
-`svc:vonk-forge`.
+An operator tailnet contains only the two canonical Service names:
+`svc:vonk-forge` (the Controller) and `svc:vonk-forge-litellm` (the LiteLLM
+admin UI, on its own origin so its scripts never share the Controller's
+cookies).
 
 Never define or advertise any other Service names, add test-only tags, or merge
 acceptance grants, tests, auto-approvers, or destinations into an operator
@@ -30,7 +32,8 @@ admin console for you.
 
 - In **DNS**, enable MagicDNS and HTTPS certificates, and copy the tailnet DNS
   suffix exactly as displayed.
-- In **Services**, define `svc:vonk-forge` with endpoint `tcp:443`.
+- In **Services**, define `svc:vonk-forge` and `svc:vonk-forge-litellm`, each
+  with endpoint `tcp:443`.
 - Merge the reviewed parts of
   `deploy/compose/tailscale/grants.example.hujson` into policy. Replace the
   GitHub-login placeholder with the exact identity from **Users**.
@@ -53,7 +56,14 @@ authentication are independent gates: an authorized tailnet user must still
 complete the application administrator login at `svc:vonk-forge`.
 
 Use **Services → Advertise → Define a Service** to define `svc:vonk-forge`
-with endpoint `tcp:443`.
+and `svc:vonk-forge-litellm`, each with endpoint `tcp:443`.
+
+The LiteLLM Service is optional for the Controller: when it is not defined (or
+not yet approved), the gateway keeps its advertisement pending, the control
+Service stays healthy, and only the LiteLLM admin UI is unreachable over the
+tailnet. To add it to an existing install, define the Service, add it to the
+grants and `autoApprovers.services` from `grants.example.hujson`, and wait for
+the configurator's next pass; no restart is needed.
 
 The gateway never receives a GitHub token. After the Services exist, use
 **Trust credentials → Credential → OAuth** to create a separate machine OAuth
@@ -62,8 +72,8 @@ tag. Do not create a human OAuth app.
 
 Merge the reviewed sections of `deploy/compose/tailscale/grants.example.hujson`
 into tailnet policy after replacing the GitHub-login placeholder. Administrators
-reach the `vonk-forge` Service through its grant. Auto-approval permits only
-`tag:vonk-gateway` to advertise it. The exact TCP 443 grant from
+reach both Services through their grant. Auto-approval permits only
+`tag:vonk-gateway` to advertise them. The exact TCP 443 grant from
 `tag:vonk-gateway` to the same Service is also required: it gives the
 already-connected proxy no backend access it does not already have, while
 allowing Tailscale to assign the Service TailVIP `PrimaryRoutes`. Without it,
@@ -139,8 +149,13 @@ The configurator waits for Caddy health. It resets any missing,
 extra, downgraded, or retargeted Serve map and deterministically creates:
 
 ```text
-svc:vonk-forge         HTTPS 443 -> http://caddy:8080
+svc:vonk-forge           HTTPS 443 -> http://caddy:8080
+svc:vonk-forge-litellm   HTTPS 443 -> http://caddy:8080
 ```
+
+Caddy tells the two apart by the Host: the LiteLLM name serves only the
+LiteLLM admin UI and its `/litellm/*` API; the control name serves everything
+else. Readiness and route repair follow only the control Service.
 
 All listeners use explicit `--https=443`; plaintext HTTP on 443 is rejected.
 This is HTTPS-only Serve. Funnel is never enabled.
@@ -150,7 +165,10 @@ This is HTTPS-only Serve. Funnel is never enabled.
 The `svc:vonk-forge` Service has the stable Service URL
 `https://vonk-forge.<TAILNET_DNS_SUFFIX>.ts.net/`. Copy the suffix from the
 Tailscale DNS page; do not invent it. This is also the exact control hostname
-entered during bundle preparation.
+entered during bundle preparation. The LiteLLM admin UI (usage and keys) is at
+`https://vonk-forge-litellm.<TAILNET_DNS_SUFFIX>.ts.net/` on its own origin;
+the Controller host still serves `/v1` and the `/litellm/*` API for clients,
+but renders any LiteLLM page there sandboxed (no scripts).
 
 Open that URL from an authorized Tailscale-connected browser, then complete the
 separate Vonk Forge application administrator login. No SSH or PowerShell
@@ -228,8 +246,9 @@ curl --fail --show-error --silent \
 If this succeeds, repair the workstation's Tailscale client or DNS integration;
 do not change Caddy, the certificate, Service identity, or NAS ports.
 
-Installs must report exactly `svc:vonk-forge` with `HTTPS: true`, never
-`HTTP: true`, and only the `http://caddy:8080` upstream. Test the control URL
+Installs must report exactly `svc:vonk-forge` and `svc:vonk-forge-litellm`,
+each with `HTTPS: true`, never `HTTP: true`, and only the `http://caddy:8080`
+upstream. Test the control URL
 from an authorized Tailscale-connected client.
 
 ## Diagnosis by symptom

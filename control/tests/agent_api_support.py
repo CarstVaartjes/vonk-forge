@@ -21,6 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.types import Message
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as AgentCompiledExecutionPlan,
 )
@@ -31,7 +32,7 @@ from vonk_control.agent_api.common import (
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.service import EnrollmentService

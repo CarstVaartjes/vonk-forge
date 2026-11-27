@@ -14,9 +14,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import RecipeDefinition
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.api.application import create_app
-from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base

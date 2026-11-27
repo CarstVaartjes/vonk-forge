@@ -31,8 +31,9 @@ from vonk_forge_contracts import (
 
 import tests
 from tests.recipe_library_source import recipe_library_root
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.catalog.api import _managed_sync
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.catalog.revision_contract import (

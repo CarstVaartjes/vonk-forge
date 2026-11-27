@@ -6,24 +6,25 @@
   "grants": [
     {
       "src": ["autogroup:admin"],
-      "dst": ["svc:vonk-forge"],
+      "dst": ["svc:vonk-forge", "svc:vonk-forge-litellm"],
       "ip": ["tcp:443"]
     },
     {
       "src": ["tag:vonk-gateway"],
-      "dst": ["svc:vonk-forge"],
+      "dst": ["svc:vonk-forge", "svc:vonk-forge-litellm"],
       "ip": ["tcp:443"]
     }
   ],
   "autoApprovers": {
     "services": {
-      "svc:vonk-forge": ["tag:vonk-gateway"]
+      "svc:vonk-forge": ["tag:vonk-gateway"],
+      "svc:vonk-forge-litellm": ["tag:vonk-gateway"]
     }
   },
   "tests": [
     {
       "src": "tag:vonk-gateway",
-      "accept": ["svc:vonk-forge:443"]
+      "accept": ["svc:vonk-forge:443", "svc:vonk-forge-litellm:443"]
     }
   ]
 }

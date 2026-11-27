@@ -25,8 +25,9 @@ from vonk_forge_contracts.qualification_status import (
     QualificationStatus,
 )
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.state_machines import CatalogSyncState
-from vonk_control.auth import CursorCodec, TokenCodec
+from vonk_control.auth import CursorCodec
 from vonk_control.catalog.revision_contract import published_steady_peaks
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService

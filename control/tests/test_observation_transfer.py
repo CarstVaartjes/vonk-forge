@@ -26,7 +26,7 @@ from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api import routes_platform as api
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.fleet_events.stream_contract import FleetRefreshEvent
 from vonk_control.fleet_projection.common import (
@@ -53,6 +53,7 @@ from .observation_transfer_peer import (
     fleet_authority,
 )
 from .test_platform_observation import Jobs
+from .token_support import TokenCodec
 
 NOW = datetime(2026, 10, 7, tzinfo=UTC)
 NODE = "spk_" + "1" * 32

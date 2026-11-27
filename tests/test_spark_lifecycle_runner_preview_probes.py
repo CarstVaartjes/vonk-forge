@@ -22,13 +22,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import RecipeDefinition
 
+from control.tests.token_support import TokenCodec
 from scripts.fleet.development_slice_client import Client
 from tests.acceptance import artifact_job_canary as job
 from tests.acceptance.controller_contract import ControllerContract
 from tests.spark_lifecycle_runner_support import _module
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
-from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.compiled_artifact_contract import compile_artifact_contract

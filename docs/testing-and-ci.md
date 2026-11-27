@@ -72,7 +72,7 @@ when it changes upgrade-sensitive paths (`CARRY_INPUTS`) or the acceptance
 programs. A merge without candidate evidence makes Release run the Spark
 acceptance (and the recipe refresh only if the change can alter the upgrade)
 itself.
-See [the contributor guide](../contributor.md#ci-and-pre-merge-release-acceptance)
+See [the contributor guide](../CONTRIBUTING.md#ci-and-pre-merge-release-acceptance)
 for dispatch by ref and protected-environment configuration. The PR and main
 publishers call the same candidate assembly and acceptance workflows.
 
@@ -604,6 +604,9 @@ New syntax is checked by `scripts/dev/check-added-lines [PATCH_FILE|-]`, which c
 an externally supplied unified diff. CI creates that patch against its explicit
 PR/merge-group base over the pathspec in `ci.yml`'s `lint` job (a workflow test keeps the hook's list equal to it). Only added lines can fail. The adapter, scanners and fixture
 tests never read Git.
+The same step pipes the diff of `Cargo.toml` and the two `AGENT_PROTOCOL_VERSION`
+definitions into `scripts/dev/check-agent-protocol-bump`, which fails a protocol
+change without a minor or major workspace bump in the same patch.
 The pre-commit hook (`scripts/dev/check-staged-code`) runs the same guards on the
 staged diff with the same path set as CI, preparing the control environment
 through the same preparer as the Python checks. A violation fails the commit.

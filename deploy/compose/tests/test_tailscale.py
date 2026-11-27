@@ -37,8 +37,20 @@ DEFAULT_MAP = {
     "version": "0.0.1",
     "services": {
         "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}},
+        "svc:vonk-forge-litellm": {"endpoints": {"tcp:443": "http://caddy:8080"}},
     },
 }
+DEFAULT_MAP_JSON = json.dumps(DEFAULT_MAP, separators=(",", ":"))
+_UNADVERTISED_MAP_JSON = json.dumps(
+    {
+        "version": "0.0.1",
+        "services": {
+            name: {**details, "advertised": False}
+            for name, details in DEFAULT_MAP["services"].items()
+        },
+    },
+    separators=(",", ":"),
+)
 
 
 def _host_status(*services: str) -> str:
@@ -86,7 +98,8 @@ def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
         "    temporary.replace(state)\n"
         "if args == ['status', '--json']:\n"
         "    value = load()\n"
-        "    mappings = {name: [f'100.64.0.{index}'] for index, name in enumerate(value['advertised'], start=1)}\n"
+        "    undefined = set(os.environ.get('TS_TEST_UNDEFINED', '').split())\n"
+        "    mappings = {name: [f'100.64.0.{index}'] for index, name in enumerate(value['advertised'], start=1) if name not in undefined}\n"
         "    routes = [addresses[0] + '/32' for addresses in mappings.values()]\n"
         "    print(json.dumps({'BackendState': 'Running', 'Self': {'CapMap': {'service-host': [mappings]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'get-config', '--all']:\n"
@@ -301,7 +314,7 @@ def test_configurator_waits_for_gateway_login_before_configuring(
     assert "Logged out." not in result.stderr
     assert json.loads(state.read_text(encoding="utf-8")) == {
         "config": DEFAULT_MAP,
-        "advertised": ["svc:vonk-forge"],
+        "advertised": sorted(DEFAULT_MAP["services"]),
     }
 
 
@@ -351,7 +364,7 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
     }
     assert gateway["environment"] == {
         "TS_AUTH_ONCE": "true",
-        "TS_CLIENT_ID": "file:/run/secrets/tailscale-oauth-client-id",
+        "TS_CLIENT_ID": "file:/run/vonk-tailscale-oauth/tailscale-oauth-client-id",
         "TS_EXTRA_ARGS": "--advertise-tags=tag:vonk-gateway",
         "TS_HOSTNAME": "vonk-forge-gateway",
         "TS_SOCKET": "/var/run/tailscale/tailscaled.sock",
@@ -369,10 +382,11 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
     volumes = _volume_targets(gateway)
     assert volumes["/var/lib/tailscale"]["type"] == "volume"
     assert volumes["/var/run/tailscale"]["type"] == "volume"
-    assert {secret["target"] for secret in gateway["secrets"]} == {
-        "/run/secrets/tailscale-oauth-client-id",
-        "/run/secrets/tailscale-oauth-client-secret",
-    }
+    # runtime-init's root-owned copy: no host secret file, no group_add.
+    assert volumes["/run/vonk-tailscale-oauth"]["type"] == "volume"
+    assert volumes["/run/vonk-tailscale-oauth"]["read_only"] is True
+    assert not gateway.get("secrets")
+    assert not gateway.get("group_add")
 
 
 def test_configurator_has_no_profile_dependency() -> None:
@@ -476,15 +490,68 @@ def test_configurator_uses_distinct_overridden_service_names(
         "config": {
             "version": "0.0.1",
             "services": {
-                "svc:vonk-forge-acceptance": {
-                    "endpoints": {"tcp:443": "http://caddy:8080"}
-                }
+                service: {"endpoints": {"tcp:443": "http://caddy:8080"}}
+                for service in (
+                    "svc:vonk-forge-acceptance",
+                    "svc:vonk-forge-acceptance-litellm",
+                )
             },
         },
-        "advertised": ["svc:vonk-forge-acceptance"],
+        "advertised": [
+            "svc:vonk-forge-acceptance",
+            "svc:vonk-forge-acceptance-litellm",
+        ],
     }
     invocations = calls.read_text(encoding="utf-8")
     assert "--service=svc:vonk-forge-acceptance" in invocations
+
+
+def test_undefined_litellm_service_leaves_the_control_service_healthy(
+    tmp_path: Path, short_socket_directory: Path
+) -> None:
+    """The owner may not have defined the LiteLLM UI Service in the tailnet.
+
+    Its advertisement then stays pending (no service-host mapping); the
+    control Service must still configure, pass its healthcheck, and the
+    LiteLLM Service must still be served and advertised for later approval.
+    """
+    socket_path = short_socket_directory / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    state, calls = _write_stateful_tailscale(tmp_path)
+    environment = os.environ | {
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "TS_SOCKET_PATH": str(socket_path),
+        "TS_TEST_STATE": str(state),
+        "TS_TEST_CALLS": str(calls),
+        "TS_TEST_UNDEFINED": "svc:vonk-forge-litellm",
+    }
+    try:
+        configured = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=environment | {"TS_CONFIGURE_ONCE": "1"},
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        health = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=environment | {"TS_HEALTHCHECK_ONLY": "1"},
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    finally:
+        daemon_socket.close()
+
+    assert configured.returncode == 0, configured.stderr
+    assert health.returncode == 0, health.stderr
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "config": DEFAULT_MAP,
+        "advertised": sorted(DEFAULT_MAP["services"]),
+    }
 
 
 @pytest.mark.parametrize(
@@ -558,7 +625,7 @@ def test_service_host_mapping_without_primary_routes_is_healthy(
         "  *\"serve status --json\"*) printf '%s\\n' "
         '\'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}}}}\' ;;\n'
         "  *\"serve get-config --all\"*) printf '%s\\n' "
-        '\'{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}\' ;;\n'
+        f"'{DEFAULT_MAP_JSON}' ;;\n"
         "  *\"status --json\"*) printf '%s\\n' "
         '\'{"BackendState":"Running","Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.70.230.202"]}]},"PrimaryRoutes":[]}}\' ;;\n'
         "esac\n",
@@ -608,7 +675,7 @@ def test_pending_advertisement_is_acceptance_only(
         "  *\"serve status --json\"*) printf '%s\\n' "
         '\'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}}}}\' ;;\n'
         "  *\"serve get-config --all\"*) printf '%s\\n' "
-        '\'{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"},"advertised":false}}}\' ;;\n'
+        f"'{_UNADVERTISED_MAP_JSON}' ;;\n"
         "  *\"status --json\"*) printf '%s\\n' "
         '\'{"BackendState":"Running","Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.70.230.202"]}]},"PrimaryRoutes":["100.70.230.202/32"]}}\' ;;\n'
         "esac\n",
@@ -840,7 +907,7 @@ def test_configurator_repairs_plaintext_or_extra_service_map(
         'case "$*" in\n'
         '  *"serve get-config --all"*)\n'
         "    if [ -f \"$repaired\" ]; then printf '%s\\n' "
-        '\'{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}\'; '
+        f"'{DEFAULT_MAP_JSON}'; "
         'else printf \'%s\\n\' \'{"version":"0.0.1","services":{"svc:extra":{"endpoints":{"tcp:99":"tcp://unexpected:99"}}}}\'; fi ;;\n'
         '  *"serve status --json"*)\n'
         '    if [ -f "$repaired" ]; then count=0; '
@@ -918,7 +985,7 @@ def test_reconciler_withdraws_services_at_once_during_its_interval_sleep(
         start_new_session=True,
     )
     try:
-        _wait_for_service_state(state, DEFAULT_MAP, {"svc:vonk-forge"})
+        _wait_for_service_state(state, DEFAULT_MAP, set(DEFAULT_MAP["services"]))
         deadline = time.monotonic() + 120
         while not sleeping.exists():
             assert reconciler.poll() is None, "the reconciler exited early"
@@ -951,12 +1018,12 @@ def test_grants_example_is_exact_service_least_privilege() -> None:
     assert policy["grants"] == [
         {
             "src": ["autogroup:admin"],
-            "dst": ["svc:vonk-forge"],
+            "dst": list(DEFAULT_MAP["services"]),
             "ip": ["tcp:443"],
         },
         {
             "src": ["tag:vonk-gateway"],
-            "dst": ["svc:vonk-forge"],
+            "dst": list(DEFAULT_MAP["services"]),
             "ip": ["tcp:443"],
         },
     ]
@@ -968,7 +1035,7 @@ def test_grants_example_is_exact_service_least_privilege() -> None:
     assert policy["tests"] == [
         {
             "src": "tag:vonk-gateway",
-            "accept": ["svc:vonk-forge:443"],
+            "accept": [f"{service}:443" for service in DEFAULT_MAP["services"]],
         },
     ]
     rendered = json.dumps(policy)

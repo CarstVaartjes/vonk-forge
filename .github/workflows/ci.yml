@@ -181,6 +181,12 @@ jobs:
           git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
             control agent_protocol src scripts rust deploy packaging tests .github tools nas_setup |
             scripts/dev/check-added-lines
+          # An agent protocol change strands older agents until their Spark
+          # installer reruns, so it ships only with a minor or major bump.
+          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
+            Cargo.toml agent_protocol/src/vonk_agent_protocol/claims.py \
+            rust/crates/vonk-agent/src/client/mod.rs |
+            scripts/dev/check-agent-protocol-bump
 
       - name: Run Ruff
         shell: bash
@@ -724,7 +730,7 @@ jobs:
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge
           VONK_ACCEPTANCE_TAILSCALE_MODE: disabled
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
-        run: scripts/fleet/run-with-nas-secret-group uv run --project control --frozen python tests/acceptance/test_fresh_nas_install.py
+        run: uv run --project control --frozen python tests/acceptance/test_fresh_nas_install.py
 
   agent-package:
     # The package lifecycle script only ran after merge, on push to main.

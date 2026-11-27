@@ -10,7 +10,7 @@ from vonk_control.runtime_init import STAGED_MARKER
 
 ROOT = Path(__file__).resolve().parents[3]
 STAGED = "runtime-init"
-STAGED_VOLUMES = ("runtime-assets", "normalized-private-keys")
+STAGED_VOLUMES = ("runtime-assets", "normalized-private-keys", "controller-tls")
 # Readers that load their kit only at start restart once a new one is staged.
 # PostgreSQL must not bounce with every release; the API image changes with
 # runtime-init's, so Compose recreates it anyway.

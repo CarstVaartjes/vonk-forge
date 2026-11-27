@@ -24,6 +24,12 @@ FACTORY = (
 )
 ACCEPTANCE = "VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT"
 AGENT = "VONK_AGENT_RELEASE_KEY_FINGERPRINT"
+VERSION_FILES = (
+    "Cargo.toml",
+    "pyproject.toml",
+    "control/pyproject.toml",
+    "nas_setup/pyproject.toml",
+)
 
 
 def _environment(policies: set[str]) -> EnvironmentState:
@@ -61,7 +67,7 @@ def complete() -> Snapshot:
             "VONK_PLATFORM_RELEASES_ENABLED": "true",
         },
         "environments": environments,
-        "workspace_version": "1.0.0",
+        "version_files": dict.fromkeys(VERSION_FILES, "1.0.0"),
         "behind_by": 0,
         "release_conclusion": "success",
         "images": {name: _image() for name in ("api", "worker", "litellm")},
@@ -128,7 +134,7 @@ def test_allowed_dev_only_names_are_not_problems() -> None:
 
 def test_each_source_input_is_checked() -> None:
     state = complete()
-    state["workspace_version"] = "0.1.1"
+    state["version_files"] = dict.fromkeys(VERSION_FILES, "0.1.1")
     state["behind_by"] = 3
     state["release_conclusion"] = "failure"
     state["signers_bytes"] = 0
@@ -195,3 +201,31 @@ def test_the_image_digest_is_read_for_linux_whatever_the_host(
     assert inspect[:2] == ["skopeo", "inspect"]
     assert inspect[inspect.index("--override-os") + 1] == "linux"
     assert inspect[inspect.index("--override-arch") + 1] == "arm64"
+
+
+def test_disagreeing_version_files_are_one_gap_among_the_others() -> None:
+    state = complete()
+    state["version_files"]["nas_setup/pyproject.toml"] = "1.0.1"
+    state["signers_bytes"] = 0
+    subjects = sorted(problem.subject for problem in check(state))
+    assert subjects == ["signers", "version-files"]
+
+
+def test_the_preflight_reads_every_version_file_at_the_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _script()
+    files = {
+        "Cargo.toml": '[workspace.package]\nversion = "1.0.0"\n',
+        "pyproject.toml": '[project]\nversion = "1.0.0"\n',
+        "control/pyproject.toml": '[project]\nversion = "1.0.0"\n',
+        "nas_setup/pyproject.toml": '[project]\nversion = "1.0.1"\n',
+    }
+    monkeypatch.setattr(script, "file_text", lambda repo, path, ref: files[path])
+
+    assert script.version_files("o/r", "0" * 40) == {
+        "Cargo.toml": "1.0.0",
+        "pyproject.toml": "1.0.0",
+        "control/pyproject.toml": "1.0.0",
+        "nas_setup/pyproject.toml": "1.0.1",
+    }

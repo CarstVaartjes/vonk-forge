@@ -15,8 +15,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import ModelDefinition
 
+from tests.token_support import TokenCodec
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.jobs.queue import JobService
 from vonk_control.library_projection.service import LibraryProjection

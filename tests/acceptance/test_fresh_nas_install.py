@@ -11,7 +11,6 @@ import re
 import shlex
 import shutil
 import socket
-import stat
 import subprocess
 import sys
 import tempfile
@@ -33,7 +32,6 @@ from tests.acceptance.runtime import (
     assert_compose_compatibility,
     assert_compose_services_healthy,
     bootstrap_command,
-    group_readable_secrets,
     https_over_command,
     reclaim_gateway_journal,
 )
@@ -664,24 +662,6 @@ def assert_installer_answer_bindings(
             raise AcceptanceError(f"installer answer was not bound to secret {name}")
 
 
-def assert_tailscale_secret_group(bundle: Path) -> None:
-    """The capability-free Tailscale services read secrets through group_add.
-
-    The lane runs the installer with the group available, so the files it
-    wrote must be group-readable (0640) with exactly the group Compose adds.
-    """
-    compose = yaml.safe_load((bundle / "docker-compose.yaml").read_text("utf-8"))
-    gid, files = group_readable_secrets(compose)
-    if gid is None or not files:
-        raise AcceptanceError("Tailscale services must share one secret group")
-    for relative in sorted(files):
-        metadata = (bundle / "secrets" / relative).stat()
-        if metadata.st_gid != gid or stat.S_IMODE(metadata.st_mode) != 0o640:
-            raise AcceptanceError(
-                f"secret {relative} is not group {gid} mode 0640 for its reader"
-            )
-
-
 def secret_snapshot(bundle: Path) -> dict[Path, bytes]:
     secrets = bundle / "secrets"
     # The Controller owns the keys it writes under secrets/gateway.
@@ -748,12 +728,18 @@ def verify_deployed_controller_identity(bundle: Path) -> None:
     script = """
 import json, time, urllib.request
 from dataclasses import asdict
-from vonk_control.auth import Actor, TokenCodec
+from datetime import UTC, datetime
+from pathlib import Path
 from vonk_control.build_identity import packaged_runtime_identity
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.db.connections import build_engine, session_factory
+from vonk_control.security.browser_auth import BrowserAuthService
 from vonk_control.settings import Settings
 identity = packaged_runtime_identity()
-token = TokenCodec(Settings.from_env_and_secrets().token_signing_key).issue(Actor("acceptance-runtime", "viewer"), ttl_seconds=30, now=int(time.time()))
+settings = Settings.from_env_and_secrets()
+service = BrowserAuthService(session_factory(build_engine(settings.database_url)), clock=lambda: datetime.now(UTC))
+password = Path("/run/vonk-normalized-secrets/admin-password").read_text(encoding="utf-8").removesuffix("\\n")
+token = service.issue_cli_token(service.login("admin", password).identity).token
 request = urllib.request.Request("http://127.0.0.1:8000/api/cli/contract", headers={"Authorization": "Bearer " + token})
 with urllib.request.urlopen(request, timeout=10) as response:
     assert response.status == 200
@@ -1188,16 +1174,17 @@ def _expected_tailnet_serve_status(
     tailnet_suffix: str,
     control_service: str = "svc:vonk-forge",
 ) -> dict[str, object]:
-    control_hostname = tailscale_service_hostname(control_service, tailnet_suffix)
+    # The control Service and its LiteLLM admin UI origin (configure.sh).
     services: dict[str, object] = {
-        control_service: {
+        service: {
             "TCP": {"443": {"HTTPS": True}},
             "Web": {
-                f"{control_hostname}:443": {
+                f"{tailscale_service_hostname(service, tailnet_suffix)}:443": {
                     "Handlers": {"/": {"Proxy": "http://caddy:8080"}}
                 }
             },
         }
+        for service in (control_service, f"{control_service}-litellm")
     }
     return {"Services": services}
 
@@ -1207,7 +1194,8 @@ def _expected_tailnet_serve_configuration(
     control_service: str = "svc:vonk-forge",
 ) -> dict[str, object]:
     services: dict[str, object] = {
-        control_service: {"endpoints": {"tcp:443": "http://caddy:8080"}}
+        service: {"endpoints": {"tcp:443": "http://caddy:8080"}}
+        for service in (control_service, f"{control_service}-litellm")
     }
     return {"version": "0.0.1", "services": services}
 
@@ -1769,8 +1757,6 @@ def main() -> None:
             responses=nas_responses(**common),
         )
         assert_installer_answer_bindings(first, **common)
-        if tailscale_mode == "full":
-            assert_tailscale_secret_group(first)
         first_secrets = secret_snapshot(first)
         generate_bundle(
             root / "default-first",

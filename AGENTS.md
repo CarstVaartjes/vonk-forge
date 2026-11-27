@@ -8,7 +8,7 @@ qualification as separate evidence boundaries.
 ## Operator access
 
 Prefer authenticated CLIs and HTTP APIs for operational work. Follow the
-[operator CLI runbook](docs/runbooks/operator-cli-access.md) and, when present,
+[operator CLI runbook](docs/maintainers/operator-cli-access.md) and, when present,
 the execution host's `~/.config/cli-access/README.md` for configured access.
 Use installed command help; do not open a browser or desktop app for an
 operation the configured CLI supports. Documentation research is separate.
@@ -225,7 +225,7 @@ text of this section:
   targeted tests and fast guards. A Dependabot PR runs nothing; fold it into an
   integration PR. The integration PR runs the complete suites and proofs, and
   main's Release reuses its run for the identical tree. See
-  [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance).
+  [the contributor CI guide](CONTRIBUTING.md#ci-and-pre-merge-release-acceptance).
 - Before pushing, run `scripts/test changed`: the fast guards plus only the
   tests your diff edits or that import a touched module (`-n 2`). It is THE
   local check; full suites run in batch CI, not on the laptop.
@@ -400,7 +400,7 @@ For a mounted controller project, consume the signed NAS installer from the
 directory containing the existing bundle, preserve `.env`, `secrets/`, and
 named volumes, then redeploy through Docker Compose over approved host access.
 Prefer the configured headless CLI to the NAS browser interface; follow the
-[NAS redeployment procedure](docs/runbooks/operator-cli-access.md#nas-compose-redeployment).
+[NAS redeployment procedure](docs/maintainers/operator-cli-access.md#nas-compose-redeployment).
 Inspect the published manifest first: it must be schema 2 and bind the intended
 current source and artifacts. Do not delete PostgreSQL volumes or run `docker compose down -v` for
 a normal upgrade. An explicitly authorized NAS Compose redeploy may use SSH as

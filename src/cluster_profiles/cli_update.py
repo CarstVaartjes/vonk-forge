@@ -7,7 +7,6 @@ import fcntl
 import hashlib
 import io
 import json
-import math
 import os
 import re
 import shutil
@@ -32,17 +31,14 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from jsonschema import Draft202012Validator, ValidationError
 
 from cluster_profiles.build_identity import current_build
-from cluster_profiles.control_client.errors import (
-    ControlClientError,
-    ControlForbidden,
-    ControlUnauthorized,
-)
+from cluster_profiles.control_client.errors import ControlClientError
 from cluster_profiles.control_client.transfers import ControlClient
 from cluster_profiles.control_transport import open_https
 from cluster_profiles.generated_control.models.cli_update_contract import (
     CliUpdateContract,
 )
 from cluster_profiles.runtime_identity import (
+    dependency_cutoff,
     installed_content_identity,
     verified_wheel_identity,
     wheel_content_identity,
@@ -304,6 +300,9 @@ def _wheel_python_floor(wheel: bytes) -> str:
     return f"{sys.version_info.major}.{sys.version_info.minor}"
 
 
+_OBSERVATION_TIMEOUT_SECONDS = 5.0
+
+
 def run_update(
     *,
     channel: str,
@@ -312,15 +311,8 @@ def run_update(
     public_key: Path | None = None,
     download: Callable[[str, int], bytes] = _download,
     compatibility_observation: Callable[[], object] | None = None,
-    observation_timeout_seconds: float = 20,
-    clock: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
-    if (
-        not math.isfinite(observation_timeout_seconds)
-        or observation_timeout_seconds <= 0
-    ):
-        raise CliUpdateError("observation timeout must be finite and positive")
     if channel not in ("stable", "dev"):
         raise CliUpdateError("update channel must be stable or dev")
     for attempt in range(3):
@@ -368,6 +360,7 @@ def run_update(
                     source_sha=cast(str, target_source),
                     version=cast(str, release["version"]),
                 )
+                cutoff = dependency_cutoff(archive)
             break
         except (KeyError, ValueError, zipfile.BadZipFile) as error:
             if attempt == 2:
@@ -405,54 +398,40 @@ def run_update(
     if not apply or equal_content:
         return result
 
-    # This is an authority observation, not a second compatibility planner.
-    # Signed wheel ingress already verified the exact installed bytes. Source
-    # revisions and worker bookkeeping cannot veto that accepted publication.
-    deadline = clock() + observation_timeout_seconds
-    observed = None
-    while clock() < deadline:
-        try:
-            deployed = (
-                compatibility_observation()
-                if compatibility_observation is not None
-                else ControlClient.from_environment().request(
-                    "GET",
-                    "/api/cli/contract",
-                    timeout_seconds=max(0.001, deadline - clock()),
-                )
+    # The Controller observation is informational and best effort: signed wheel
+    # ingress already verified the exact installed bytes, so no Controller state
+    # (absent, unreachable, logged out) can veto or delay the update.
+    try:
+        deployed = (
+            compatibility_observation()
+            if compatibility_observation is not None
+            else ControlClient.from_environment().request(
+                "GET",
+                "/api/cli/contract",
+                timeout_seconds=_OBSERVATION_TIMEOUT_SECONDS,
+                retry=False,
             )
-            installed_schema = json.loads(
-                files("cluster_profiles")
-                .joinpath("schemas/cli-update-contract.schema.json")
-                .read_text()
-            )
-            Draft202012Validator(installed_schema).validate(deployed)
-
-            if not isinstance(deployed, dict):
-                raise TypeError("controller compatibility document is not an object")
-            observed = CliUpdateContract.from_dict(deployed)
-        except ControlUnauthorized, ControlForbidden:
-            raise
-        except (
-            ControlClientError,
-            OSError,
-            KeyError,
-            TypeError,
-            ValueError,
-            ValidationError,
-        ):
-            remaining = deadline - clock()
-            if remaining > 0:
-                sleeper(min(0.5, remaining))
-            continue
+        )
+        installed_schema = json.loads(
+            files("cluster_profiles")
+            .joinpath("schemas/cli-update-contract.schema.json")
+            .read_text()
+        )
+        Draft202012Validator(installed_schema).validate(deployed)
+        if not isinstance(deployed, dict):
+            raise TypeError("controller compatibility document is not an object")
+        observed = CliUpdateContract.from_dict(deployed)
         result["controller"] = deployed
         result["compatibility"] = observed.worker_compatibility
-        break
-    if observed is None:
-        # An unresolved apply must not be rendered as an unchanged success.
-        raise CliUpdateError(
-            "controller observation remained unknown within the apply deadline"
-        )
+    except (
+        ControlClientError,
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        ValidationError,
+    ):
+        print("controller observation unavailable", file=sys.stderr)
     uv = None
     for attempt in range(3):
         uv = shutil.which("uv")
@@ -476,6 +455,8 @@ def run_update(
             "--force",
             "--python",
             _wheel_python_floor(wheel),
+            # Dependencies as they were when the release was built.
+            *(("--exclude-newer", cutoff) if cutoff is not None else ()),
             str(wheel_path),
         ]
         for attempt in range(3):

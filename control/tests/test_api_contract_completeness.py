@@ -51,6 +51,13 @@ def test_all_mounted_routes_and_typed_agent_roots_are_registered(browser_auth):
     assert "/metrics" not in admin_paths
 
 
+def test_controller_does_not_serve_its_schema_but_still_generates_it():
+    app = schema_application(browser_auth=True)
+    with TestClient(app) as client:
+        assert client.get("/openapi.json").status_code == 404
+    assert "/api/auth/login" in app.openapi()["paths"]
+
+
 def test_hidden_new_route_fails_even_when_absent_from_openapi():
     app = FastAPI()
     app.add_api_route("/new", added, methods=["POST"], include_in_schema=False)

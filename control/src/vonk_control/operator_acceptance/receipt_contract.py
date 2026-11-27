@@ -107,6 +107,8 @@ class SecurityEdge(StrEnum):
     LOGIN = "login"
     LOGOUT = "logout"
     CLI_TOKEN = "cli-token"
+    CLI_TOKEN_REVOKE = "cli-token-revoke"
+    CLI_TOKEN_REVOKE_ALL = "cli-token-revoke-all"
 
     @property
     def endpoint(self) -> tuple[str, str]:

@@ -78,12 +78,12 @@ function stubFetch(body: unknown): string[] {
 }
 
 function setCsrfCookie(): void {
-  document.cookie = "vonk_csrf=test-csrf-token; Path=/";
+  document.cookie = "__Host-vonk_csrf=test-csrf-token; Path=/; Secure";
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  document.cookie = "vonk_csrf=; Max-Age=0; Path=/";
+  document.cookie = "__Host-vonk_csrf=; Max-Age=0; Path=/; Secure";
 });
 
 test("sends sort and updated_since to both library routes", async () => {
@@ -264,8 +264,8 @@ test("a failed call carries the Controller's request ID on the error", async () 
 });
 
 test("refuses to send a mutating request when the CSRF token is missing", async () => {
-  document.cookie = "vonk_csrf=; Max-Age=0; Path=/";
-  // Break caught: a missing vonk_csrf cookie silently dropped the CSRF header,
+  document.cookie = "__Host-vonk_csrf=; Max-Age=0; Path=/; Secure";
+  // Break caught: a missing __Host-vonk_csrf cookie silently dropped the CSRF header,
   // so the operator saw the Controller's generic 403 instead of the missing
   // token that caused it. Every mutation transport must refuse up front.
   const requests: Request[] = [];
@@ -309,7 +309,7 @@ test("refuses to send a mutating request when the CSRF token is missing", async 
 test.each(["generated", "request", "logout", "token", "upload"])(
   "expired cookies trigger authentication through %s without sending a mutation",
   async (transport) => {
-    document.cookie = "vonk_csrf=; Max-Age=0; Path=/";
+    document.cookie = "__Host-vonk_csrf=; Max-Age=0; Path=/; Secure";
     // Break caught: a missing CSRF cookie throws before the authentication
     // callback, leaving expired sessions stranded on pages without polling.
     const required = vi.fn();

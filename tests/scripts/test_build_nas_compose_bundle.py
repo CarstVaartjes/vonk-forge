@@ -158,7 +158,10 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         secret["file"].removeprefix("./secrets/")
         for secret in compose["secrets"].values()
     }
-    assert compose_secret_files == installer_secret_files
+    # The root CA key stays on the host: no container may mount it.
+    root_key = payload["step_ca_controller"]["files"]["root_private_key"]
+    assert root_key not in compose_secret_files
+    assert compose_secret_files == installer_secret_files - {root_key}
     assert "configs" not in compose
     assert "control-secret-init" not in compose_text
     assert "/repository" not in compose_text
@@ -272,62 +275,24 @@ def test_invalid_mount_preserves_published_bundle_and_repaired_input_builds(
     assert output.read_bytes() == verified
 
 
-def test_capability_free_services_read_secrets_through_the_installer_group(
-    tmp_path: Path,
-) -> None:
-    """Every all-capabilities-dropped secret reader gets the installer's group.
+def test_capability_free_services_read_no_host_secret_files(tmp_path: Path) -> None:
+    """A service without DAC_OVERRIDE reads only runtime-init's copies.
 
-    Compose file secrets keep the host mode, and the installer writes them
-    0600, so a service without DAC_OVERRIDE reads them only through a
-    supplementary group. The payload must name exactly those secret files for
-    the installer to write 0640 with that group.
+    Compose file secrets keep the host owner and mode, and the installer writes
+    them 0600 for whoever ran it, so only root with DAC_OVERRIDE (runtime-init)
+    may read them; it stages a copy owned by each consumer.
     """
     output = tmp_path / "payload.json"
     rendered = _render(tmp_path)
     document = yaml.safe_load(rendered.read_text(encoding="utf-8"))
     assert _build(rendered, output).returncode == 0
-    payload = json.loads(output.read_text(encoding="utf-8"))
-
     readers = {
-        name: service
+        name
         for name, service in document["services"].items()
-        if service.get("secrets")
-        and service.get("cap_drop") == ["ALL"]
-        and "DAC_OVERRIDE" not in service.get("cap_add", [])
+        if service.get("secrets") and "DAC_OVERRIDE" not in service.get("cap_add", [])
     }
-    assert set(readers) == {"tailscale-gateway"}
-    group = payload["group_readable_secrets"]
-    assert {service["group_add"][0] for service in readers.values()} == {
-        str(group["gid"])
-    }
-    assert all("cap_add" not in service for service in readers.values())
-    expected = {
-        document["secrets"][secret]["file"].removeprefix("./secrets/")
-        for service in readers.values()
-        for secret in service["secrets"]
-    }
-    assert expected == {
-        "tailscale-oauth-client-id",
-        "tailscale-oauth-client-secret",
-    }
-    assert set(group["files"]) == expected
-    assert group["gid"] == 64400
-
-
-def test_ci_secret_group_helper_uses_the_compose_gid() -> None:
-    helper = (ROOT / "scripts/fleet/run-with-nas-secret-group").read_text(
-        encoding="utf-8"
-    )
-    tailscale = yaml.safe_load(
-        (ROOT / "deploy/compose/tailscale/compose.yaml").read_text(encoding="utf-8")
-    )
-    gids = {
-        gid
-        for service in tailscale["services"].values()
-        for gid in service.get("group_add", [])
-    }
-    assert gids == {"64400"}
-    assert "gid=64400\n" in helper
+    assert readers == set()
+    assert all("group_add" not in service for service in document["services"].values())
 
 
 @pytest.mark.parametrize(
@@ -369,7 +334,6 @@ def test_installer_writes_the_selected_services_without_profiles(
     # Anything only an unselected service used is gone.
     if "tailscale" not in expected:
         assert "tailscale-state" not in written["volumes"]
-        assert "tailscale-oauth-client-id" not in written["secrets"]
 
 
 @pytest.mark.parametrize(

@@ -38,6 +38,9 @@ transport is separate and is not a CLI fallback.
 Log in once with the admin password. `vonkctl` asks for it without echo, uses
 it only to mint the Controller's CLI token, and stores the token alone; the
 password is never stored, put in arguments or environment, or printed.
+To mint it, `vonkctl` opens a short browser session (cookies
+`__Host-vonk_session` and `__Host-vonk_csrf`, the same as the web UI) and
+logs it out again.
 
 ```bash
 vonkctl auth login https://forge.example.test
@@ -50,14 +53,23 @@ applies; directory mode 0700, files 0600, written atomically). The token lasts
 30 days. From 7 days before it expires every command prints one warning on
 stderr; the stored expiry never blocks a command, the Controller decides. After
 it expires, a refused command names `vonkctl auth login`; run it again. A wrong
-password writes nothing. For unattended use `--password-stdin` reads the
+password writes nothing. The Controller answers a wrong password after a fixed one-second
+delay and never locks the login: one password check runs at a time, so a
+correct password always gets in after its turn (a login that waits more than
+ten seconds is answered busy with a retry time). For unattended use `--password-stdin` reads the
 password from stdin (discouraged: the password then passes through your
 script).
 
 `vonkctl auth status` shows the Controller, where the credential comes from and
-its expiry, and checks it with a Fleet read. `vonkctl auth logout` deletes the
-two local files; the token itself stays valid until it expires because the
-Controller keeps no revocation list.
+its expiry, and checks it with a Fleet read. Every CLI token is a revocable row
+on the Controller (only its digest is stored). `vonkctl auth logout` revokes
+this login's token when the Controller answers, then deletes the two local
+files. `vonkctl auth tokens` lists the tokens (id, expiry, revoked, which one is
+this login). `vonkctl auth tokens --revoke ID` revokes one token at once, for example a
+lost laptop's, and leaves the others working; `vonkctl auth tokens --revoke-all`
+revokes every CLI token and every browser session, this login's included, so
+log in again afterwards. The browser menu's token download mints the same kind
+of row.
 
 `VONK_CONTROL_URL` and `VONK_CONTROL_TOKEN_FILE` still override the address and
 the token path (for example for a second Controller or a CI job). Set both
@@ -123,6 +135,29 @@ Generate completion with `vonkctl completion bash` or `vonkctl completion zsh`.
 Source the generated script from your shell configuration after inspecting it;
 Zsh requires its normal `compinit` setup. Generation never edits shell files or
 queries the Controller.
+
+## Reset the administrator password
+
+The staged `secrets/admin-password` file is the administrator password's only
+authority and its reset path; there is no reset endpoint. To choose a new
+password, or after restoring PostgreSQL next to a different `secrets/` set:
+
+1. Write the new password as one line of UTF-8 text, ending in a newline, of
+   at least 12 characters and at most 256 bytes, into `secrets/admin-password`
+   (keep the file's owner and mode).
+2. Redeploy the project (a plain restart of `runtime-init` and `control-api`
+   is enough); `runtime-init` stages the file and the API adopts it at start.
+3. Sign in with the new password and run `vonkctl auth login` again.
+
+When the file differs from the stored password the API replaces the stored
+verifier and revokes every browser session and CLI token of the administrator,
+then keeps serving. An unusable file changes nothing and the stored password
+keeps working. An empty file or one that is not a regular file is logged by
+`runtime-init` (`staged administrator password is unusable`, error level),
+which keeps the previous staged copy. A file shorter than 12 characters, with
+an extra line, without a final newline, not UTF-8, or over 256 bytes is logged
+by the API (`staged administrator password`, error level). Neither stops over
+this file.
 
 ## Words
 

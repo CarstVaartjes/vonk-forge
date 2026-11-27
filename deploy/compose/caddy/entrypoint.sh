@@ -42,10 +42,32 @@ control_hostname=$(normalize_hostname "$VONK_CONTROL_HOSTNAME")
 export VONK_CONTROL_HOSTNAME="$control_hostname"
 export VONK_AGENT_ENROLL_HOSTNAME="enroll.$control_hostname"
 export VONK_AGENT_HOSTNAME="agents.$control_hostname"
+# The LiteLLM admin UI gets its own origin: the control hostname with
+# "-litellm" appended to its first label, a sibling name (never a subdomain)
+# so it is also a Tailscale Service name. The installer's certificate and the
+# Tailscale configurator derive the same name.
+case "$control_hostname" in
+  *.*) litellm_hostname="${control_hostname%%.*}-litellm.${control_hostname#*.}" ;;
+  *) litellm_hostname="${control_hostname}-litellm" ;;
+esac
+export VONK_LITELLM_HOSTNAME="$litellm_hostname"
+
+# runtime-init keeps the served controller leaf renewed in this volume, the
+# chain and its key in one file (Caddy reads the certificates and the key from
+# it), so a pair is published by one rename. Until it has staged one, or with
+# an older Compose file that mounts no volume, the installer's leaf serves.
+tls_file=/run/vonk-controller-tls/controller-server.pem
+if [ -s "$tls_file" ]; then
+  export VONK_CONTROLLER_TLS_CERTIFICATE="$tls_file"
+  export VONK_CONTROLLER_TLS_KEY="$tls_file"
+else
+  export VONK_CONTROLLER_TLS_CERTIFICATE=/run/secrets/controller-server-certificate
+  export VONK_CONTROLLER_TLS_KEY=/run/secrets/controller-server-key
+fi
 
 for required_file in \
-  /run/secrets/controller-server-certificate \
-  /run/secrets/controller-server-key \
+  "$VONK_CONTROLLER_TLS_CERTIFICATE" \
+  "$VONK_CONTROLLER_TLS_KEY" \
   /run/secrets/agent-client-ca
 do
   if [ -L "$required_file" ] || [ ! -f "$required_file" ] || [ ! -r "$required_file" ] || [ ! -s "$required_file" ]; then

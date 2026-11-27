@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Refuse an agent protocol change that does not ship in a new minor or major.
+
+The Controller accepts exactly its own AGENT_PROTOCOL_VERSION, so a change
+strands every agent of the previous protocol until its Spark installer reruns.
+A patch release must never do that: the protocol may change only together with
+a minor or major bump of the workspace version (root Cargo.toml), in the same
+patch. Reads a unified diff on stdin; Git belongs to the caller.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+
+PROTOCOL = {
+    "agent_protocol/src/vonk_agent_protocol/claims.py": re.compile(
+        r"AGENT_PROTOCOL_VERSION = (\d+)$"
+    ),
+    "rust/crates/vonk-agent/src/client/mod.rs": re.compile(
+        r"pub const AGENT_PROTOCOL_VERSION: u32 = (\d+);$"
+    ),
+}
+VERSION_FILE = "Cargo.toml"
+VERSION = re.compile(r'version = "(\d+)\.(\d+)\.\d+"$')
+
+
+def changes(patch: str) -> dict[str, dict[str, list[tuple[int, ...]]]]:
+    """Per watched file, the removed (`-`) and added (`+`) values."""
+    found: dict[str, dict[str, list[tuple[int, ...]]]] = {}
+    path = ""
+    for line in patch.splitlines():
+        if line.startswith(("--- a/", "+++ b/")):
+            path = line[6:]
+            continue
+        if line.startswith(("---", "+++")) or line[:1] not in ("-", "+"):
+            continue
+        pattern = PROTOCOL.get(path) or (VERSION if path == VERSION_FILE else None)
+        match = pattern.fullmatch(line[1:]) if pattern else None
+        if match:
+            side = found.setdefault(path, {"-": [], "+": []})
+            side[line[0]].append(tuple(int(group) for group in match.groups()))
+    return found
+
+
+def problem(patch: str) -> str | None:
+    found = changes(patch)
+    protocol_changed = any(
+        sides["-"] != sides["+"] for path, sides in found.items() if path in PROTOCOL
+    )
+    if not protocol_changed:
+        return None
+    version = found.get(VERSION_FILE, {"-": [], "+": []})
+    if (
+        len(version["-"]) == 1
+        and len(version["+"]) == 1
+        and version["+"][0] > version["-"][0]
+    ):
+        return None
+    return (
+        "AGENT_PROTOCOL_VERSION changed without a minor or major bump of the "
+        "workspace version in Cargo.toml; bump it in the same change"
+    )
+
+
+def main() -> int:
+    message = problem(sys.stdin.read())
+    if message:
+        print(message, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

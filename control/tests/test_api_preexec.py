@@ -103,7 +103,6 @@ def test_administrator_initialization_creates_one_login_on_postgres(
         assert db.scalar(select(User.role)) == "administrator"
     auth = BrowserAuthService(
         sessions,
-        token_signing_key=b"test-token-signing-key",
         clock=lambda: datetime.now(UTC),
     )
     assert auth.login("admin", password).identity.actor.subject == "admin"
@@ -114,20 +113,26 @@ def test_administrator_initialization_creates_one_login_on_postgres(
         assert tuple(db.scalars(select(User.subject))) == ("admin",)
 
 
-def test_administrator_initialization_rejects_malformed_secret_before_db_access(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    "content",
+    # The three branches: a file the bounded read refuses, a file that is
+    # not one terminated line, and a line that is not UTF-8.
+    [b"", b"missing final newline", b"\xff not utf-8\n"],
+)
+def test_an_unusable_staged_password_keeps_startup_going_without_db_access(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, content: bytes
 ) -> None:
+    """Catches a hand-edited file crash-looping the API or reaching the database."""
 
     password_path = tmp_path / "admin-password"
-    password_path.write_text("missing final newline", encoding="utf-8")
+    password_path.write_bytes(content)
     monkeypatch.setattr(
         api_preexec,
         "build_engine",
         lambda _database_url: pytest.fail("malformed secret reached the database"),
     )
 
-    with pytest.raises(Exception) as _ending:
-        api_preexec.initialize_administrator("postgresql://unused", password_path)
+    api_preexec.initialize_administrator("postgresql://unused", password_path)
 
 
 @pytest.mark.parametrize("fault", ["typed", "io"])

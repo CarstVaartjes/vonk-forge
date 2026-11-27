@@ -13,12 +13,13 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
 
 from cluster_profiles import cli
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.failures.classification import disposition
 from vonk_control.library_projection.service import LibraryProjection

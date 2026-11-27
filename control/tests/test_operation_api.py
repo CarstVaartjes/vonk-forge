@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import NodeIdentityState
@@ -25,7 +26,7 @@ from vonk_control.agent_upgrades.status import (
     agent_upgrade_next_action,
 )
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.bounded_json import BoundedJSONError
 from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
 from vonk_control.failures.summary_cut import summary_cut as _summary_cut

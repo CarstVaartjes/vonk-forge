@@ -19,12 +19,13 @@ from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from cluster_profiles import cli
 from cluster_profiles.control_client.transfers import ControlClient
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
 from vonk_control.api.application import create_app
 from vonk_control.api.production import production_app
-from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
+from vonk_control.auth import MUTATION_ROLES, Actor
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileInput,
     FleetProfileList,

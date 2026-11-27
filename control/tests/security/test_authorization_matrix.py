@@ -4,8 +4,9 @@ from collections.abc import Mapping, Sequence
 
 from starlette.routing import Route
 
+from tests.token_support import TokenCodec
 from vonk_control.api.application import create_app
-from vonk_control.auth import MUTATION_ROLES, TokenCodec
+from vonk_control.auth import MUTATION_ROLES
 
 
 def test_every_mutating_route_has_explicit_role() -> None:

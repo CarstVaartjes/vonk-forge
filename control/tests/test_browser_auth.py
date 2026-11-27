@@ -1,28 +1,29 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import threading
+from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from vonk_control.auth import Actor
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import LoginSession, User
 from vonk_control.security.browser_auth import (
-    BootstrapResult,
+    BootstrapOutcome,
     BrowserAuthenticationError,
-    BrowserAuthenticationThrottledError,
     BrowserAuthService,
-    LoginRateLimiter,
+    BrowserLoginBusyError,
     bootstrap_administrator,
 )
 from vonk_control.security.passwords import hash_password, verify_password
-
-from .insert_collision_support import Rendezvous
 
 ADMIN_PASSWORD = "correct horse battery staple"
 NOW = datetime(2026, 8, 13, 9, 30, tzinfo=UTC)
@@ -38,14 +39,6 @@ class Clock:
         self.value = value
 
     def __call__(self) -> datetime:
-        return self.value
-
-
-class MonotonicClock:
-    def __init__(self, value: float = 0.0) -> None:
-        self.value = value
-
-    def __call__(self) -> float:
         return self.value
 
 
@@ -68,7 +61,6 @@ def browser_auth(
 
     return BrowserAuthService(
         sessions,
-        token_signing_key=b"test-token-signing-key",
         clock=clock,
         token_source=source,
     )
@@ -216,14 +208,12 @@ def test_login_cleanup_removes_only_a_bounded_batch_of_expired_sessions(
 def test_bootstrap_administrator_creates_once_and_verifies_on_restart(
     sessions: sessionmaker[Session],
 ) -> None:
-    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == BootstrapResult(
-        "created"
+    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == (
+        BootstrapOutcome.CREATED
     )
-    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == BootstrapResult(
-        "unchanged"
+    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == (
+        BootstrapOutcome.UNCHANGED
     )
-    with pytest.raises(BrowserAuthenticationError):
-        bootstrap_administrator(sessions, "different administrator password")
 
     with sessions() as db:
         user = db.scalar(select(User))
@@ -235,6 +225,40 @@ def test_bootstrap_administrator_creates_once_and_verifies_on_restart(
     service = browser_auth(sessions, Clock(), opaque(33), opaque(34))
     issued = service.login("admin", ADMIN_PASSWORD)
     assert service.resolve(issued.token).actor == Actor("admin", "administrator")
+
+
+def test_a_changed_staged_password_replaces_the_old_and_revokes_sessions(
+    sessions: sessionmaker[Session],
+) -> None:
+    """Catches the crash-loop on a mismatch and a reset that leaves old logins."""
+    bootstrap_administrator(sessions, ADMIN_PASSWORD)
+    service = browser_auth(sessions, Clock(), opaque(35), opaque(36))
+    issued = service.login("admin", ADMIN_PASSWORD)
+
+    assert bootstrap_administrator(sessions, "a new staged password") == (
+        BootstrapOutcome.REWRITTEN
+    )
+
+    with pytest.raises(BrowserAuthenticationError):
+        service.resolve(issued.token)
+    with pytest.raises(BrowserAuthenticationError):
+        service.login("admin", ADMIN_PASSWORD)
+    fresh = browser_auth(sessions, Clock(), opaque(37), opaque(38))
+    assert fresh.login("admin", "a new staged password").identity.actor == Actor(
+        "admin", "administrator"
+    )
+
+
+def test_a_short_staged_password_keeps_the_stored_one(
+    sessions: sessionmaker[Session],
+) -> None:
+    """Catches a hand-edited short password being adopted or ending startup."""
+    bootstrap_administrator(sessions, ADMIN_PASSWORD)
+
+    assert bootstrap_administrator(sessions, "x" * 11) == BootstrapOutcome.REFUSED
+
+    service = browser_auth(sessions, Clock(), opaque(39), opaque(40))
+    assert service.login("admin", ADMIN_PASSWORD).identity.actor.subject == "admin"
 
 
 def test_bootstrap_admin_rejects_conflicting_administrator_authority(
@@ -250,120 +274,11 @@ def test_bootstrap_admin_rejects_conflicting_administrator_authority(
                 password_verifier=hash_password(ADMIN_PASSWORD),
             )
         )
-    with pytest.raises(BrowserAuthenticationError):
-        bootstrap_administrator(sessions, ADMIN_PASSWORD)
-
-
-def test_throttle_rejects_the_sixth_failed_attempt_for_one_subject(
-    sessions: sessionmaker[Session],
-) -> None:
-    """Allowing a sixth failure in five minutes must stop before password work."""
-    add_admin(sessions)
-    monotonic = MonotonicClock()
-    limiter = LoginRateLimiter(
-        token_signing_key=b"test-token-signing-key", clock=monotonic
+    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == (
+        BootstrapOutcome.REFUSED
     )
-    service = BrowserAuthService(
-        sessions,
-        token_signing_key=b"test-token-signing-key",
-        clock=Clock(),
-        token_source=lambda: opaque(25),
-        rate_limiter=limiter,
-    )
-
-    for _ in range(5):
-        with pytest.raises(BrowserAuthenticationError):
-            service.login("admin", "wrong password")
-
-    with pytest.raises(BrowserAuthenticationThrottledError) as error:
-        service.login("admin", ADMIN_PASSWORD)
-    assert ADMIN_PASSWORD not in str(error.value)
     with sessions() as db:
-        assert db.scalar(select(LoginSession)) is None
-    monotonic.value += 301
-    issued = service.login("admin", ADMIN_PASSWORD)
-    assert service.resolve(issued.token).actor == Actor("admin", "administrator")
-
-
-def test_throttle_rejects_a_new_subject_after_twenty_global_failures(
-    sessions: sessionmaker[Session],
-) -> None:
-    """Dropping the global failure window must not permit the twenty-first attempt."""
-    add_admin(sessions)
-    monotonic = MonotonicClock()
-    limiter = LoginRateLimiter(
-        token_signing_key=b"test-token-signing-key", clock=monotonic
-    )
-    service = BrowserAuthService(
-        sessions,
-        token_signing_key=b"test-token-signing-key",
-        clock=Clock(),
-        token_source=lambda: opaque(26),
-        rate_limiter=limiter,
-    )
-
-    for index in range(20):
-        with pytest.raises(BrowserAuthenticationError):
-            service.login(f"unknown-{index}", "wrong password")
-
-    with pytest.raises(BrowserAuthenticationThrottledError):
-        service.login("new-subject", "wrong password")
-
-
-def test_throttle_success_clears_only_its_subject_failure_state() -> None:
-    """Clearing every subject after one success would weaken independent limits."""
-    limiter = LoginRateLimiter(
-        token_signing_key=b"test-token-signing-key", clock=MonotonicClock()
-    )
-    for _ in range(4):
-        admin = limiter.reserve("admin")
-        other = limiter.reserve("other-subject")
-        assert admin is not None
-        assert other is not None
-        limiter.fail(admin)
-        limiter.fail(other)
-    other = limiter.reserve("other-subject")
-    assert other is not None
-    limiter.fail(other)
-    successful = limiter.reserve("admin")
-    assert successful is not None
-
-    limiter.succeed(successful)
-
-    assert limiter.reserve("admin") is not None
-    assert limiter.reserve("other-subject") is None
-
-
-def test_throttle_evicts_expired_subject_state_before_admission() -> None:
-    """Retaining expired subject entries would eventually exhaust the bounded map."""
-    monotonic = MonotonicClock()
-    limiter = LoginRateLimiter(
-        token_signing_key=b"test-token-signing-key", clock=monotonic
-    )
-    attempt = limiter.reserve("expired-subject")
-    assert attempt is not None
-    limiter.fail(attempt)
-    assert len(limiter._subjects) == 1
-
-    monotonic.value = 300.0
-
-    assert limiter.reserve("new-subject") is not None
-    assert len(limiter._subjects) == 1
-
-
-def test_throttle_never_retains_a_submitted_subject_in_plaintext() -> None:
-    """Replacing keyed identifiers with raw subject keys would expose login input."""
-    subject = "unkeyed-submitted-subject"
-    limiter = LoginRateLimiter(
-        token_signing_key=b"test-token-signing-key", clock=MonotonicClock()
-    )
-
-    attempt = limiter.reserve(subject)
-    assert attempt is not None
-    limiter.fail(attempt)
-
-    assert subject not in limiter._subjects
-    assert subject not in repr(limiter)
+        assert tuple(db.scalars(select(User.subject))) == ("other-admin",)
 
 
 def test_login_issues_independent_session_and_csrf_tokens(
@@ -397,76 +312,178 @@ def test_resolution_rejects_session_when_exact_browser_authority_changes(
         service.resolve(issued.token)
 
 
-def _concurrently_reserve(
-    limiter: LoginRateLimiter, subjects: tuple[str, ...]
-) -> list[object]:
-    start = Rendezvous(len(subjects) + 1)
-    reserved = Rendezvous(len(subjects) + 1)
+def _threaded_sessions() -> sessionmaker[Session]:
+    # admit() verifies on a worker thread: one in-memory database for all.
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(engine, expire_on_commit=False)
+
+
+def _admitting_service(
+    sessions: sessionmaker[Session],
+    *,
+    password_check: Callable[[str, str], bool] | None = None,
+    failure_delay: Callable[[], Awaitable[None]] | None = None,
+    lock_wait_seconds: float = 30.0,
+) -> BrowserAuthService:
+    tokens = iter(opaque(byte) for byte in range(40, 60))
+    return BrowserAuthService(
+        sessions,
+        clock=Clock(),
+        token_source=lambda: next(tokens),
+        password_check=password_check,
+        failure_delay=failure_delay,
+        lock_wait_seconds=lock_wait_seconds,
+    )
+
+
+async def _until(condition: Callable[[], bool]) -> None:
+    for _ in range(3000):
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition was never reached")
+
+
+def test_only_a_failed_admission_waits_out_the_failure_delay() -> None:
+    """Delaying every login, or none, would either slow the owner or a guesser."""
+    sessions = _threaded_sessions()
+    add_admin(sessions)
+    delays: list[None] = []
+
+    async def delay() -> None:
+        delays.append(None)
+
+    service = _admitting_service(sessions, failure_delay=delay)
+
+    async def scenario() -> None:
+        for _ in range(3):
+            with pytest.raises(BrowserAuthenticationError):
+                await service.admit("admin", "wrong password")
+        assert len(delays) == 3
+        issued = await service.admit("admin", ADMIN_PASSWORD)
+        assert service.resolve(issued.token).actor == Actor("admin", "administrator")
+        assert len(delays) == 3
+
+    asyncio.run(scenario())
+
+
+def test_verifications_run_one_at_a_time_and_waiters_hold_no_thread() -> None:
+    """Parallel Argon2 runs, or logins parked on worker threads, exhaust the API."""
+    sessions = _threaded_sessions()
+    add_admin(sessions)
     release = threading.Event()
-    attempts: list[object] = []
-    attempts_lock = threading.Lock()
+    guard = threading.Lock()
+    running = [0]
+    peak = [0]
+    entered = [0]
 
-    def reserve(subject: str) -> None:
-        start.wait()
-        attempt = limiter.reserve(subject)
-        with attempts_lock:
-            attempts.append(attempt)
-        reserved.wait()
+    def slow_check(_verifier: str, password: str) -> bool:
+        with guard:
+            running[0] += 1
+            entered[0] += 1
+            peak[0] = max(peak[0], running[0])
         assert release.wait(timeout=30)
-        if attempt is not None:
-            limiter.fail(attempt)
+        with guard:
+            running[0] -= 1
+        return password == ADMIN_PASSWORD
 
-    threads = [
-        threading.Thread(target=reserve, args=(subject,)) for subject in subjects
-    ]
-    for thread in threads:
-        thread.start()
-    start.wait()
-    reserved.wait()
-    release.set()
-    for thread in threads:
-        thread.join(timeout=30)
-    assert all(not thread.is_alive() for thread in threads)
-    return attempts
+    async def no_delay() -> None:
+        return None
 
-
-def test_limiter_reservations_bound_inflight_attempts_for_one_subject() -> None:
-    """Splitting admission from failure recording would admit a sixth in-flight attempt."""
-    limiter = LoginRateLimiter(
-        token_signing_key=b"test-token-signing-key", clock=MonotonicClock()
+    service = _admitting_service(
+        sessions, password_check=slow_check, failure_delay=no_delay
     )
 
-    attempts = _concurrently_reserve(limiter, ("admin",) * 6)
+    async def scenario() -> None:
+        asyncio.get_running_loop().set_default_executor(
+            ThreadPoolExecutor(max_workers=2)
+        )
+        flood = [
+            asyncio.create_task(service.admit("admin", f"wrong {index}"))
+            for index in range(4)
+        ]
+        owner = asyncio.create_task(service.admit("admin", ADMIN_PASSWORD))
+        await _until(lambda: entered[0] == 1)
+        # One worker runs the blocked verification; the four waiters hold
+        # none, so the second worker is still free for any other request.
+        probe = asyncio.to_thread(lambda: "free")
+        assert await asyncio.wait_for(probe, timeout=30) == "free"
+        assert entered[0] == 1
+        release.set()
+        outcomes = await asyncio.gather(*flood, return_exceptions=True)
+        issued = await owner
+        assert all(isinstance(o, BrowserAuthenticationError) for o in outcomes)
+        assert service.resolve(issued.token).actor == Actor("admin", "administrator")
 
-    assert sum(attempt is not None for attempt in attempts) == 5
+    asyncio.run(scenario())
+    assert entered[0] == 5
+    assert peak[0] == 1
 
 
-def test_limiter_reservations_bound_inflight_attempts_globally() -> None:
-    """Splitting admission from failure recording would admit 21 global attempts."""
-    limiter = LoginRateLimiter(
-        token_signing_key=b"test-token-signing-key", clock=MonotonicClock()
+def test_a_pending_failure_delay_does_not_queue_the_next_login() -> None:
+    """Holding the verification lock through the delay would queue the owner."""
+    sessions = _threaded_sessions()
+    add_admin(sessions)
+
+    async def scenario() -> None:
+        delaying = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def delay() -> None:
+            delaying.set()
+            await finish.wait()
+
+        service = _admitting_service(sessions, failure_delay=delay)
+        failed = asyncio.create_task(service.admit("admin", "wrong password"))
+        await asyncio.wait_for(delaying.wait(), timeout=30)
+        issued = await asyncio.wait_for(
+            service.admit("admin", ADMIN_PASSWORD), timeout=30
+        )
+        assert service.resolve(issued.token).actor == Actor("admin", "administrator")
+        assert not failed.done()
+        finish.set()
+        with pytest.raises(BrowserAuthenticationError):
+            await failed
+
+    asyncio.run(scenario())
+
+
+def test_a_login_waiting_past_the_deadline_is_busy_and_its_retry_succeeds() -> None:
+    """An unbounded wait queues the owner behind a flood; a refusal must heal."""
+    sessions = _threaded_sessions()
+    add_admin(sessions)
+    release = threading.Event()
+    entered = threading.Event()
+
+    def held_check(_verifier: str, password: str) -> bool:
+        entered.set()
+        assert release.wait(timeout=30)
+        return password == ADMIN_PASSWORD
+
+    async def no_delay() -> None:
+        return None
+
+    service = _admitting_service(
+        sessions,
+        password_check=held_check,
+        failure_delay=no_delay,
+        lock_wait_seconds=0.05,
     )
 
-    attempts = _concurrently_reserve(
-        limiter, tuple(f"concurrent-{index}" for index in range(21))
-    )
+    async def scenario() -> None:
+        holder = asyncio.create_task(service.admit("admin", "wrong password"))
+        await _until(entered.is_set)
+        with pytest.raises(BrowserLoginBusyError):
+            await service.admit("admin", ADMIN_PASSWORD)
+        release.set()
+        with pytest.raises(BrowserAuthenticationError):
+            await holder
+        issued = await service.admit("admin", ADMIN_PASSWORD)
+        assert service.resolve(issued.token).actor == Actor("admin", "administrator")
 
-    assert sum(attempt is not None for attempt in attempts) == 20
-
-
-def test_limiter_rejects_the_1025th_tracked_subject() -> None:
-    """Growing past 1,024 keyed subjects would permit unbounded retention."""
-    limiter = LoginRateLimiter(
-        token_signing_key=b"test-token-signing-key",
-        clock=MonotonicClock(),
-        maximum_global_failures=1_025,
-    )
-
-    attempts = [limiter.reserve(f"subject-{index}") for index in range(1_024)]
-
-    assert all(attempt is not None for attempt in attempts)
-    assert limiter.reserve("subject-over-limit") is None
-    assert len(limiter._subjects) == 1_024
-    for attempt in attempts:
-        assert attempt is not None
-        limiter.succeed(attempt)
+    asyncio.run(scenario())

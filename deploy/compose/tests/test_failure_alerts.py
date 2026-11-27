@@ -257,3 +257,53 @@ def test_agent_ingress_alert_fires_only_when_every_active_node_is_offline(
         _test(nobody_active, [("8m", INGRESS, [])]),
     ]
     _promtool(tmp_path, tests)
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(30)
+def test_controller_certificate_alerts_fire_at_sixty_and_thirty_days(
+    tmp_path: Path,
+) -> None:
+    """Catches a threshold off by a unit (seconds against days) or a missing tier."""
+    shutil.copy(ROOT / "deploy/compose/prometheus/alerts.yaml", tmp_path)
+    metric = "vonk_controller_certificate_expiry_timestamp_seconds"
+    day = 86400
+
+    def expiring(certificate: str, days: int) -> dict[str, str]:
+        return _series(metric, f'certificate="{certificate}"', f"{days * day}x180")
+
+    def fired(name: str, certificate: str) -> dict:
+        return {
+            "exp_labels": {
+                **SHIPPED[name]["labels"],
+                "job": "vonk-control",
+                "instance": "control-api:8000",
+                "certificate": certificate,
+            },
+            "exp_annotations": SHIPPED[name]["annotations"],
+        }
+
+    warning, critical = (
+        "ControllerCertificateExpiring",
+        "ControllerCertificateExpiringSoon",
+    )
+    series = [
+        expiring("server", 61),
+        expiring("intermediate", 59),
+        expiring("root", 29),
+    ]
+    tests = [
+        _test(
+            series,
+            [
+                ("30m", warning, []),
+                (
+                    "2h",
+                    warning,
+                    [fired(warning, "intermediate"), fired(warning, "root")],
+                ),
+                ("2h", critical, [fired(critical, "root")]),
+            ],
+        )
+    ]
+    _promtool(tmp_path, tests)

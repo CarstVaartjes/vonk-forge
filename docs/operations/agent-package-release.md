@@ -43,16 +43,16 @@ release for the current tip. Each run is one fan-in:
 5. `authority` starts once `ci`, `agent`, `images` and `setups` have settled,
    and only if none failed or was cancelled. It verifies the exact evidence
    and hands it to candidate, NAS and Spark acceptance, acceptance signing and
-   promotion. `apt` and the producer records run beside it: promotion waits
-   for both, and a failed or cancelled one blocks it.
+   promotion. The producer records run beside it: promotion waits for them,
+   and a failed or cancelled one blocks it. `apt` also runs beside it but
+   never blocks promotion, because nothing reads the apt repository.
 
 A development producer is skipped when the newest release run that completed
 it, on an ancestor of the source, saw the same producer inputs and its
 artifacts are still available. `scripts/ci/resolve-publication-producer` owns the
 input paths of each producer. Every release records the producers it completed
 as `release-producer-<name>` marker artifacts, so the lookup needs no walk over
-runs that reused. An agent package counts only after apt dev published it; a
-failed apt publication is therefore healed by the next release building again.
+runs that reused.
 Producer artifacts, markers, acceptance and promotion receipts are kept for 90
 days, the repository maximum, which bounds how long evidence can be reused.
 
@@ -96,6 +96,23 @@ never interrupted. Tag releases never cancel and are never cancelled.
 `.github/workflows/installer-maintenance.yml` refreshes both channel manifests
 daily and, when dispatched, removes stale disposable CI tailnets.
 
+### Installer manifest expiry
+
+The signed `current.manifest` of each channel expires 7 days after its last
+refresh. If new installs or `vonkctl update` say the release manifest has
+expired, the scheduled refresh has stopped. Enable *Installer maintenance* in
+the Actions tab if GitHub disabled it (public repositories lose scheduled
+workflows after 60 days without repository activity). The refresh only runs on
+the schedule, never on a dispatch: rerun the latest scheduled run (all jobs)
+when it is less than 30 days old, otherwise the next scheduled run (03:17 UTC)
+refreshes both channels.
+
+Every scheduled run re-enables the workflow, which prevents that 60-day
+disable, and a failed scheduled run opens or comments on the issue "Installer
+maintenance is failing" (it closes only when a scheduled run fully succeeds). That issue
+means the refresh is failing, for example because of a rotated R2 or signing
+secret: fix the cause, then rerun the failed run.
+
 ## One-time publication authority setup
 
 The workflow separates candidate signing, behavioral canaries, acceptance
@@ -120,6 +137,16 @@ Stable releases use three more environments, all restricted to tag `v*`:
 | `agent-release` | `VONK_AGENT_RELEASE_KEY_FINGERPRINT` (equal to `agent-development`) | `VONK_AGENT_RELEASE_PRIVATE_KEY` |
 | `apt-release` | `APT_REPOSITORY_GPG_FINGERPRINT`, `R2_APT_PUBLIC_BUCKET`, `R2_APT_STATE_BUCKET` | `APT_GPG_PASSPHRASE`, `APT_REPOSITORY_GPG_PRIVATE_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
 | `platform-release` | none | none |
+
+The `apt` job signs the public apt repository with the key in
+`APT_REPOSITORY_GPG_PRIVATE_KEY`. Nothing on a Spark or the Controller reads that
+repository (Sparks install the digest-verified package directly), so a failed
+`apt` job, an expired key included, blocks neither producer reuse nor
+promotion. The job warns when the key or a
+subkey expires within 60 days; extend it with `gpg --quick-set-expire
+<fingerprint> <period>` (the same `<fingerprint>`, so
+`APT_REPOSITORY_GPG_FINGERPRINT` stays) and store the re-exported private key in
+the secret.
 
 Each stable environment carries a deployment policy; the owner is a required
 reviewer (`prevent_self_review` off) on `apt-release` and
@@ -306,12 +333,18 @@ Operators use the signed `/nas` endpoint, which verifies the wheel and payload
 before executing the equivalent of:
 
 ```sh
-uv run --isolated --no-project --python 3.15 --with "$wheel" \
+UV_EXCLUDE_NEWER="$cutoff" uv run --isolated --no-project --python 3.15 --with "$wheel" \
   vonk-nas-setup --template "$payload"
 ```
 
 Here `$wheel` and `$payload` are the exact files already verified by the
-bootstrap, not independently chosen downloads. `uv` must already be installed;
+bootstrap, not independently chosen downloads. `$cutoff` is the release's
+source commit time (RFC 3339 UTC), so the wheel's dependencies resolve as they
+were when the release was built and accepted, not to whatever a package index
+published since. The CLI build stamps that time into the CLI wheel's
+`build-identity.json` (`dependencies_exclude_newer`); assembly renders it into
+the NAS bootstrap (as `UV_EXCLUDE_NEWER`), and `install/channel` and
+`vonkctl update` pass it to `uv tool install --exclude-newer`. `uv` must already be installed;
 it manages the Python 3.15 runtime. Upgrade switch, private answers,
 Lab mode, local secrets and PKI retain the same command workflow.
 

@@ -19,6 +19,13 @@ Python 3.15 environment. Then run one command as your normal user:
 curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
+Without a terminal (CI, automation), pass the prompt answers from a file:
+`curl -fsSL https://install.vonkforge.ai/nas | sh -s -- --answers-file PATH`.
+The file holds one answer per line, in the order the installer would ask,
+including hidden secret prompts; a blank line accepts a default or skips an
+optional value. It must be a regular file with no group or other permissions (`0600`) and a
+single link, otherwise the installer refuses it.
+
 Until the first stable release is published, the unqualified `/nas`, `/spark` and `/vonkctl` URLs serve the newest accepted development release; once a stable release exists they serve stable. To choose a channel explicitly, use `https://install.vonkforge.ai/dev/nas` (or `/dev/spark`, `/dev/vonkctl`).
 
 The command verifies the signed release, exact Python setup wheel and payload,
@@ -84,10 +91,13 @@ equivalent is:
 
 ```sh
 cd vonk-forge
-sudo docker compose pull
-sudo docker compose up -d --wait --remove-orphans
-sudo docker compose ps
+docker compose pull
+docker compose up -d --wait --remove-orphans
+docker compose ps
 ```
+
+On Linux, prefix `sudo` when your user is not in the `docker` group or the
+project is root-owned.
 
 Use the same project when upgrading. `--remove-orphans` stops and removes
 containers for services removed from the new bundle while preserving named
@@ -108,7 +118,15 @@ verify the controller from a LAN client.
 Do not add host-path overrides. Persistent data belongs to the named Docker
 volumes declared by the generated project. Caddy publishes 8443 on all NAS
 interfaces and serves the browser UI with the generated local CA certificate;
-Secure remote additionally enables the Tailscale gateway. PostgreSQL is the
+Secure remote additionally enables the Tailscale gateway. The LiteLLM admin
+UI has its own origin, the control hostname with `-litellm` appended to its
+first label (`vonk-forge-litellm.<tailnet>.ts.net`, the `svc:vonk-forge-litellm`
+Service, in Secure remote; `vonk-forge-litellm.internal:8443` in Lab mode), so its
+scripts never reach the Controller's cookies. The Controller host keeps `/v1`
+and the `/litellm/*` API for clients and sandboxes every LiteLLM response there;
+no LiteLLM route receives a browser Cookie. The installer adds the name to the
+controller certificate, so rerun it once after upgrading to this release for
+the LAN listener to present it. PostgreSQL is the
 control authority and Step CA is the agent identity authority. There is no
 runtime Git checkout, host updater, migration helper, or A/B agent supervisor.
 The one setup service is `runtime-init` (below); like every service it stays
@@ -117,10 +135,10 @@ running.
 ## Upgrade
 
 Run the same command from the directory that already contains `vonk-forge/`.
-Use the account that owns the existing private files. For a root-owned bundle,
-or an explicitly authorized repair of the configured secret group, put `sudo`
-on the `sh` side of the pipe (`sudo curl ... | sh` does not work). Installed `uv`
-must be available to the account running the installer:
+Use the account that owns the existing private files. Only for a root-owned
+bundle, put `sudo` on the `sh` side of the pipe (`sudo curl ... | sh` does not
+work); under `sudo` the installer falls back to the invoking user's `uv` in
+`~/.local/bin` or `~/.cargo/bin`:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/nas | sudo sh
@@ -167,10 +185,12 @@ They use development `:dev` or production `:latest` application images and chann
 selected by the installer publication channel.
 
 
-Generated deployment Compose and the NAS curl installer payload use floating image
-tags: Vonk images follow `:dev` or production `:latest`; upstream services follow
-`:latest`. Every service pulls on startup/redeploy. The source templates and pinned
-publication artifact provide evidence inputs, not the installed image policy.
+Generated deployment Compose and the NAS curl installer payload float only the
+Vonk images: they follow `:dev` or production `:latest`. Upstream services
+(PostgreSQL, Caddy, Prometheus, Tailscale and the others) keep the exact version
+the release pins; the bundle builder refuses a floating upstream tag,
+so a new upstream version arrives only with a Vonk release. Every service pulls
+on startup/redeploy.
 
 ## Database backups
 
@@ -197,10 +217,26 @@ time its container starts it stages, before the services that read it start:
   `normalized-private-keys` (owner and mode per consumer, the administrator
   password included), and the gateway master key under
   `secrets/gateway/authority`;
+- the Tailscale OAuth secrets in `tailscale-oauth`, root-owned `0400`, which
+  only the capability-free gateway mounts (removed when Lab mode leaves them
+  empty);
 - this release's runtime kit in `runtime-assets`, with files a release no
   longer ships removed;
 - the ownership of the shared volume roots (`/state`, the object stores,
-  `/routes`, `/supervisor`, `secrets/gateway`).
+  `/routes`, `/supervisor`, `secrets/gateway`);
+- the controller TLS leaf that Caddy serves, in `controller-tls` as one
+  file, `controller-server.pem`: the chain and then its key, root-owned `0440`
+  with group 10001 so the API can read the certificate for the expiry metric.
+  One rename publishes the pair, so a crash never leaves a key beside another
+  leaf. It is the newest leaf, from that
+  volume or from the installer's `controller-server-*` secrets, that is issued
+  by the current intermediate and carries exactly the installer leaf's names.
+  The installer stays the authority for the names. When none has more than 60
+  days left, runtime-init mints a new 397-day leaf with the intermediate. Each
+  redeploy therefore renews it, and Caddy restarts with runtime-init. A
+  renewal fault is logged (`controller TLS leaf renewal failed`) and never
+  fails staging: Caddy keeps the leaf it has. Until a leaf is staged, or with
+  a Compose file that predates the volume, Caddy serves the installer's leaf.
 
 Every file is a bounded regular file (at most 64 KiB) published with fsync and
 atomic replacement, so a reader sees the old or the new copy, never a partial

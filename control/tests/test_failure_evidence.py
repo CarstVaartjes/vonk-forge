@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.agent_operations import (
     AgentOperation as ProtocolAgentOperation,
 )
@@ -30,7 +31,7 @@ from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor
 from vonk_control.failures.evidence import (
     _OMISSION_MARKER,
     FailedAttempt,

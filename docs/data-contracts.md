@@ -32,7 +32,7 @@ that no longer occurs fails as stale.
 | Progress phase and wait words (plain words for a person) | `vonk_agent_protocol/phase_words.py` | none | `control/web/src/api/vocabulary.generated.ts` (`PHASE_WORDS`, `WAIT_WORDS`) | `src/cluster_profiles/cli_states_generated.py` |
 | CLI state words | the vocabulary above | none | none | `src/cluster_profiles/cli_states_generated.py` (`scripts/dev/generate-python-vocabulary`) |
 | Route activation marker | `route_activation.py`; its state words from `GatewayRouteState` | none | none | `route_activation_words.py` (generated), loaded beside `route_activation.py` by the LiteLLM supervisor |
-| CLI token download | `CliTokenDownload` in `auth_api.py` | none | `components["schemas"]["CliTokenDownload"]` | none |
+| CLI token download and list | `CliTokenDownload`, `CliTokenList` in `auth_api.py` | none | `components["schemas"]["CliTokenDownload"]` | `vonkctl auth tokens` (`cli_auth.py`, hand-read like login) |
 | Published Model and Recipe | `vonk_forge_contracts` in the recipes checkout | none | `ModelDefinition`, `RecipeDefinition` in `generated.d.ts` | catalog, compiler |
 | Database rows | SQLAlchemy models, `control/src/vonk_control/models/` | none | none | Controller |
 

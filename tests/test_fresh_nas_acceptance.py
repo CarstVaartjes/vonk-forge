@@ -756,14 +756,15 @@ def test_immutable_image_check_distinguishes_versioned_dev_tags(
 
 def _serve_status() -> dict[str, object]:
     services: dict[str, object] = {
-        "svc:vonk-forge": {
+        f"svc:{name}": {
             "TCP": {"443": {"HTTPS": True}},
             "Web": {
-                "vonk-forge.acceptance.example.test:443": {
+                f"{name}.acceptance.example.test:443": {
                     "Handlers": {"/": {"Proxy": "http://caddy:8080"}}
                 }
             },
         }
+        for name in ("vonk-forge", "vonk-forge-litellm")
     }
     return {"Services": services}
 
@@ -855,7 +856,8 @@ def test_tailnet_service_mapping_does_not_require_primary_routes() -> None:
 
 def _serve_configuration() -> dict[str, object]:
     services: dict[str, object] = {
-        "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}}
+        service: {"endpoints": {"tcp:443": "http://caddy:8080"}}
+        for service in ("svc:vonk-forge", "svc:vonk-forge-litellm")
     }
     return {"version": "0.0.1", "services": services}
 

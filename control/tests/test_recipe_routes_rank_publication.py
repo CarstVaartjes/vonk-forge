@@ -17,6 +17,7 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
+from tests.token_support import TokenCodec
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.route_activation import SupervisorPhase
@@ -26,7 +27,6 @@ from vonk_agent_protocol.state_machines import (
     RouteState,
     RunState,
 )
-from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract.endpoints import (
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,

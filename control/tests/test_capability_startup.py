@@ -5,19 +5,19 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import time
 from datetime import UTC, datetime, timedelta
 from threading import Event, Thread
 
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import sessionmaker
 
+from tests.token_support import stored_cli_token
 from vonk_agent_protocol.capability_reply import CapabilityReason, ControllerCapability
 from vonk_control import capabilities
 from vonk_control.api import production as api
 from vonk_control.artifact_jobs import blob_store as artifact_blob_store
-from vonk_control.auth import Actor, TokenCodec
 from vonk_control.capabilities import CapabilityRegistry, RecoveringService
 from vonk_control.capability_contract import CapabilityAvailability
 from vonk_control.gateway import route_runtime
@@ -101,9 +101,7 @@ def test_production_constructor_fault_and_repair(
         model_cache_root=tmp_path / "models",
     )
     app = api.production_app(settings)
-    token = TokenCodec(settings.token_signing_key).issue(
-        Actor("operator", "administrator"), ttl_seconds=3600, now=int(time.time())
-    )
+    token = stored_cli_token(sessionmaker(bind=postgres_engine))
     headers = {"Authorization": f"Bearer {token}"}
     client = TestClient(app)
     registry.retry_due()

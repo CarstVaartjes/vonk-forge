@@ -61,7 +61,7 @@ available to its dependencies, and failed work must not block unrelated work.
   progress.
 - Controller reconciliation removes unused local model-cache entries while preserving profile and active-workload references. Spark-local copies are execution caches, not profile authority, and trusted Controller cache entries do not imply repeated full hashing.
 - Individual Spark management and whole-fleet profiles use the same primitives and terminology.
-- This is a clean-slate product. There are no production installations to migrate and no requirement to retain legacy pages, schemas, adapters, routes, or data.
+- From 1.0.0 the stable channel keeps one minor release of compatibility (N-1); the [support statement](docs/runbooks/stable-release.md#support-statement) defines it.
 - Repository work must not mutate the live Controller or Sparks.
 
 ## Brand Commitments

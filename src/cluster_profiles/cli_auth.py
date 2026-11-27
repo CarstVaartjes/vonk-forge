@@ -1,9 +1,12 @@
-"""``vonkctl auth``: log in once, check the login, or forget it.
+"""``vonkctl auth``: log in once, check the login, list or revoke tokens, or log out.
 
 Login types the admin password into a no-echo prompt (or stdin), uses it for
 one browser-style session, mints the usual CLI token through the Controller's
 own routes, ends the session, and keeps only the token. The password is never
-stored, put in argv or environment, or printed; neither is the token.
+stored, put in argv or environment, or printed; neither is the token. Every
+CLI token is a revocable Controller row: ``logout`` revokes this login's token,
+``tokens`` lists them and revokes one by id or all of them (browser sessions
+included).
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import sys
 import urllib.parse
 import urllib.request
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from email.message import Message
 from enum import StrEnum
@@ -48,14 +51,29 @@ from cluster_profiles.control_client.transport import _read_control_response
 from cluster_profiles.control_transport import open_https
 
 _TIMEOUT_SECONDS = 15
-_SESSION_COOKIE = "vonk_session"
-_CSRF_COOKIE = "vonk_csrf"
+# The Controller's cookie names (control auth.SESSION_COOKIE and CSRF_COOKIE).
+_SESSION_COOKIE = "__Host-vonk_session"
+_CSRF_COOKIE = "__Host-vonk_csrf"
 
 
 class AuthAction(StrEnum):
     LOGIN = "login"
     STATUS = "status"
     LOGOUT = "logout"
+    TOKENS = "tokens"
+
+
+class TokenRevocation(StrEnum):
+    """What logout learned about this login's token on the Controller."""
+
+    #: The Controller revoked it.
+    REVOKED = "revoked"
+    #: The Controller answered 401: the token was already revoked or expired.
+    NOT_ACCEPTED = "not-accepted"
+    #: No answer that settles it (unreachable, or another failure).
+    UNCONFIRMED = "unconfirmed"
+    #: There was no stored login token to revoke.
+    NONE = "none"
 
 
 class _Unknown(StrEnum):
@@ -112,8 +130,36 @@ class StatusResult:
 
 @dataclass(frozen=True)
 class LogoutResult:
+    token_revocation: TokenRevocation
+
     def document(self) -> dict[str, str]:
-        return {}
+        return {"token_revocation": self.token_revocation.value}
+
+
+@dataclass(frozen=True)
+class TokenEntry:
+    id: str
+    expires_at: str
+    revoked: bool
+    #: The token this vonkctl login presented.
+    presented: bool
+
+
+@dataclass(frozen=True)
+class TokensResult:
+    tokens: tuple[TokenEntry, ...]
+
+    def document(self) -> dict[str, list[dict[str, str | bool]]]:
+        return {"tokens": [asdict(entry) for entry in self.tokens]}
+
+
+@dataclass(frozen=True)
+class RevokeResult:
+    #: The revoked token id, or ``all``.
+    revoked_token: str
+
+    def document(self) -> dict[str, str]:
+        return asdict(self)
 
 
 class LoginFailed(LocalInputError):
@@ -203,12 +249,6 @@ def _mint_token(url: str, password: str) -> tuple[str, datetime]:
             "the Controller refused the login request (origin check); "
             "check the Controller URL"
         ) from None
-    if status == 429:
-        wait = headers.get("retry-after")
-        raise LoginFailed(
-            "too many login attempts"
-            + (f"; try again in {wait} seconds" if wait else "; try again later")
-        )
     cookies = _session_cookies(headers)
     if status != 200 or len(cookies) != 2:
         raise LoginFailed(f"the Controller login answered {status} without a session")
@@ -297,25 +337,96 @@ def _status() -> StatusResult:
     )
 
 
+def _stored_login_client() -> ControlClient:
+    credential = resolve_credential()
+    return ControlClient(credential.url, credential.token_file)
+
+
+def _list_tokens(client: ControlClient) -> TokensResult:
+    document = client.request("GET", "/api/auth/cli-tokens")
+    tokens = document.get("tokens")
+    if not isinstance(tokens, list):
+        raise LoginFailed("the Controller sent an unreadable token list")
+    return TokensResult(
+        tuple(
+            TokenEntry(
+                id=str(item["id"]),
+                expires_at=str(item["expires_at"]),
+                revoked=item["revoked"] is True,
+                presented=item["presented"] is True,
+            )
+            for item in tokens
+            if isinstance(item, dict)
+        )
+    )
+
+
+def _revoke(client: ControlClient, token_id: str | None) -> RevokeResult:
+    if token_id is None:
+        client.request("POST", "/api/auth/cli-tokens/revoke-all", retry=False)
+        return RevokeResult("all")
+    quoted = urllib.parse.quote(token_id, safe="")
+    client.request("POST", f"/api/auth/cli-tokens/{quoted}/revoke", retry=False)
+    return RevokeResult(token_id)
+
+
+def _revoke_own_token() -> TokenRevocation:
+    try:
+        credential = resolve_credential()
+    except LocalInputError, ControlClientError, OSError:
+        return TokenRevocation.NONE
+    if credential.token_from_environment:
+        # The environment's token file is not this login; leave it alone.
+        return TokenRevocation.NONE
+    try:
+        client = ControlClient(credential.url, credential.token_file)
+        own = next(
+            (entry for entry in _list_tokens(client).tokens if entry.presented), None
+        )
+        if own is None:
+            return TokenRevocation.UNCONFIRMED
+        _revoke(client, own.id)
+    except ControlUnauthorized:
+        return TokenRevocation.NOT_ACCEPTED
+    except LocalInputError, ControlClientError, OSError:
+        return TokenRevocation.UNCONFIRMED
+    return TokenRevocation.REVOKED
+
+
 def _logout() -> LogoutResult:
+    # The local files go regardless; a Controller that answers also revokes
+    # this login's token, so a copied token file stops working.
+    revocation = _revoke_own_token()
     for path in (login_token_path(), connection_path()):
         path.unlink(missing_ok=True)
-    return LogoutResult()
+    return LogoutResult(revocation)
 
 
 def run_auth(
-    action: str | None, *, url: str | None, password_stdin: bool
-) -> LoginResult | StatusResult | LogoutResult:
+    action: str | None,
+    *,
+    url: str | None,
+    password_stdin: bool,
+    token_id: str | None = None,
+    revoke_all: bool = False,
+) -> LoginResult | StatusResult | LogoutResult | TokensResult | RevokeResult:
     if action == AuthAction.LOGIN:
         return _login(url, password_stdin=password_stdin)
     if action == AuthAction.STATUS:
         return _status()
     if action == AuthAction.LOGOUT:
         return _logout()
+    if action == AuthAction.TOKENS:
+        client = _stored_login_client()
+        if token_id is None and not revoke_all:
+            return _list_tokens(client)
+        return _revoke(client, None if revoke_all else token_id)
     raise ValueError(f"unknown auth action {action!r}")
 
 
-def render(result: LoginResult | StatusResult | LogoutResult) -> str:
+def render(
+    result: LoginResult | StatusResult | LogoutResult | TokensResult | RevokeResult,
+) -> str:
     if isinstance(result, LoginResult):
         text = (
             f"Logged in to {result.controller_url}; token expires "
@@ -336,7 +447,31 @@ def render(result: LoginResult | StatusResult | LogoutResult) -> str:
                 f"Check: GET /api/fleet {result.check}",
             )
         )
-    return (
-        "Removed the local login. The token itself stays valid until it "
-        "expires; the Controller has no revocation."
-    )
+    if isinstance(result, TokensResult):
+        if not result.tokens:
+            return "No CLI tokens."
+        return "\n".join(
+            f"{entry.id}  expires {entry.expires_at[:10]}"
+            + ("  revoked" if entry.revoked else "")
+            + ("  (this login)" if entry.presented else "")
+            for entry in result.tokens
+        )
+    if isinstance(result, RevokeResult):
+        if result.revoked_token == "all":
+            return "Revoked every CLI token and browser session."
+        return f"Revoked CLI token {result.revoked_token}."
+    return {
+        TokenRevocation.REVOKED: (
+            "Revoked this login's token on the Controller and removed the local login."
+        ),
+        TokenRevocation.NOT_ACCEPTED: (
+            "Removed the local login. The Controller no longer accepted its token "
+            "(already revoked or expired)."
+        ),
+        TokenRevocation.UNCONFIRMED: (
+            "Removed the local login. The Controller did not confirm the "
+            "revocation, so the token stays valid until it expires or another "
+            "login revokes it."
+        ),
+        TokenRevocation.NONE: "Removed the local login.",
+    }[result.token_revocation]

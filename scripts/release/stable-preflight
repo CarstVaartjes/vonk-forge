@@ -16,10 +16,10 @@ import argparse
 import base64
 import json
 import platform
+import runpy
 import shlex
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,7 @@ from tools.stable_preflight import (  # noqa: E402 -- the repository import foll
     check,
 )
 
+PACKAGE_METADATA = runpy.run_path(str(ROOT / "scripts/agent/agent-package-metadata"))
 RELEASE_WORKFLOW = "installer-publication.yml"
 IMAGE_PREFIX = "ghcr.io/carstvaartjes/vonk-forge-"
 # The flags stable-release.yml passes when it validates each accepted image.
@@ -152,9 +153,14 @@ def release_conclusion(repo: str, sha: str) -> str | None:
     return "success" if "success" in conclusions else (conclusions or [None])[0]
 
 
+def version_files(repo: str, sha: str) -> dict[str, str]:
+    """Each version file a release reads, at the commit; the checks report
+    files that disagree beside every other gap."""
+    return PACKAGE_METADATA["version_files"](lambda path: file_text(repo, path, sha))
+
+
 def snapshot(repo: str, tag: str, sha: str) -> Snapshot:
     variables = api(f"repos/{repo}/actions/variables?per_page=100")["variables"]
-    cargo = tomllib.loads(file_text(repo, "Cargo.toml", sha))
     signers = api(f"repos/{repo}/contents/.github/release-allowed-signers?ref=main")
     return {
         "tag": tag,
@@ -163,7 +169,7 @@ def snapshot(repo: str, tag: str, sha: str) -> Snapshot:
         "environments": {
             name: environment_state(repo, name) for name in (*POLICIES, *TWINS)
         },
-        "workspace_version": cargo["workspace"]["package"]["version"],
+        "version_files": version_files(repo, sha),
         "behind_by": api(f"repos/{repo}/compare/{sha}...main")["behind_by"],
         "release_conclusion": release_conclusion(repo, sha),
         "images": {name: image_state(repo, name, sha) for name in IMAGES},
