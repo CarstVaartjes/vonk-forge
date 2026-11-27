@@ -1619,13 +1619,16 @@ def test_edge_body_limit_errors_are_distinct_from_proxied_controller_limits(tmp_
         )
 
 
+@pytest.mark.needs_docker
+@pytest.mark.slow(30)
 def test_a_large_inference_body_waits_for_a_key_litellm_accepts(tmp_path: Path) -> None:
     """The real gate snippet in front of a stub LiteLLM.
 
     Catches: a large or unsized body reaching LiteLLM without a key it accepts
     (LiteLLM reads the body before its own key check), a key check that sends
-    the body or another method, a key header other than Authorization that is
-    not passed, and an ordinary small body that pays the extra round trip.
+    the body, another method or a browser cookie, a key header other than
+    Authorization that is not passed, and an ordinary small body that pays
+    the extra round trip.
     """
 
     # Every path the edge admits a large body on is gated, on the real site.
@@ -1664,7 +1667,8 @@ def test_a_large_inference_body_waits_for_a_key_litellm_accepts(tmp_path: Path) 
         # Stub LiteLLM: the key check passes only as a bodyless GET with a
         # known key; any other request is the real route and says so.
         + ":9000 {\n @key_check {\n  method GET\n  path /v1/models\n"
-        + "  not header Content-Length *\n  not header Transfer-Encoding *\n }\n"
+        + "  not header Content-Length *\n  not header Transfer-Encoding *\n"
+        + "  not header Cookie *\n }\n"
         + ' @known {\n  header Authorization "Bearer known"\n }\n'
         + " @known_anthropic {\n  header x-api-key known\n }\n"
         + " handle @key_check {\n  handle @known {\n   respond 200\n  }\n"
@@ -1770,6 +1774,12 @@ def test_a_large_inference_body_waits_for_a_key_litellm_accepts(tmp_path: Path) 
                 "reached",
             ), path
         assert post("/v1/messages", {"x-api-key": "known"}, b"{}") == (200, "reached")
+        # Controller browser cookies never reach the key check.
+        assert post(
+            "/v1/chat/completions",
+            {"Authorization": "Bearer known", "Cookie": "vonk_session=s; vonk_csrf=c"},
+            b"{}",
+        ) == (200, "reached")
         # A small declared body goes straight to LiteLLM's own key check.
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         try:

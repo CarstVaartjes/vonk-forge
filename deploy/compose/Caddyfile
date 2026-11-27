@@ -91,6 +91,11 @@
 	}
 	forward_auth @unverified_large_inference {args[0]} {
 		uri /v1/models?
+		# The key check, like every LiteLLM upstream, never sees a cookie.
+		header_up -Cookie
+		transport http {
+			response_header_timeout 30s
+		}
 	}
 }
 
