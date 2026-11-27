@@ -68,5 +68,5 @@ def test_the_bootstrap_still_waits_for_another_user_authority_writer(
         # snapshot, so the shared helper samples pg_locks in fresh transactions.
         waits = lock_waits_behind(sessions, backend_pid(holder), bootstrap)
         assert any(locktype == "relation" for _, locktype, _ in waits), waits
-    assert bootstrap.result(timeout=30).status == "created"
+    assert bootstrap.result(timeout=30) == "created"
     pool.shutdown()

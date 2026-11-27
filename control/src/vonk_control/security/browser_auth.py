@@ -6,6 +6,7 @@ either can be revoked one by one or all together.
 
 from __future__ import annotations
 
+import logging
 import re
 import secrets
 import time
@@ -13,11 +14,11 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from hashlib import sha256
 from hmac import new as hmac_new
 from itertools import count
 from threading import Lock
-from typing import Literal
 
 from sqlalchemy import delete, or_, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -28,6 +29,7 @@ from vonk_control.db.connections import require_durable_commit
 from vonk_control.models.fleet import LoginSession, SessionKind, User
 from vonk_control.security.passwords import hash_password, verify_password
 
+_LOGGER = logging.getLogger(__name__)
 _ADMIN_SUBJECT = "admin"
 _ADMIN_ROLE = ADMIN_ROLE
 _SESSION_LIFETIME = timedelta(hours=12)
@@ -39,6 +41,9 @@ _LOGIN_WINDOW_SECONDS = 300.0
 _MAX_SUBJECT_FAILURES = 5
 _MAX_GLOBAL_FAILURES = 20
 _MAX_TRACKED_SUBJECTS = 1_024
+# The staged administrator password the bootstrap adopts. Only the bootstrap
+# enforces it: login verification accepts whatever verifier is stored.
+MIN_ADMIN_PASSWORD_CHARACTERS = 12
 
 
 class BrowserAuthenticationError(ValueError):
@@ -85,9 +90,17 @@ class CliTokenRecord:
     presented: bool
 
 
-@dataclass(frozen=True)
-class BootstrapResult:
-    status: Literal["created", "unchanged"]
+class BootstrapOutcome(StrEnum):
+    """What one administrator bootstrap did with the staged password."""
+
+    CREATED = "created"
+    UNCHANGED = "unchanged"
+    # The staged file differed from the stored verifier: it was adopted and
+    # every session and CLI token of the administrator was revoked.
+    REWRITTEN = "rewritten"
+    # The staged password or the stored authority is unusable: nothing was
+    # written, the stored verifier (if any) still governs login.
+    REFUSED = "refused"
 
 
 @dataclass(frozen=True)
@@ -516,8 +529,21 @@ def _database_utc(value: datetime) -> datetime:
 
 def bootstrap_administrator(
     sessions: sessionmaker[Session], password: str
-) -> BootstrapResult:
-    """Create the sole administrator or verify the persisted password."""
+) -> BootstrapOutcome:
+    """Make the staged password the administrator's, never ending startup.
+
+    The staged file is the authority and the reset path: a different password
+    replaces the stored verifier and revokes every session and CLI token. An
+    unusable password or administrator authority writes nothing and is logged;
+    the API keeps serving and login keeps answering from the stored verifier.
+    """
+    if len(password) < MIN_ADMIN_PASSWORD_CHARACTERS:
+        _LOGGER.error(
+            "staged administrator password is shorter than %d characters; "
+            "the stored password is kept",
+            MIN_ADMIN_PASSWORD_CHARACTERS,
+        )
+        return BootstrapOutcome.REFUSED
     with sessions.begin() as db:
         # The one fence on user authority: it serializes administrator writers,
         # including absent rows. Request paths read users without any lock.
@@ -537,15 +563,30 @@ def bootstrap_administrator(
                     password_verifier=hash_password(password),
                 )
             )
-            return BootstrapResult("created")
-        if len(users) != 1:
-            raise BrowserAuthenticationError
+            return BootstrapOutcome.CREATED
         user = users[0]
         if (
-            user.subject != _ADMIN_SUBJECT
+            len(users) != 1
+            or user.subject != _ADMIN_SUBJECT
             or user.role != _ADMIN_ROLE
-            or user.password_verifier is None
-            or not verify_password(user.password_verifier, password).valid
         ):
-            raise BrowserAuthenticationError
-        return BootstrapResult("unchanged")
+            # Conflicting administrator rows: never pick one to rewrite. Login
+            # refuses anything but the sole admin row, so this fails closed.
+            _LOGGER.error(
+                "administrator authority is inconsistent; the staged password "
+                "was not applied"
+            )
+            return BootstrapOutcome.REFUSED
+        if (
+            user.password_verifier is not None
+            and verify_password(user.password_verifier, password).valid
+        ):
+            return BootstrapOutcome.UNCHANGED
+        require_durable_commit(db)
+        user.password_verifier = hash_password(password)
+        revoke_sessions(db, datetime.now(UTC), LoginSession.user_id == user.id)
+        _LOGGER.warning(
+            "administrator password replaced from the staged file; every "
+            "session and CLI token was revoked"
+        )
+        return BootstrapOutcome.REWRITTEN

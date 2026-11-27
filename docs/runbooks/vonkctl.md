@@ -130,6 +130,27 @@ Source the generated script from your shell configuration after inspecting it;
 Zsh requires its normal `compinit` setup. Generation never edits shell files or
 queries the Controller.
 
+## Reset the administrator password
+
+The staged `secrets/admin-password` file is the administrator password's only
+authority and its reset path; there is no reset endpoint. To choose a new
+password, or after restoring PostgreSQL next to a different `secrets/` set:
+
+1. Write the new password as one line of UTF-8 text, ending in a newline, of
+   at least 12 characters and at most 256 bytes, into `secrets/admin-password`
+   (keep the file's owner and mode).
+2. Redeploy the project (a plain restart of `runtime-init` and `control-api`
+   is enough); `runtime-init` stages the file and the API adopts it at start.
+3. Sign in with the new password and run `vonkctl auth login` again.
+
+When the file differs from the stored password the API replaces the stored
+verifier and revokes every browser session and CLI token of the administrator,
+then keeps serving. A file the API cannot use (shorter than 12 characters, an
+extra line, no final newline, not UTF-8, over 256 bytes, empty, or not a
+regular file) changes nothing: the API logs `staged administrator password`
+at error level and keeps the stored password. The API never stops over this
+file.
+
 ## Words
 
 The CLI, the Controller and the site use one word per thing:
