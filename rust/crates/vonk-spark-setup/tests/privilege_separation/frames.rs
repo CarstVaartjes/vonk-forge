@@ -380,6 +380,17 @@ fn system_path_operations_cannot_use_a_synthetic_caller_identity() {
 }
 
 #[test]
+fn the_user_phase_rejects_root_and_sudo_callers_with_their_own_error() {
+    for caller in [
+        CallerIdentity::direct_root(),
+        CallerIdentity::sudo_root(1000),
+    ] {
+        assert!(matches!(caller.ensure_public(), Err(SetupError::RunAsRoot)));
+    }
+    assert!(CallerIdentity::unprivileged(1000).ensure_public().is_ok());
+}
+
+#[test]
 fn symlinked_configuration_is_isolated_without_blocking_a_fresh_setup() {
     let temporary = tempdir().unwrap();
     let real_directory = temporary.path().join("real-configuration");

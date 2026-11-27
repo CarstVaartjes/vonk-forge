@@ -73,6 +73,10 @@ pub enum SetupError {
     Command(String),
     #[error("privileged configuration input is invalid")]
     PrivilegedInput,
+    #[error(
+        "run the Spark installer as your normal user without sudo; it asks for sudo itself when it needs it"
+    )]
+    RunAsRoot,
     #[error("setup was invoked from the wrong privilege phase")]
     CallerPhase,
     #[error("setup I/O failed")]
