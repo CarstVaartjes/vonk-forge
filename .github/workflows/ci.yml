@@ -181,6 +181,12 @@ jobs:
           git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
             control agent_protocol src scripts rust deploy packaging tests .github tools nas_setup |
             scripts/dev/check-added-lines
+          # An agent protocol change strands older agents until their Spark
+          # installer reruns, so it ships only with a minor or major bump.
+          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
+            Cargo.toml agent_protocol/src/vonk_agent_protocol/claims.py \
+            rust/crates/vonk-agent/src/client/mod.rs |
+            scripts/dev/check-agent-protocol-bump
 
       - name: Run Ruff
         shell: bash
