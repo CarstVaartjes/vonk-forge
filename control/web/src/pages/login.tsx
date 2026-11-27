@@ -7,6 +7,7 @@ function loginMessage(value: unknown): string {
   const status =
     typeof value === "object" && value !== null ? (value as LoginFailure).status : undefined;
   if (status === 401) return "Sign in failed. Check your credentials and try again.";
+  if (status === 503) return "Sign in is busy. Please try again in a few seconds.";
   return "Unable to sign in. Please try again.";
 }
 
