@@ -157,7 +157,7 @@ def _run_bootstrap(
         "VONK_TEST_FORBIDDEN": str(forbidden),
         "VONK_INSTALL_RELEASE_MANIFEST": str(release_manifest),
         "VONK_INSTALL_RELEASE_SIGNATURE": str(release_signature),
-        "VONK_CONTROLLER_ADDRESS": "192.168.1.231",
+        "VONK_CONTROLLER_ADDRESS": "192.0.2.10",
     }
     if release_root is not None:
         environment["VONK_INSTALL_RELEASE_PUBLIC_KEY"] = str(root)
@@ -221,9 +221,7 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
         ]
         assert receipt.read_text().splitlines()[1] == "mode=700"
         assert receipt.read_text().splitlines()[2] == "package-mode=600"
-        assert (
-            receipt.read_text().splitlines()[-1] == "controller-address=192.168.1.231"
-        )
+        assert receipt.read_text().splitlines()[-1] == "controller-address=192.0.2.10"
     assert not forbidden.exists()
 
 

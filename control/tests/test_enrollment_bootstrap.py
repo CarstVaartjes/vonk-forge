@@ -81,7 +81,7 @@ def test_from_paths_validates_the_private_controller_route(tmp_path: Path) -> No
         controller_endpoint="https://agents.example.test:8443",
         enrollment_endpoint="https://enroll.example.test:8443",
         controller_ca_path=controller_ca,
-        controller_address="192.168.1.231",
+        controller_address="192.0.2.10",
         service_hostnames=(
             "control.example.test",
             "enroll.example.test",
@@ -94,7 +94,7 @@ def test_from_paths_validates_the_private_controller_route(tmp_path: Path) -> No
         enrollment_endpoint="https://enroll.example.test:8443",
         ca_fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
         ca_pem=pem.decode("ascii"),
-        controller_address="192.168.1.231",
+        controller_address="192.0.2.10",
         service_hostnames=(
             "control.example.test",
             "enroll.example.test",
@@ -107,8 +107,8 @@ def test_from_paths_validates_the_private_controller_route(tmp_path: Path) -> No
     ("address", "hostnames"),
     [
         ("not-an-ip", ("agents.example.test", "enroll.example.test")),
-        ("192.168.1.231", ("agents.example.test",)),
-        ("192.168.1.231", ("AGENTS.example.test", "enroll.example.test")),
+        ("192.0.2.10", ("agents.example.test",)),
+        ("192.0.2.10", ("AGENTS.example.test", "enroll.example.test")),
         (None, ("agents.example.test", "enroll.example.test")),
     ],
 )

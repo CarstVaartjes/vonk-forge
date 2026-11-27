@@ -7,7 +7,7 @@ import { ServingNow } from "./serving-now";
 const endpoint = {
   alias: "qwen-code",
   api_base: "https://vonk-forge.example.ts.net/v1",
-  backend_api_base: "http://192.168.1.211:8888/v1",
+  backend_api_base: "http://192.0.2.11:8888/v1",
   generation: 3,
   node_id: "spk_00000000000000000000000000000001",
   observed_at: "2026-09-10T00:00:00Z",
