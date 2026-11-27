@@ -132,10 +132,10 @@ def _run_bootstrap(
         commands,
         "uv",
         '[ "$1" = run ] && [ "$2" = --isolated ] && [ "$3" = --no-project ]\n'
-        '[ "$4" = --exclude-newer ] && [ "$5" = 2026-11-26T22:21:19Z ]\n'
-        f'[ "$6" = --python ] && [ "$7" = {PYTHON} ] && [ "$8" = --with ]\n'
-        'wheel=$9; [ -f "$wheel" ]; case "$wheel" in *.whl) ;; *) exit 98 ;; esac\n'
-        'shift 9; [ "$1" = vonk-nas-setup ]; shift\nexec sh "$wheel" "$@"\n',
+        f'[ "$4" = --python ] && [ "$5" = {PYTHON} ] && [ "$6" = --with ]\n'
+        '[ "$UV_EXCLUDE_NEWER" = 2026-11-26T22:21:19Z ]\n'
+        'wheel=$7; [ -f "$wheel" ]; case "$wheel" in *.whl) ;; *) exit 98 ;; esac\n'
+        'shift 7; [ "$1" = vonk-nas-setup ]; shift\nexec sh "$wheel" "$@"\n',
     )
     for command in ("apt-get", "dpkg-deb", "systemctl"):
         _fake_command(commands, command, "exit 97\n")

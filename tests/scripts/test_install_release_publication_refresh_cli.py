@@ -107,10 +107,9 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
     curl.chmod(0o755)
     uv = commands / "uv"
     uv.write_text(
-        '#!/bin/sh\nset -eu\n[ "$1" = run ]\n'
+        '#!/bin/sh\nset -eu\n[ "$1" = run ]; [ "$6" = --with ]; wheel=$7; shift 8\n'
         # The bootstrap pins dependencies to the release's stamped cutoff.
-        f'[ "$4" = --exclude-newer ]; [ "$5" = {DEPENDENCIES_EXCLUDE_NEWER} ]\n'
-        '[ "$8" = --with ]; wheel=$9; shift 10\n'
+        f'[ "$UV_EXCLUDE_NEWER" = {DEPENDENCIES_EXCLUDE_NEWER} ]\n'
         'exec python3 - "$wheel" "$@" <<\'PYUV\'\n'
         "import sys, zipfile\nwheel = sys.argv.pop(1)\n"
         "with zipfile.ZipFile(wheel) as archive: exec(compile(archive.read('vonk_nas_setup/cli.py'), 'fixture.py', 'exec'))\nPYUV\n"

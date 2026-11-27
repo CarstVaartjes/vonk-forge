@@ -306,7 +306,7 @@ Operators use the signed `/nas` endpoint, which verifies the wheel and payload
 before executing the equivalent of:
 
 ```sh
-uv run --isolated --no-project --exclude-newer "$cutoff" --python 3.15 --with "$wheel" \
+UV_EXCLUDE_NEWER="$cutoff" uv run --isolated --no-project --python 3.15 --with "$wheel" \
   vonk-nas-setup --template "$payload"
 ```
 
@@ -316,8 +316,8 @@ source commit time (RFC 3339 UTC), so the wheel's dependencies resolve as they
 were when the release was built and accepted, not to whatever a package index
 published since. The CLI build stamps that time into the CLI wheel's
 `build-identity.json` (`dependencies_exclude_newer`); assembly renders it into
-the NAS bootstrap, and `install/channel` and `vonkctl update` pass it to
-`uv tool install`. `uv` must already be installed;
+the NAS bootstrap (as `UV_EXCLUDE_NEWER`), and `install/channel` and
+`vonkctl update` pass it to `uv tool install --exclude-newer`. `uv` must already be installed;
 it manages the Python 3.15 runtime. Upgrade switch, private answers,
 Lab mode, local secrets and PKI retain the same command workflow.
 
