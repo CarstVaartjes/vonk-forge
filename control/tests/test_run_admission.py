@@ -34,6 +34,7 @@ from vonk_control.models.execution import (
 )
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
 from vonk_control.runs.admission import (
     RunAdmissionBusy,
     RunAdmissionService,
@@ -64,6 +65,7 @@ def setup(
     engine=None,
     stored_family=False,
     job=False,
+    example=None,
 ):
     engine = engine or create_engine(f"sqlite:///{tmp_path / 'run.sqlite'}")
     Base.metadata.create_all(engine)
@@ -72,7 +74,10 @@ def setup(
     node = "spk_" + "1" * 32
     document = json.loads(
         resources.files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-job.json" if job else "recipe-source-build.json")
+        .joinpath(
+            "examples",
+            example or ("recipe-job.json" if job else "recipe-source-build.json"),
+        )
         .read_text()
     )
     document["identity"]["slug"] = "qwen"
@@ -314,6 +319,24 @@ def test_run_alias_is_not_in_the_digest_and_is_not_persisted_in_the_plan(
         assert run is not None
         assert run.alias == plan.alias
         assert "alias" not in run.plan
+
+
+def test_an_embedding_run_is_admitted_through_the_hosted_vllm_provider(
+    tmp_path,
+) -> None:
+    """Catches `dimensions` dropped: the `openai` provider drops it for an unknown model name."""
+    sessions, now, _node, installation = setup(
+        tmp_path, example="recipe-embedding.json"
+    )
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    run_id = service.accept_run(plan, actor="admin", now=now)
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        assert parse_stored_run_plan(run.plan).upstream_provider == "hosted_vllm"
 
 
 def test_a_stored_model_row_carrying_its_retired_family_is_still_admitted(

@@ -11,8 +11,8 @@ path every signed index takes) and checks what that parser made of it:
   serving kind is withheld; every other Recipe and every Model is kept;
 - every capability word is kept: in each Model display, in each Recipe's
   ``served_capabilities`` and in the vocabulary;
-- no block is lost, except an API block whose own reasoning placement or
-  remaining-context word is unknown: neither has a cautious neutral (a guessed
+- no block is lost, except an API block whose own mode, reasoning placement or
+  remaining-context word is unknown: none has a cautious neutral (a guessed
   placement sends a wrong request), so the parser withholds that block and
   marks it withheld (``withheld_blocks``), which keeps the recorded value.
 
@@ -44,12 +44,13 @@ from vonk_control.recipe_packages.client import RecipePackageClient
 WORD = "zz-future-word"
 FIELD = "zz_future_field"
 KIND = "zz.future-kind"
-# API words with no cautious neutral, as paths inside a Recipe's base block.
-NO_NEUTRAL_API_SITES = (
-    ("mode",),
-    ("reasoning", "via"),
-    ("default_output_tokens", "remaining"),
-)
+# API words with no cautious neutral: the path inside a Recipe's base block and
+# the unknown word the vector puts there.
+NO_NEUTRAL_API_SITES = {
+    ("mode",): WORD,
+    ("reasoning", "via"): WORD,
+    ("default_output_tokens", "remaining"): WORD,
+}
 # The optional entry blocks a Recipe carries into the library snapshot.
 RECIPE_BLOCKS = (
     "display",
@@ -85,7 +86,7 @@ def _no_neutral(entry: dict[str, Any]) -> bool:
     """Whether the entry's base API block holds the word where it has no neutral."""
     api = entry.get("api")
     return isinstance(api, dict) and any(
-        _at(api.get("api"), site) == WORD for site in NO_NEUTRAL_API_SITES
+        _at(api.get("api"), site) == word for site, word in NO_NEUTRAL_API_SITES.items()
     )
 
 
@@ -114,8 +115,13 @@ def check(raw: bytes) -> dict[str, Any]:
         failures.append(f"no served_capabilities carries {WORD}")
     if not any(_holds(entry.get("display"), WORD) for entry in models.values()):
         failures.append(f"no Model display carries {WORD}")
-    if not any(_no_neutral(entry) for entry in recipes.values()):
-        failures.append(f"no API block carries {WORD} where it has no neutral")
+    for site, word in NO_NEUTRAL_API_SITES.items():
+        if not any(
+            _at(entry["api"].get("api"), site) == word
+            for entry in recipes.values()
+            if isinstance(entry.get("api"), dict)
+        ):
+            failures.append(f"no API block carries {word} at {'.'.join(site)}")
     with tempfile.TemporaryDirectory() as cache_root:
         client = RecipePackageClient(cache_root=Path(cache_root))
         try:

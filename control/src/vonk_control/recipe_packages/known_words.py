@@ -34,7 +34,7 @@ from typing import Final, Union, get_args, get_origin
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_forge_contracts import ModelDisplay, RecipeDisplay, UnrecognisedWord
-from vonk_forge_contracts.api import ApiReasoningSwitch, UnrecognisedApiBlock
+from vonk_forge_contracts.api import ApiReasoningSwitch
 from vonk_forge_contracts.qualification_status import (
     PublishedQualificationStatusView,
     QualificationPlatform,
@@ -160,9 +160,6 @@ def _model(model: BaseModel, dumped: dict[str, _Json]) -> dict[str, _Json]:
 
 
 def _value(value: object, dumped: _Json) -> _Json:
-    if isinstance(value, UnrecognisedApiBlock):
-        # An API mode a newer minor added: the block has no facts to keep.
-        raise _NoNeutral
     if isinstance(value, BaseModel) and isinstance(dumped, dict):
         return _model(value, dumped)
     if isinstance(value, list | tuple) and isinstance(dumped, list):
