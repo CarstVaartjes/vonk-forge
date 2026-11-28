@@ -102,9 +102,11 @@ pub(super) fn reload_and_finish(host: &mut impl Host, upgrade: bool) -> Result<(
 /// `xt_owner` module the rules need itself (`ExecReload=+modprobe`): this hook
 /// runs inside the helper's sandbox, which cannot load modules. Running
 /// workloads keep their traffic: the apply adds the drops only after the allow
-/// rules. A failure here never fails dpkg; the firewall check then refuses
-/// distributed launches (a security edge) until the unit applies, which its own
-/// `Restart=on-failure` keeps retrying.
+/// rules. A failure here never fails dpkg. Until an apply succeeds the firewall
+/// check refuses distributed launches (a security edge); the next apply heals
+/// it: the next unit start (boot, or a Docker restart, which restarts the
+/// `PartOf` unit) or any later package configure. A failed start is retried by
+/// `Restart=on-failure`; a failed reload is not.
 fn reapply_firewall(host: &mut impl Host) {
     if host.lstat(FIREWALL_CONFIG).is_none() {
         return;

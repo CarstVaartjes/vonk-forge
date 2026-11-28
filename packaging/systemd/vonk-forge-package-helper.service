@@ -60,7 +60,6 @@ RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=restart
 ReadWritePaths=/var/lib/vonk-forge /var/lib/dpkg /var/log /var/cache/apt /var/cache/debconf /etc/vonk-forge-agent /usr/lib/vonk-forge /usr/bin /lib/systemd/system
 ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent
-ReadWritePaths=-/usr/lib/modules-load.d
 # dpkg maintainer scripts run deb-systemd-helper, which records enablement in
 # these state directories and links units under /etc/systemd/system. The
 # directories are optional so a host without them still starts the helper.

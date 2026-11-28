@@ -716,13 +716,9 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "RestrictAddressFamilies=AF_UNIX AF_NETLINK" in firewall_unit
     assert "PrivateNetwork=yes" not in firewall_unit
     # The sandboxed unit cannot load xt_owner, so "+" runs the modprobe outside
-    # it on start and on the upgrade's reload; the file loads it at boot.
+    # it on every start (boot included) and on the upgrade's reload.
     assert "ExecStartPre=+-/usr/sbin/modprobe xt_owner" in firewall_unit
     assert "ExecReload=+-/usr/sbin/modprobe xt_owner" in firewall_unit
-    modules = (payload / "usr/lib/modules-load.d/vonk-forge-firewall.conf").read_text()
-    assert [line for line in modules.splitlines() if not line.startswith("#")] == [
-        "xt_owner"
-    ]
     helper_unit = (
         payload / "lib/systemd/system/vonk-forge-package-helper.service"
     ).read_text()
@@ -734,8 +730,6 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "vonk-forge-docker-firewall.service" in helper_unit
     assert "PrivateNetwork=yes" not in helper_unit
     assert "IPAddressDeny=any" in helper_unit
-    # dpkg, inside this sandbox, installs the module-load file.
-    assert "ReadWritePaths=-/usr/lib/modules-load.d" in helper_unit.splitlines()
     assert "RestrictAddressFamilies=AF_UNIX AF_NETLINK" in helper_unit
     assert "RuntimeDirectory=vonk-forge-package-candidates" in helper_unit.splitlines()
     assert "RuntimeDirectoryMode=0700" in helper_unit.splitlines()
@@ -998,7 +992,9 @@ def test_docker_firewall_filters_the_uid_every_workload_runs_as() -> None:
         ),
         ("control/src/vonk_control/harnesses/canonical.py", r'user="(\d+):'),
     ):
-        assert re.search(pattern, (ROOT / path).read_text()).group(1) == uid.group(1)
+        found = re.search(pattern, (ROOT / path).read_text())
+        assert found is not None
+        assert found.group(1) == uid.group(1)
 
 
 def test_docker_firewall_rejects_missing_site_configuration(tmp_path: Path) -> None:

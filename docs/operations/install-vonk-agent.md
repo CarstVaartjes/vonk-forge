@@ -40,9 +40,8 @@ verifies sustained readiness before returning.
 
 The firewall also holds an output chain (`VONK-FORGE-OUT`, IPv4 and IPv6): replies
 from workload containers leave the management interface only toward the NAS
-endpoint ports. It needs the `xt_owner` kernel module; the package ships
-`/usr/lib/modules-load.d/vonk-forge-firewall.conf` and the firewall unit loads
-the module before each apply. A package upgrade re-applies the firewall before
+endpoint ports. It needs the `xt_owner` kernel module, which the firewall unit
+loads before each start and reload. A package upgrade re-applies the firewall before
 the helper restarts, so running workloads keep serving; if the module is missing
 the apply fails and distributed launches stay refused until it loads. To inspect
 a Spark: `sudo iptables -S VONK-FORGE-OUT; sudo ip6tables -S VONK-FORGE-OUT` and

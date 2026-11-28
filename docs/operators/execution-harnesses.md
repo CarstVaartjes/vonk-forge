@@ -55,7 +55,7 @@ started before it existed has none.
 
 Cluster listeners may bind any address: the Spark firewall lets a workload's
 replies leave the management interface only toward the NAS endpoint ports, on
-IPv4 and IPv6, so only the fabric peer can reach them. An engine must still
+IPv4 and IPv6, so the management LAN cannot reach them. An engine must still
 advertise `VONK_LOCAL_ADDR` to its peers, never its default-route address.
 
 ## Interface publication

@@ -424,12 +424,9 @@ verify_out_rules() {
 apply_out_rules() {
     binary=$1
     "$binary" -w -n -L OUTPUT >/dev/null 2>&1 || fail "host OUTPUT chain is unavailable"
-    if "$binary" -w -n -L "$out_chain" >/dev/null 2>&1; then
-        "$binary" -w -C "$out_chain" -m comment --comment "$marker" -j RETURN >/dev/null 2>&1 \
-            || fail "refusing foreign $out_chain chain"
-    else
-        "$binary" -w -N "$out_chain"
-    fi
+    # The name is ours: an apply cut short leaves a chain without its marker,
+    # and the next apply must rebuild it, never refuse it.
+    "$binary" -w -n -L "$out_chain" >/dev/null 2>&1 || "$binary" -w -N "$out_chain"
     "$binary" -w -F "$out_chain"
     while "$binary" -w -D OUTPUT -j "$out_chain" >/dev/null 2>&1; do :; done
     "$binary" -w -I OUTPUT 1 -j "$out_chain"
@@ -454,12 +451,7 @@ if [ "$action" = check ] || [ "$action" = check-host-port ] \
 fi
 
 ipt -n -L DOCKER-USER >/dev/null 2>&1 || fail "Docker DOCKER-USER chain is unavailable"
-if ipt -n -L "$chain" >/dev/null 2>&1; then
-    ipt -C "$chain" -m comment --comment "$marker" -j RETURN >/dev/null 2>&1 \
-        || fail "refusing foreign $chain chain"
-else
-    ipt -N "$chain"
-fi
+ipt -n -L "$chain" >/dev/null 2>&1 || ipt -N "$chain"
 ipt -F "$chain"
 while ipt -D DOCKER-USER -j "$chain" >/dev/null 2>&1; do :; done
 ipt -I DOCKER-USER 1 -j "$chain"
@@ -486,12 +478,7 @@ ipt -A "$chain" -p tcp -m conntrack --ctorigdst "$node_fabric_ip" -j DROP
 ipt -A "$chain" -m comment --comment "$marker" -j RETURN
 
 ipt -n -L INPUT >/dev/null 2>&1 || fail "host INPUT chain is unavailable"
-if ipt -n -L "$host_chain" >/dev/null 2>&1; then
-    ipt -C "$host_chain" -m comment --comment "$marker" -j RETURN >/dev/null 2>&1 \
-        || fail "refusing foreign $host_chain chain"
-else
-    ipt -N "$host_chain"
-fi
+ipt -n -L "$host_chain" >/dev/null 2>&1 || ipt -N "$host_chain"
 ipt -F "$host_chain"
 while ipt -D INPUT -j "$host_chain" >/dev/null 2>&1; do :; done
 ipt -I INPUT 1 -j "$host_chain"

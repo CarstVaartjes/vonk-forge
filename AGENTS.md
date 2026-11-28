@@ -414,8 +414,9 @@ rules plus an OUTPUT chain, `VONK-FORGE-OUT`, in `iptables` and `ip6tables`, tha
 drops replies of the workload uid (`workload_uid`, equal to the adapter image
 user) leaving the management interface unless they are endpoint replies to the
 NAS. Do not add per-engine bind options for it. The rules need `xt_owner`, which
-the firewall unit loads itself (`ExecStartPre`/`ExecReload` with `+`) and
-`modules-load.d` loads at boot. A change to the script must keep `apply`,
+the firewall unit loads itself (`ExecStartPre`/`ExecReload` with `+`); the
+package ships no modules-load file, because dpkg runs in a read-only helper
+sandbox. An apply cut short leaves a chain the next apply rebuilds. A change to the script must keep `apply`,
 `check` and `tests/scripts/test_docker_firewall.sh` in step, because the package
 upgrade re-applies the unit before the helper restarts and the exact-count check
 refuses distributed launches on old rules.
