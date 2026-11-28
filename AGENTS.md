@@ -408,6 +408,19 @@ its host transport; do not request another approval merely for that transport
 when the operation is already authorized. This exception does not permit SSH
 Spark rollouts or bypass a Controller authorization decision.
 
+The Spark firewall (`packaging/bin/vonk-forge-docker-firewall`) is the one
+mechanism that keeps cluster listeners off the management LAN: it carries INPUT
+rules plus an OUTPUT chain, `VONK-FORGE-OUT`, in `iptables` and `ip6tables`, that
+drops replies of the workload uid (`workload_uid`, equal to the adapter image
+user) leaving the management interface unless they are endpoint replies to the
+NAS. Do not add per-engine bind options for it. The rules need `xt_owner`, which
+the firewall unit loads itself (`ExecStartPre`/`ExecReload` with `+`); the
+package ships no modules-load file, because dpkg runs in a read-only helper
+sandbox. An apply cut short leaves a chain the next apply rebuilds. A change to the script must keep `apply`,
+`check` and `tests/scripts/test_docker_firewall.sh` in step, because the package
+upgrade re-applies the unit before the helper restarts and the exact-count check
+refuses distributed launches on old rules.
+
 Compose dependency edges order startup and never gate it (`required: false` on
 any condition other than `service_started`). Every service is long-running: NAS
 Docker UIs show an exited container as a failed project. The `runtime-init`

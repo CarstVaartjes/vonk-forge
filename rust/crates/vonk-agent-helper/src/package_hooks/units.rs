@@ -6,6 +6,7 @@ pub(super) const ENABLE: &str = "/usr/bin/deb-systemd-helper";
 const HELPER: &str = "/usr/lib/vonk-forge/vonk-agent-helper";
 pub(super) const FINISHER_UNIT: &str = "vonk-forge-package-helper-upgrade-finish.service";
 const FIREWALL_CONFIG: &str = "/etc/vonk-forge-agent/docker-firewall.conf";
+const FIREWALL_UNIT: &str = "vonk-forge-docker-firewall.service";
 
 /// How `enable` establishes a unit.
 pub(super) enum Enablement {
@@ -88,10 +89,33 @@ pub(super) fn reload_and_finish(host: &mut impl Host, upgrade: bool) -> Result<(
         return Ok(());
     }
     host.run(SYSTEMCTL, &["--system", "daemon-reload"])?;
+    reapply_firewall(host);
     if upgrade {
         schedule_finisher(host)?;
     }
     Ok(())
+}
+
+/// Put the new firewall script's rules on a node that already runs the unit
+/// (its oneshot is not restarted with the package). It runs before the helper
+/// restarts, so no distributed launch meets old rules. The unit loads the
+/// `xt_owner` module the rules need itself (`ExecReload=+modprobe`): this hook
+/// runs inside the helper's sandbox, which cannot load modules. Running
+/// workloads keep their traffic: the apply adds the drops only after the allow
+/// rules. A failure here never fails dpkg. Until an apply succeeds the firewall
+/// check refuses distributed launches (a security edge); the next apply heals
+/// it: the next unit start (boot, or a Docker restart, which restarts the
+/// `PartOf` unit) or any later package configure. A failed start is retried by
+/// `Restart=on-failure`; a failed reload is not.
+fn reapply_firewall(host: &mut impl Host) {
+    if host.lstat(FIREWALL_CONFIG).is_none() {
+        return;
+    }
+    best_effort(
+        host,
+        SYSTEMCTL,
+        &["--system", "try-reload-or-restart", FIREWALL_UNIT],
+    );
 }
 
 /// The digest the restarted helper must run: the ingress digest of an armed
