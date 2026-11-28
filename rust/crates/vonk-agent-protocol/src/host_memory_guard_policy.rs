@@ -64,8 +64,10 @@ pub const PSI_FALLING_RATIO: f64 = 0.85;
 // swapped out is absorbed, not wedged (spark-bbbb, 2026-10-29T12:35:29Z: 976 MiB
 // MemFree, 63 GiB free swap, 148k pages/s swap-out, a load that finished on
 // 2026-10-25 with the same content); pinned memory that cannot reclaim still
-// stops. CALIBRATABLE.
-pub const DRIVER_FAILURE_FREE_BYTES: u64 = 1024 * 1024 * 1024;
+// stops. 512 MiB (2026-11-28): R5 killed a load at MemFree 755 MiB with
+// 63 GiB swap free and PSI low; the kernel only swaps below ~170 MiB free.
+// CALIBRATABLE.
+pub const DRIVER_FAILURE_FREE_BYTES: u64 = 512 * 1024 * 1024;
 pub const DRIVER_FAILURE_RECLAIM_PAGES_PER_SECOND: f64 = 100.0;
 // R5's corroboration is sustained like R1, never one sample: a healthy load's
 // derived MemFree touches ~0.9 GB at its NVRM line (GLM mosaic a0 2026-10-28).
