@@ -29,7 +29,7 @@ vonk-nas-setup = { workspace = true }
 # under inventory/wheels and recorded in control/packaging/public-contracts.lock;
 # uv, the image build and CI install those same bytes
 # (scripts/dev/refresh-public-contracts moves it).
-vonk-forge-public-contracts = { path = "../inventory/wheels/vonk_forge_public_contracts-5.8.2-py3-none-any.whl" }
+vonk-forge-public-contracts = { path = "../inventory/wheels/vonk_forge_public_contracts-5.9.0-py3-none-any.whl" }
 
 [tool.uv]
 required-version = ">=0.13.7"

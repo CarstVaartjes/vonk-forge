@@ -45,7 +45,11 @@ WORD = "zz-future-word"
 FIELD = "zz_future_field"
 KIND = "zz.future-kind"
 # API words with no cautious neutral, as paths inside a Recipe's base block.
-NO_NEUTRAL_API_SITES = (("reasoning", "via"), ("default_output_tokens", "remaining"))
+NO_NEUTRAL_API_SITES = (
+    ("mode",),
+    ("reasoning", "via"),
+    ("default_output_tokens", "remaining"),
+)
 # The optional entry blocks a Recipe carries into the library snapshot.
 RECIPE_BLOCKS = (
     "display",

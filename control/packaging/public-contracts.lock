@@ -1,4 +1,4 @@
-package = "vonk-forge-public-contracts==5.8.2"
-release = "https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v5.8.2"
-wheel = "inventory/wheels/vonk_forge_public_contracts-5.8.2-py3-none-any.whl"
-sha256 = "c999a3b9de995bf9632e446a53bee7ee34864e586de429102db74ddd5b1ed997"
+package = "vonk-forge-public-contracts==5.9.0"
+release = "https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v5.9.0"
+wheel = "inventory/wheels/vonk_forge_public_contracts-5.9.0-py3-none-any.whl"
+sha256 = "88e41c48c51f84a8001cda33e6e3375e68f44d2aa5a9741417c728489e61ed64"

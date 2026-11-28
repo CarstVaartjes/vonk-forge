@@ -1458,7 +1458,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.1.1" },
     { name = "uvicorn", specifier = ">=0.54.0" },
     { name = "vonk-agent-protocol", editable = "agent_protocol" },
-    { name = "vonk-forge-public-contracts", path = "inventory/wheels/vonk_forge_public_contracts-5.8.2-py3-none-any.whl" },
+    { name = "vonk-forge-public-contracts", path = "inventory/wheels/vonk_forge_public_contracts-5.9.0-py3-none-any.whl" },
 ]
 
 [package.metadata.requires-dev]
@@ -1478,13 +1478,13 @@ dev = [
 
 [[package]]
 name = "vonk-forge-public-contracts"
-version = "5.8.2"
-source = { path = "inventory/wheels/vonk_forge_public_contracts-5.8.2-py3-none-any.whl" }
+version = "5.9.0"
+source = { path = "inventory/wheels/vonk_forge_public_contracts-5.9.0-py3-none-any.whl" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { filename = "vonk_forge_public_contracts-5.8.2-py3-none-any.whl", hash = "sha256:c999a3b9de995bf9632e446a53bee7ee34864e586de429102db74ddd5b1ed997" },
+    { filename = "vonk_forge_public_contracts-5.9.0-py3-none-any.whl", hash = "sha256:88e41c48c51f84a8001cda33e6e3375e68f44d2aa5a9741417c728489e61ed64" },
 ]
 
 [package.metadata]

@@ -2968,6 +2968,63 @@
       "title": "EffectiveSettingsSelection",
       "type": "object"
     },
+    "EmbeddingApi": {
+      "description": "A route serving ``POST /v1/embeddings``: input in, one vector per input out.\n\nThe mode fixes the endpoint, so the block has no ``endpoints`` field.\n``max_input_tokens`` is the engine's sequence limit (an embedding recipe's\nsettings have no ``context_tokens``). ``input_modalities`` states what the\nroute takes through the gateway. ``output_dimensions`` is the native vector\nsize; ``matryoshka_min_dimensions`` is ``null`` when the request's\n``dimensions`` is not honoured, else the smallest size the engine truncates\nto (any size from it up to ``output_dimensions``).",
+      "properties": {
+        "encoding_formats": {
+          "items": {
+            "enum": [
+              "float",
+              "base64"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Encoding Formats",
+          "type": "array"
+        },
+        "input_modalities": {
+          "$ref": "#/$defs/ApiInputModalities"
+        },
+        "matryoshka_min_dimensions": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Matryoshka Min Dimensions"
+        },
+        "max_input_tokens": {
+          "minimum": 1,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "mode": {
+          "const": "embedding",
+          "title": "Mode",
+          "type": "string"
+        },
+        "output_dimensions": {
+          "minimum": 1,
+          "title": "Output Dimensions",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mode",
+        "max_input_tokens",
+        "input_modalities",
+        "output_dimensions",
+        "matryoshka_min_dimensions",
+        "encoding_formats"
+      ],
+      "title": "EmbeddingApi",
+      "type": "object"
+    },
     "EndpointResponse": {
       "description": "One published alias: clients use `api_base` with `alias` as the model.\n\n`backend_api_base` is the Spark-local serving address LiteLLM routes to.\nIt is diagnostic only and usually unreachable from a client.",
       "properties": {
@@ -14261,7 +14318,8 @@
               "audio_speech": "#/$defs/AudioSpeechApi",
               "audio_transcription": "#/$defs/AudioTranscriptionApi",
               "chat": "#/$defs/ChatApi",
-              "decision": "#/$defs/DecisionApi"
+              "decision": "#/$defs/DecisionApi",
+              "embedding": "#/$defs/EmbeddingApi"
             },
             "propertyName": "mode"
           },
@@ -14277,6 +14335,9 @@
             },
             {
               "$ref": "#/$defs/AudioSpeechApi"
+            },
+            {
+              "$ref": "#/$defs/EmbeddingApi"
             }
           ],
           "title": "Api"
@@ -14316,7 +14377,8 @@
               "audio_speech": "#/$defs/AudioSpeechApi",
               "audio_transcription": "#/$defs/AudioTranscriptionApi",
               "chat": "#/$defs/ChatApi",
-              "decision": "#/$defs/DecisionApi"
+              "decision": "#/$defs/DecisionApi",
+              "embedding": "#/$defs/EmbeddingApi"
             },
             "propertyName": "mode"
           },
@@ -14332,6 +14394,9 @@
             },
             {
               "$ref": "#/$defs/AudioSpeechApi"
+            },
+            {
+              "$ref": "#/$defs/EmbeddingApi"
             }
           ],
           "title": "Api"
