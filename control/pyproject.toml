@@ -14,7 +14,7 @@ dependencies = [
   "psycopg[binary]>=3.3.6",
   "PyYAML>=6.0.3",
   "sigstore==4.5.1",
-  "certifi==2026.10.19",
+  "certifi==2026.11.20",
   "sqlalchemy>=2.1.1",
   "uvicorn>=0.54.0",
 ]
