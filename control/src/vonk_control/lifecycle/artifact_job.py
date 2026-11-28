@@ -61,6 +61,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_words import Disposition
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics, decisive_first
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
@@ -89,7 +90,11 @@ from vonk_control.lifecycle.agent_operation import (
     set_parent_state,
 )
 from vonk_control.lifecycle.core import transition
-from vonk_control.lifecycle.job_ranks import fan_in_cancellation_key, resolve_owner
+from vonk_control.lifecycle.job_ranks import (
+    attempt_diagnostics,
+    fan_in_cancellation_key,
+    resolve_owner,
+)
 from vonk_control.lifecycle.reconciler import settle
 from vonk_control.lifecycle.types import (
     Effect,
@@ -916,15 +921,33 @@ class ArtifactJobAdapter:
         asked = isinstance(parent.result, Mapping) and (
             parent.result.get("cancel_requested") is True
         )
-        broken = next(
-            (
+
+        # One rule over every rank that ended unsuccessfully: a rank killed from
+        # outside decided the job, whatever its peers reported after losing it.
+        # The owner's own end projects the job by itself.
+        def diagnostics_of(order: StoredOperation) -> FailureDiagnostics | None:
+            return attempt_diagnostics(AgentOperationAdapter.attempt_of(session, order))
+
+        unsuccessful = decisive_first(
+            [
                 order
                 for order in orders
-                if order is not owner
-                and order.state not in aos.LIVE
+                if order.state not in aos.LIVE
                 and order.state != LifecycleState.SUCCEEDED
-            ),
-            None,
+            ],
+            diagnostics_of,
+        )
+        owner_killed = (
+            owner is not None
+            and bool(unsuccessful)
+            and unsuccessful[0] is owner
+            and (found := diagnostics_of(owner)) is not None
+            and found.killed_from_outside
+        )
+        broken = (
+            None
+            if owner_killed
+            else next((order for order in unsuccessful if order is not owner), None)
         )
         changed = False
         if broken is not None and not asked and not ajs.is_ended(job):

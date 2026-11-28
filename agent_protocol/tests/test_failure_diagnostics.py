@@ -158,7 +158,7 @@ def _exited_with(cause: str) -> FailureDiagnostics:
     )
 
 
-def test_a_platform_caused_exit_comes_first_and_the_rest_keep_their_order():
+def test_a_killed_from_outside_exit_comes_first_and_the_rest_keep_their_order():
     ranks = {
         "entrypoint": _exited_with(EXIT_CAUSE_TOKENS["PythonException"]),
         "worker": _exited_with(EXIT_CAUSE_TOKENS["HostMemoryExhausted"]),

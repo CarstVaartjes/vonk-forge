@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import FailureStage
-from vonk_agent_protocol.failure_evidence import FailureDiagnostics, decisive_first
+from vonk_agent_protocol.failure_evidence import decisive_first
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -38,7 +38,7 @@ from vonk_control.lifecycle.agent_operation import (
     set_parent_state,
 )
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
-from vonk_control.lifecycle.job_ranks import job_run_verdict
+from vonk_control.lifecycle.job_ranks import attempt_diagnostics, job_run_verdict
 from vonk_control.logging import redact_text
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
@@ -49,15 +49,6 @@ from vonk_control.strict_json import serialize_json_value
 
 if TYPE_CHECKING:
     from vonk_control.agent_jobs.service import AgentJobService
-
-
-def _attempt_diagnostics(
-    attempt: AgentOperationAttempt | None,
-) -> FailureDiagnostics | None:
-    diagnostics = (
-        None if attempt is None else column_field(attempt, "result", "diagnostics")
-    )
-    return diagnostics if isinstance(diagnostics, FailureDiagnostics) else None
 
 
 def _aggregate_parent(
@@ -190,7 +181,7 @@ def _aggregate_parent_state(
     # A rank the platform killed decides the reason; its peers' exits after
     # losing it are consequences (one rule: ``decisive_first``).
     for operation, attempt in decisive_first(
-        ended_with_parent, lambda order: _attempt_diagnostics(order[1])
+        ended_with_parent, lambda order: attempt_diagnostics(order[1])
     ):
         if attempt is not None and column_value(attempt, "result") is not None:
             reason = column_field(attempt, "result", "reason")

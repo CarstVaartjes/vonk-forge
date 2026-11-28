@@ -249,16 +249,13 @@ def _exited(claim, cause: str, reason: str) -> AgentResult:
     )
 
 
-@pytest.mark.parametrize("killed_reports_first", [True, False])
-def test_a_platform_kill_outranks_the_peers_consequent_exit(
-    tmp_path, killed_reports_first
-) -> None:
+def test_a_platform_kill_outranks_the_peers_consequent_exit(tmp_path) -> None:
     """Catches rank 0's consequent exit becoming the run's failure.
 
     Incident 2026-11-28: the host memory guard killed rank 1; rank 0 then
-    exited with ``RuntimeError: cancelled`` and the run was blamed on the
-    recipe. The guard-killed rank's exit is the failure, in either order of
-    arrival.
+    exited with ``RuntimeError: cancelled`` after it and the run was
+    blamed on the recipe. The killed rank's exit is the failure in the parent
+    Job's reason and in the evidence download, though the peer's is newest.
     """
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -267,7 +264,9 @@ def test_a_platform_kill_outranks_the_peers_consequent_exit(
     installed = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="i" * 36
     )
-    jobs = AgentJobService(sessions, clock=lambda: NOW)
+    clock = _AdvancingClock(NOW)
+    jobs = AgentJobService(sessions, clock=clock)
+    service._clock = clock
     service._agent_jobs = jobs
     jobs.set_result_consumer(service.consume_agent_result)
     plan = service.preview_run(installed.owner_id, "qwen")
@@ -278,20 +277,16 @@ def test_a_platform_kill_outranks_the_peers_consequent_exit(
     entrypoint = claim_agent(jobs, nodes[0], "serial-0")
     assert worker is not None
     assert entrypoint is not None
-    guard = _exited(worker, EXIT_CAUSE_TOKENS["HostMemoryExhausted"], _GUARD_REASON)
-    consequence = _exited(
-        entrypoint, EXIT_CAUSE_TOKENS["PythonException"], _AGENT_REASON
+    jobs.record_result(
+        _exited(worker, EXIT_CAUSE_TOKENS["HostMemoryExhausted"], _GUARD_REASON)
     )
-    for message in (
-        (guard, consequence) if killed_reports_first else (consequence, guard)
-    ):
-        jobs.record_result(message)
+    clock.advance(5)
+    jobs.record_result(
+        _exited(entrypoint, EXIT_CAUSE_TOKENS["PythonException"], _AGENT_REASON)
+    )
 
     assert service.get(started.id).state == LifecycleState.FAILED
     assert _GUARD_REASON in _outcome(sessions, started.id)
     bundle = FailureEvidenceService(sessions).read(started.id, 1)
     assert bundle.diagnostics.exit_cause == EXIT_CAUSE_TOKENS["HostMemoryExhausted"]
-    assert {(rank.node_id, rank.cause) for rank in bundle.rank_exits} == {
-        (nodes[1], EXIT_CAUSE_TOKENS["HostMemoryExhausted"]),
-        (nodes[0], EXIT_CAUSE_TOKENS["PythonException"]),
-    }
+    assert bundle.context.node_ids == [nodes[1]]

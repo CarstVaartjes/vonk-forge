@@ -1384,6 +1384,96 @@ def test_a_failed_run_switch_carries_the_stderr_of_its_phase_childs_spark_work(
     assert "libllama-server-impl.so" in diagnostics.stderr.text
 
 
+def test_a_run_switch_download_names_the_rank_the_host_killed_not_its_newer_peer(
+    service,
+):
+    """Catches the peer's consequent exit (the newest rank) being the diagnostics."""
+
+    job_id = str(uuid4())
+    start_job_id = str(uuid4())
+    application_id = str(uuid4())
+    result = RunSwitchOperationResult(
+        phase_index=3,
+        phase="start",
+        failed_phase="start",
+        child_operation_id=start_job_id,
+        profile_application_id=application_id,
+    ).model_dump(mode="json")
+    with service.sessions.begin() as session:
+        for row_id, kind, stored in (
+            (job_id, "recipe.run-switch.v2", result),
+            (start_job_id, "recipe.start", None),
+        ):
+            session.add(
+                Job(
+                    id=row_id,
+                    request_id=str(uuid4()),
+                    kind=kind,
+                    state="failed",
+                    actor="test",
+                    authority_revision="a" * 64,
+                    targets=[NODE_A, NODE_B],
+                    payload_digest="b" * 64,
+                    payload={},
+                    result=stored,
+                    status_reason="failed",
+                    current_attempt=0,
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+        for index, (node_id, cause, stderr) in enumerate(
+            (
+                (NODE_B, "host_memory_exhausted", "killed by the guard"),
+                (NODE_A, "python_exception", "RuntimeError: cancelled"),
+            )
+        ):
+            operation_id = str(uuid4())
+            document = _child_diagnostics_document(stderr)
+            document["preflight"] = [{"name": "exit_cause", "value": cause}]
+            session.add(
+                AgentOperation(
+                    id=operation_id,
+                    parent_job_id=start_job_id,
+                    node_id=node_id,
+                    kind=ProtocolAgentOperation.RECIPE_START.value,
+                    payload_digest="b" * 64,
+                    payload={},
+                    authority_revision=COMMIT,
+                    state="failed",
+                    status_reason="failed",
+                    current_attempt=1,
+                    created_at=NOW,
+                    # The peer exits after losing the killed rank: newest.
+                    updated_at=NOW + timedelta(seconds=60 * index),
+                )
+            )
+            session.add(
+                AgentOperationAttempt(
+                    id=str(uuid4()),
+                    operation_id=operation_id,
+                    attempt=1,
+                    fence=str(uuid4()),
+                    lease_deadline=NOW,
+                    agent_certificate_serial="test-serial",
+                    state="failed",
+                    progress=None,
+                    result={
+                        "error_code": "recipe_start_failed",
+                        "diagnostics": document,
+                    },
+                )
+            )
+
+    bundle = service.read(job_id, 1)
+    assert bundle.diagnostics.stderr.text == "killed by the guard"
+    assert bundle.context.node_ids == [NODE_B]
+    with service.sessions() as session:
+        diagnostics = service._application_child_diagnostics(session, application_id)
+    assert diagnostics is not None
+    assert diagnostics.stderr.text == "killed by the guard"
+
+
 def test_oversized_failure_evidence_keeps_the_container_diagnostics():
 
     document = _child_diagnostics_document("segfault\n")

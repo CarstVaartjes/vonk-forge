@@ -24,10 +24,13 @@ EXIT_CAUSE_TOKENS: dict[str, str] = json.loads(
 
 KNOWN_EXIT_CAUSES = frozenset(EXIT_CAUSE_TOKENS.values())
 
-#: Exits the platform caused, whatever the workload did. Such an exit outranks
-#: every other rank's exit of the same run: a peer that exits after losing the
-#: killed rank reports a consequence, not the cause.
-PLATFORM_CAUSED_EXIT_CAUSES = frozenset({EXIT_CAUSE_TOKENS["HostMemoryExhausted"]})
+#: Exits where the process was killed from outside (the host memory guard, the
+#: runtime's OOM kill), whatever the workload did; ``crashed_by_signal`` is not
+#: one. Such an exit outranks every other rank's exit of the same run: a peer
+#: that exits after losing the killed rank reports a consequence, not the cause.
+KILLED_FROM_OUTSIDE_EXIT_CAUSES = frozenset(
+    {EXIT_CAUSE_TOKENS["HostMemoryExhausted"], EXIT_CAUSE_TOKENS["OomKilled"]}
+)
 
 
 class FailureLogPolicy(WireModel):
@@ -113,9 +116,9 @@ class FailureDiagnostics(WireModel):
         return recorded if recorded in KNOWN_EXIT_CAUSES else None
 
     @property
-    def platform_caused(self) -> bool:
-        """Whether the platform, not the workload, ended this process."""
-        return self.exit_cause in PLATFORM_CAUSED_EXIT_CAUSES
+    def killed_from_outside(self) -> bool:
+        """Whether this process was killed from outside, not by its own fault."""
+        return self.exit_cause in KILLED_FROM_OUTSIDE_EXIT_CAUSES
 
     @property
     def host_memory_exhausted(self) -> bool:
@@ -149,7 +152,7 @@ def decisive_first[T](
 ) -> list[T]:
     """The exits of one run's ranks, ordered so the one that decided it is first.
 
-    A platform-caused exit (the host memory guard) comes before every other
+    A killed-from-outside exit (the host memory guard) comes before every other
     rank's exit, which may be only its consequence; among equals the given
     order holds. The one rule every reader of a run's rank exits uses.
     """
@@ -158,7 +161,7 @@ def decisive_first[T](
         key=lambda item: (
             not (
                 (diagnostics := diagnostics_of(item)) is not None
-                and diagnostics.platform_caused
+                and diagnostics.killed_from_outside
             )
         )
     )

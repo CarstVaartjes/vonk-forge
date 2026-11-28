@@ -22,15 +22,15 @@ attempt. A multi-rank artifact job's parent Job ends only after every rank has, 
 download answers as soon as the artifact job itself has failed, with its reason.
 
 When several ranks of one run fail, one rule picks the rank that decided the
-failure (`decisive_first` in `vonk_agent_protocol.failure_evidence`): a
-platform-caused exit (a token in `PLATFORM_CAUSED_EXIT_CAUSES`, today the
-host memory guard's `host_memory_exhausted`) outranks every other rank's exit,
-because a peer that exits after losing the killed rank reports a consequence
-(for example `RuntimeError: cancelled`). Without one, the order is unchanged.
-The parent Job's reason and the download's diagnostics are that rank's. The
-download's `rank_exits` lists every failed rank's `node_id` and `cause`
-(null when absent or not a known cause); it is empty for a failure with no
-failed rank receipts. A new platform-caused exit cause is added to that one set.
+failure (`decisive_first` in `vonk_agent_protocol.failure_evidence`): an exit
+killed from outside (a token in `KILLED_FROM_OUTSIDE_EXIT_CAUSES`: the host
+memory guard's `host_memory_exhausted` and the runtime's `oom_killed`, not
+`crashed_by_signal`) outranks every other rank's exit, because a peer that
+exits after losing the killed rank reports a consequence (for example
+`RuntimeError: cancelled`). Without one, the order is unchanged. The parent
+Job's reason (also a multi-rank artifact job's) and the download's diagnostics,
+including a profile application's, are that rank's. A new such cause is added to
+that one set.
 
 The cache writes `AvailabilityOperationFailure` directly into durable failure
 state. Exception codes and recovery choices are translated once, at creation.
