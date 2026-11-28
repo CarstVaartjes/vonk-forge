@@ -29,7 +29,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.failure_evidence import (
     LOG_TAIL_BYTES,
-    ExitCause,
     FailureDiagnostics,
     FailureLogTail,
     add_known_dropped_bytes,
@@ -165,7 +164,7 @@ class RankExit(EvidenceModel):
     """How one Spark's rank of the failed run exited, whichever decided the failure."""
 
     node_id: str = Field(min_length=1, max_length=128)
-    exit_cause: ExitCause | None = None
+    cause: str | None = Field(default=None, max_length=64)
 
 
 class FailureEvidenceBundle(EvidenceModel):
@@ -831,17 +830,16 @@ class FailureEvidenceService:
         ).all()
         # The newest receipt of each Spark: an earlier attempt's exit is not
         # this failure's.
-        newest: dict[str, object] = {}
+        seen: set[str] = set()
+        children: list[tuple[OperationResultFacts, str]] = []
         for result, node_id in rows:
-            newest.setdefault(node_id, result)
-        children = [
-            (OperationResultFacts.model_validate(result), node_id)
-            for node_id, result in newest.items()
-        ]
+            if node_id not in seen:
+                seen.add(node_id)
+                children.append((OperationResultFacts.model_validate(result), node_id))
         rank_exits = [
             RankExit(
                 node_id=node_id,
-                exit_cause=None
+                cause=None
                 if facts.diagnostics is None
                 else facts.diagnostics.exit_cause,
             )

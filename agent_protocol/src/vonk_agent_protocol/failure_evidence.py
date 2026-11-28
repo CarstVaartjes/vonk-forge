@@ -3,7 +3,6 @@
 import json
 from collections.abc import Callable, Iterable
 from datetime import datetime
-from enum import StrEnum
 from importlib.resources import files
 from typing import Annotated, Literal
 
@@ -23,25 +22,12 @@ EXIT_CAUSE_TOKENS: dict[str, str] = json.loads(
 )["tokens"]
 
 
-class ExitCause(StrEnum):
-    """Why a workload process exited (the Rust ``ExitCause``, by its token)."""
-
-    OOM_KILLED = "oom_killed"
-    HOST_MEMORY_EXHAUSTED = "host_memory_exhausted"
-    BAD_ARGUMENTS = "bad_arguments"
-    MISSING_FILE = "missing_file"
-    UNSUPPORTED_GPU_ARCH = "unsupported_gpu_arch"
-    IMAGE_ARCH_MISMATCH = "image_arch_mismatch"
-    START_REFUSED = "start_refused"
-    CRASHED_BY_SIGNAL = "crashed_by_signal"
-    PYTHON_EXCEPTION = "python_exception"
-    UNCLASSIFIED = "unclassified"
-
+KNOWN_EXIT_CAUSES = frozenset(EXIT_CAUSE_TOKENS.values())
 
 #: Exits the platform caused, whatever the workload did. Such an exit outranks
 #: every other rank's exit of the same run: a peer that exits after losing the
 #: killed rank reports a consequence, not the cause.
-PLATFORM_CAUSED_EXIT_CAUSES = frozenset({ExitCause.HOST_MEMORY_EXHAUSTED})
+PLATFORM_CAUSED_EXIT_CAUSES = frozenset({EXIT_CAUSE_TOKENS["HostMemoryExhausted"]})
 
 
 class FailureLogPolicy(WireModel):
@@ -118,15 +104,13 @@ class FailureDiagnostics(WireModel):
     collector_errors: list[Annotated[str, Field(max_length=256)]] = Field(max_length=8)
 
     @property
-    def exit_cause(self) -> ExitCause | None:
-        """The exit cause the helper recorded, if it recorded a known one."""
-        for item in self.preflight:
-            if item.name == EXIT_CAUSE_FIELD:
-                try:
-                    return ExitCause(item.value)
-                except ValueError:
-                    return None
-        return None
+    def exit_cause(self) -> str | None:
+        """The exit cause token the helper recorded, if it is a known one."""
+        recorded = next(
+            (item.value for item in self.preflight if item.name == EXIT_CAUSE_FIELD),
+            None,
+        )
+        return recorded if recorded in KNOWN_EXIT_CAUSES else None
 
     @property
     def platform_caused(self) -> bool:
@@ -141,7 +125,7 @@ class FailureDiagnostics(WireModel):
         property; its token is the Rust ``ExitCause::HostMemoryExhausted`` one,
         read from the shared vector.
         """
-        return self.exit_cause is ExitCause.HOST_MEMORY_EXHAUSTED
+        return self.exit_cause == EXIT_CAUSE_TOKENS["HostMemoryExhausted"]
 
     @field_validator("collected_at")
     @classmethod

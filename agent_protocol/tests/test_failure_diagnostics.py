@@ -9,7 +9,6 @@ from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import (
     EXIT_CAUSE_TOKENS,
     LOG_TAIL_BYTES,
-    ExitCause,
     FailureDiagnostics,
     FailureLogTail,
     decisive_first,
@@ -159,14 +158,10 @@ def _exited_with(cause: str) -> FailureDiagnostics:
     )
 
 
-def test_exit_causes_are_the_shared_vector_tokens():
-    assert {cause.value for cause in ExitCause} == set(EXIT_CAUSE_TOKENS.values())
-
-
 def test_a_platform_caused_exit_comes_first_and_the_rest_keep_their_order():
     ranks = {
-        "entrypoint": _exited_with("python_exception"),
-        "worker": _exited_with("host_memory_exhausted"),
+        "entrypoint": _exited_with(EXIT_CAUSE_TOKENS["PythonException"]),
+        "worker": _exited_with(EXIT_CAUSE_TOKENS["HostMemoryExhausted"]),
         "other": _exited_with("a_cause_a_newer_agent_adds"),
     }
     ordered = decisive_first(ranks, ranks.__getitem__)

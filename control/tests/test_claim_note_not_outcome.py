@@ -16,7 +16,7 @@ from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import (
-    ExitCause,
+    EXIT_CAUSE_TOKENS,
     FailureDiagnostics,
     FailureLogTail,
     FailureProperty,
@@ -217,7 +217,7 @@ def test_a_failure_behind_a_503_ends_with_the_agents_reason(tmp_path) -> None:
     assert WireOperation.RUNTIME_PREFLIGHT in handed_out, handed_out
 
 
-def _exited(claim, cause: ExitCause, reason: str) -> AgentResult:
+def _exited(claim, cause: str, reason: str) -> AgentResult:
     """A failed start whose receipt names how the rank's process exited."""
 
     tail = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
@@ -231,7 +231,7 @@ def _exited(claim, cause: ExitCause, reason: str) -> AgentResult:
         sandbox=[],
         storage=[],
         collector_errors=[],
-        preflight=[FailureProperty(name="exit_cause", value=cause.value)],
+        preflight=[FailureProperty(name="exit_cause", value=cause)],
     )
     return AgentResult.model_validate_json(
         canonical_message(
@@ -278,8 +278,10 @@ def test_a_platform_kill_outranks_the_peers_consequent_exit(
     entrypoint = claim_agent(jobs, nodes[0], "serial-0")
     assert worker is not None
     assert entrypoint is not None
-    guard = _exited(worker, ExitCause.HOST_MEMORY_EXHAUSTED, _GUARD_REASON)
-    consequence = _exited(entrypoint, ExitCause.PYTHON_EXCEPTION, _AGENT_REASON)
+    guard = _exited(worker, EXIT_CAUSE_TOKENS["HostMemoryExhausted"], _GUARD_REASON)
+    consequence = _exited(
+        entrypoint, EXIT_CAUSE_TOKENS["PythonException"], _AGENT_REASON
+    )
     for message in (
         (guard, consequence) if killed_reports_first else (consequence, guard)
     ):
@@ -288,8 +290,8 @@ def test_a_platform_kill_outranks_the_peers_consequent_exit(
     assert service.get(started.id).state == LifecycleState.FAILED
     assert _GUARD_REASON in _outcome(sessions, started.id)
     bundle = FailureEvidenceService(sessions).read(started.id, 1)
-    assert bundle.diagnostics.exit_cause is ExitCause.HOST_MEMORY_EXHAUSTED
-    assert {(rank.node_id, rank.exit_cause) for rank in bundle.rank_exits} == {
-        (nodes[1], ExitCause.HOST_MEMORY_EXHAUSTED),
-        (nodes[0], ExitCause.PYTHON_EXCEPTION),
+    assert bundle.diagnostics.exit_cause == EXIT_CAUSE_TOKENS["HostMemoryExhausted"]
+    assert {(rank.node_id, rank.cause) for rank in bundle.rank_exits} == {
+        (nodes[1], EXIT_CAUSE_TOKENS["HostMemoryExhausted"]),
+        (nodes[0], EXIT_CAUSE_TOKENS["PythonException"]),
     }
