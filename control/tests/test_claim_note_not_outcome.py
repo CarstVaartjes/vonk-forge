@@ -15,10 +15,17 @@ import pytest
 from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
 from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.failure_evidence import (
+    ExitCause,
+    FailureDiagnostics,
+    FailureLogTail,
+    FailureProperty,
+)
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import _REFUSAL_PREFIXES
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.failures.evidence import FailureEvidenceService
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_operations.result_helpers import _child_progress_payload
@@ -41,6 +48,7 @@ _PREFLIGHT = {
 }
 #: Claim polls the node may need to reach a fresh request behind its cleanup.
 _BOUNDED_POLLS = 3
+_GUARD_REASON = "the workload process exited: exit_cause=host_memory_exhausted"
 _AGENT_REASON = "the workload process exited: exit_code=1 exit_cause=python_exception"
 
 
@@ -207,3 +215,81 @@ def test_a_failure_behind_a_503_ends_with_the_agents_reason(tmp_path) -> None:
         if claimed.operation == WireOperation.RUNTIME_PREFLIGHT:
             break
     assert WireOperation.RUNTIME_PREFLIGHT in handed_out, handed_out
+
+
+def _exited(claim, cause: ExitCause, reason: str) -> AgentResult:
+    """A failed start whose receipt names how the rank's process exited."""
+
+    tail = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
+    diagnostics = FailureDiagnostics(
+        collected_at="2026-11-28T16:30:37+00:00",
+        phase="recipe.start",
+        category="runtime",
+        stdout=tail,
+        stderr=tail,
+        versions=[],
+        sandbox=[],
+        storage=[],
+        collector_errors=[],
+        preflight=[FailureProperty(name="exit_cause", value=cause.value)],
+    )
+    return AgentResult.model_validate_json(
+        canonical_message(
+            {
+                "fence": claim.fence,
+                "state": LifecycleState.FAILED,
+                "result": {
+                    "error_code": FailureCode.RECIPE_START_FAILED,
+                    "status": "failed",
+                    "reason": reason,
+                    "diagnostics": diagnostics,
+                },
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize("killed_reports_first", [True, False])
+def test_a_platform_kill_outranks_the_peers_consequent_exit(
+    tmp_path, killed_reports_first
+) -> None:
+    """Catches rank 0's consequent exit becoming the run's failure.
+
+    Incident 2026-11-28: the host memory guard killed rank 1; rank 0 then
+    exited with ``RuntimeError: cancelled`` and the run was blamed on the
+    recipe. The guard-killed rank's exit is the failure, in either order of
+    arrival.
+    """
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installed = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="i" * 36
+    )
+    jobs = AgentJobService(sessions, clock=lambda: NOW)
+    service._agent_jobs = jobs
+    jobs.set_result_consumer(service.consume_agent_result)
+    plan = service.preview_run(installed.owner_id, "qwen")
+    started = service.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="r" * 36
+    )
+    worker = claim_agent(jobs, nodes[1], "serial-1")
+    entrypoint = claim_agent(jobs, nodes[0], "serial-0")
+    assert worker is not None
+    assert entrypoint is not None
+    guard = _exited(worker, ExitCause.HOST_MEMORY_EXHAUSTED, _GUARD_REASON)
+    consequence = _exited(entrypoint, ExitCause.PYTHON_EXCEPTION, _AGENT_REASON)
+    for message in (
+        (guard, consequence) if killed_reports_first else (consequence, guard)
+    ):
+        jobs.record_result(message)
+
+    assert service.get(started.id).state == LifecycleState.FAILED
+    assert _GUARD_REASON in _outcome(sessions, started.id)
+    bundle = FailureEvidenceService(sessions).read(started.id, 1)
+    assert bundle.diagnostics.exit_cause is ExitCause.HOST_MEMORY_EXHAUSTED
+    assert {(rank.node_id, rank.exit_cause) for rank in bundle.rank_exits} == {
+        (nodes[1], ExitCause.HOST_MEMORY_EXHAUSTED),
+        (nodes[0], ExitCause.PYTHON_EXCEPTION),
+    }

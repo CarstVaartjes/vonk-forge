@@ -29,9 +29,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.failure_evidence import (
     LOG_TAIL_BYTES,
+    ExitCause,
     FailureDiagnostics,
     FailureLogTail,
     add_known_dropped_bytes,
+    decisive_first,
 )
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -159,6 +161,13 @@ class EvidenceContext(EvidenceModel):
 _MAX_COLLECTOR_ERRORS = 8
 
 
+class RankExit(EvidenceModel):
+    """How one Spark's rank of the failed run exited, whichever decided the failure."""
+
+    node_id: str = Field(min_length=1, max_length=128)
+    exit_cause: ExitCause | None = None
+
+
 class FailureEvidenceBundle(EvidenceModel):
     schema_version: Literal[2] = 2
     context: EvidenceContext
@@ -172,6 +181,9 @@ class FailureEvidenceBundle(EvidenceModel):
     collector_errors: list[str] = Field(max_length=_MAX_COLLECTOR_ERRORS)
     #: What the operation was waiting for when it stopped, when it recorded that.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    #: Every failed rank's exit cause: the diagnostics above are the decisive
+    #: rank's (a platform kill outranks a peer's consequent exit).
+    rank_exits: list[RankExit] = Field(default_factory=list, max_length=128)
 
 
 #: The states of an operation (of any kind) whose failure evidence is downloadable:
@@ -366,6 +378,7 @@ class FailedAttempt(BaseModel):
     progress: AttemptPhase | None = None
     result: OperationResultFacts = Field(default_factory=OperationResultFacts)
     blockers: list[OperationBlocker] | None = None
+    rank_exits: list[RankExit] = Field(default_factory=list)
 
     @field_validator("node_ids", mode="before")
     @classmethod
@@ -509,6 +522,7 @@ def collect_failure(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBun
             )
             for blocker in item.blockers or []
         ],
+        rank_exits=item.rank_exits[:128],
     )
 
 
@@ -667,6 +681,7 @@ class FailureEvidenceService:
             ):
                 result = OperationResultFacts.model_validate(job.result)
                 node_ids = list(job.targets)
+                rank_exits: list[RankExit] = []
                 if ended is not None:
                     # Not yet ended itself: its stored words are the siblings'
                     # stop, not why the job failed.
@@ -691,7 +706,9 @@ class FailureEvidenceService:
                         and payload.failure.build_operation_id is not None
                     ):
                         parents.append(payload.failure.build_operation_id)
-                    child, child_node_id = self._child_failure(session, parents)
+                    child, child_node_id, rank_exits = self._child_failure(
+                        session, parents
+                    )
                     if child_node_id is not None:
                         # The Spark that produced the evidence, not the Job's
                         # targets (a preparation targets its recipe revision).
@@ -724,7 +741,9 @@ class FailureEvidenceService:
                     if isinstance(job.result, Mapping)
                     else None
                 )
-                return item.model_copy(update={"blockers": refusal or None})
+                return item.model_copy(
+                    update={"blockers": refusal or None, "rank_exits": rank_exits}
+                )
             cache = session.get(ModelCacheOperation, operation_id)
             if (
                 cache is not None
@@ -773,17 +792,23 @@ class FailureEvidenceService:
     @staticmethod
     def _child_failure(
         session: Session, job_ids: list[str]
-    ) -> tuple[OperationResultFacts | None, str | None]:
-        """Spark-side facts, preferring the newest child with captured diagnostics.
+    ) -> tuple[OperationResultFacts | None, str | None, list[RankExit]]:
+        """Spark-side facts of the failed child that decided the failure.
 
         A Controller-owned parent fails because a child operation failed on a
         Spark, and that child's receipt holds the container's exit facts and
         log tails.  Reporting only the parent's reason text was how a workload
         that exited left empty stdout/stderr and category ``unknown``.  The
         returned facts carry sanitized diagnostics and the receipt's exit code,
-        with the Spark the receipt came from when its diagnostics are readable.
+        with the Spark the receipt came from when its diagnostics are readable,
+        and every failed rank's exit cause.
+
+        The decisive child is a platform-caused exit (the host memory guard)
+        if any rank has one: its peers exit after losing it, so their exits
+        are consequences.  Otherwise the newest child with captured
+        diagnostics.
         """
-        row = session.execute(
+        rows = session.execute(
             select(AgentOperationAttempt.result, AgentOperation.node_id)
             .join(
                 AgentOperation,
@@ -801,24 +826,43 @@ class FailureEvidenceService:
                 AgentOperation.updated_at.desc(),
                 AgentOperationAttempt.attempt.desc(),
             )
-            # Prefer captured diagnostics; otherwise retain the latest typed
-            # cause. Never cap the search behind unrelated empty receipts.
-            # One persisted receipt has the producer's bounded evidence size.
-            .limit(1)
-        ).one_or_none()
-        if row is None:
-            return OperationResultFacts.model_validate(None), None
-        result, node_id = row
-        facts = OperationResultFacts.model_validate(result)
+            # One receipt per rank and attempt, each with the producer's
+            # bounded evidence size.
+        ).all()
+        # The newest receipt of each Spark: an earlier attempt's exit is not
+        # this failure's.
+        newest: dict[str, object] = {}
+        for result, node_id in rows:
+            newest.setdefault(node_id, result)
+        children = [
+            (OperationResultFacts.model_validate(result), node_id)
+            for node_id, result in newest.items()
+        ]
+        rank_exits = [
+            RankExit(
+                node_id=node_id,
+                exit_cause=None
+                if facts.diagnostics is None
+                else facts.diagnostics.exit_cause,
+            )
+            for facts, node_id in children
+        ]
+        ordered = decisive_first(
+            children,
+            lambda child: child[0].diagnostics,
+        )
+        if not ordered:
+            return OperationResultFacts.model_validate(None), None, rank_exits
+        facts, node_id = ordered[0]
         diagnostics = facts.diagnostics
         if diagnostics is None:
-            return facts, None
+            return facts, None, rank_exits
         try:
             sanitized = sanitize_diagnostics(diagnostics)
         except TypeError, ValueError:
             # A damaged latest receipt is unknown, not a failure of this read.
-            return None, None
-        return facts.model_copy(update={"diagnostics": sanitized}), node_id
+            return None, None, rank_exits
+        return facts.model_copy(update={"diagnostics": sanitized}), node_id, rank_exits
 
     @classmethod
     def _application_child_diagnostics(

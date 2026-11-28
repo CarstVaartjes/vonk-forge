@@ -1,7 +1,9 @@
 """Current bounded failure diagnostics shared by agent and Controller."""
 
 import json
+from collections.abc import Callable, Iterable
 from datetime import datetime
+from enum import StrEnum
 from importlib.resources import files
 from typing import Annotated, Literal
 
@@ -14,11 +16,32 @@ MAX_DROPPED_COUNT = 2**64 - 1
 
 #: The key of a process-exit fact naming the cause (Rust ``EXIT_CAUSE_FIELD``).
 EXIT_CAUSE_FIELD = "exit_cause"
-#: The Rust ``ExitCause::HostMemoryExhausted.token()``, from the shared vector
-#: the Rust tests prove equal to it.
-HOST_MEMORY_EXHAUSTED_TOKEN: str = json.loads(
+#: Every Rust ``ExitCause`` token, from the shared vector the Rust tests prove
+#: equal to ``ExitCause::token()``.
+EXIT_CAUSE_TOKENS: dict[str, str] = json.loads(
     files(__package__).joinpath("vectors/exit-causes-v1.json").read_text("utf-8")
-)["tokens"]["HostMemoryExhausted"]
+)["tokens"]
+
+
+class ExitCause(StrEnum):
+    """Why a workload process exited (the Rust ``ExitCause``, by its token)."""
+
+    OOM_KILLED = "oom_killed"
+    HOST_MEMORY_EXHAUSTED = "host_memory_exhausted"
+    BAD_ARGUMENTS = "bad_arguments"
+    MISSING_FILE = "missing_file"
+    UNSUPPORTED_GPU_ARCH = "unsupported_gpu_arch"
+    IMAGE_ARCH_MISMATCH = "image_arch_mismatch"
+    START_REFUSED = "start_refused"
+    CRASHED_BY_SIGNAL = "crashed_by_signal"
+    PYTHON_EXCEPTION = "python_exception"
+    UNCLASSIFIED = "unclassified"
+
+
+#: Exits the platform caused, whatever the workload did. Such an exit outranks
+#: every other rank's exit of the same run: a peer that exits after losing the
+#: killed rank reports a consequence, not the cause.
+PLATFORM_CAUSED_EXIT_CAUSES = frozenset({ExitCause.HOST_MEMORY_EXHAUSTED})
 
 
 class FailureLogPolicy(WireModel):
@@ -95,6 +118,22 @@ class FailureDiagnostics(WireModel):
     collector_errors: list[Annotated[str, Field(max_length=256)]] = Field(max_length=8)
 
     @property
+    def exit_cause(self) -> ExitCause | None:
+        """The exit cause the helper recorded, if it recorded a known one."""
+        for item in self.preflight:
+            if item.name == EXIT_CAUSE_FIELD:
+                try:
+                    return ExitCause(item.value)
+                except ValueError:
+                    return None
+        return None
+
+    @property
+    def platform_caused(self) -> bool:
+        """Whether the platform, not the workload, ended this process."""
+        return self.exit_cause in PLATFORM_CAUSED_EXIT_CAUSES
+
+    @property
     def host_memory_exhausted(self) -> bool:
         """Whether the host memory guard stopped the workload (R1-R5).
 
@@ -102,10 +141,7 @@ class FailureDiagnostics(WireModel):
         property; its token is the Rust ``ExitCause::HostMemoryExhausted`` one,
         read from the shared vector.
         """
-        return any(
-            item.name == EXIT_CAUSE_FIELD and item.value == HOST_MEMORY_EXHAUSTED_TOKEN
-            for item in self.preflight
-        )
+        return self.exit_cause is ExitCause.HOST_MEMORY_EXHAUSTED
 
     @field_validator("collected_at")
     @classmethod
@@ -122,3 +158,24 @@ class FailureDiagnostics(WireModel):
         ):
             raise ValueError("failure diagnostics exceed their document bound")
         return self
+
+
+def decisive_first[T](
+    exits: Iterable[T], diagnostics_of: Callable[[T], FailureDiagnostics | None]
+) -> list[T]:
+    """The exits of one run's ranks, ordered so the one that decided it is first.
+
+    A platform-caused exit (the host memory guard) comes before every other
+    rank's exit, which may be only its consequence; among equals the given
+    order holds. The one rule every reader of a run's rank exits uses.
+    """
+    ranked = list(exits)
+    ranked.sort(
+        key=lambda item: (
+            not (
+                (diagnostics := diagnostics_of(item)) is not None
+                and diagnostics.platform_caused
+            )
+        )
+    )
+    return ranked

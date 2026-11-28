@@ -7,9 +7,12 @@ from pydantic import ValidationError
 from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import (
+    EXIT_CAUSE_TOKENS,
     LOG_TAIL_BYTES,
+    ExitCause,
     FailureDiagnostics,
     FailureLogTail,
+    decisive_first,
 )
 from vonk_agent_protocol.outcome import OutcomeFailed
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
@@ -145,3 +148,28 @@ def test_a_traceback_tail_up_to_the_policy_bound_is_kept():
     assert isinstance(over.result, OutcomeFailed)
     assert over.result.evidence is not None
     assert over.result.evidence.diagnostics is None
+
+
+def _exited_with(cause: str) -> FailureDiagnostics:
+    document = json.loads(
+        (VECTORS / "recipe-start-workload-exited-v1.json").read_text()
+    )["result"]["evidence"]["diagnostics"]
+    return FailureDiagnostics.model_validate(
+        {**document, "preflight": [{"name": "exit_cause", "value": cause}]}
+    )
+
+
+def test_exit_causes_are_the_shared_vector_tokens():
+    assert {cause.value for cause in ExitCause} == set(EXIT_CAUSE_TOKENS.values())
+
+
+def test_a_platform_caused_exit_comes_first_and_the_rest_keep_their_order():
+    ranks = {
+        "entrypoint": _exited_with("python_exception"),
+        "worker": _exited_with("host_memory_exhausted"),
+        "other": _exited_with("a_cause_a_newer_agent_adds"),
+    }
+    ordered = decisive_first(ranks, ranks.__getitem__)
+    assert ordered == ["worker", "entrypoint", "other"]
+    assert ranks["other"].exit_cause is None
+    assert decisive_first(["a", "b"], lambda _: None) == ["a", "b"]
