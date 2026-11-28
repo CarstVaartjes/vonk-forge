@@ -210,3 +210,11 @@ published Vonk image, and never point `LITELLM_IMAGE` at
 an upstream tag. See [Verify the platform supply
 chain](runbooks/supply-chain.md) and [Platform release
 publication](runbooks/platform-release-publication.md).
+
+The embedding route relies on three more facts of the pinned LiteLLM, which
+`tests/acceptance/litellm_model_info_proof.py` pins through the real image: the
+`hosted_vllm` provider forwards `dimensions` and `encoding_format` (the `openai`
+provider drops `dimensions` for a model name it does not know, which is why an
+embedding run uses `hosted_vllm`), a `base64` answer reaches the client as
+`base64`, and `/v1/embeddings` without `input` is a 400 at the gateway. A bump
+that changes one fails the proof; the last also reopens the image-embedding path.

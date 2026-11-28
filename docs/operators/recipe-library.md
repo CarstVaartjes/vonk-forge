@@ -93,7 +93,9 @@ never breaks the catalog; only integrity edges refuse it:
     withheld for N entries (...): it cannot stand without an unknown word`;
     any other failure to rebuild a block withholds only that block, and the
     note names the failure).
-    That is the case for an unknown reasoning-switch placement, an unknown
+    That is the case for an unknown API `mode` (a block of a mode a newer
+    contract added; its route publishes no `model_info` and stays up), an
+    unknown reasoning-switch placement, an unknown
     `remaining` context word in the default output tokens, and a Model display
     whose only modality is unknown. A block withheld this way is unknown to
     this Controller, not withdrawn: the sync keeps what it recorded for that
@@ -101,6 +103,15 @@ never breaks the catalog; only integrity edges refuse it:
     and `model_info`), and a Controller on the newer contract records the new
     block on its first sync. Only a block the index no longer carries is
     withdrawn, by the complete automatic sync.
+
+## Embedding routes
+A recipe whose API block has `mode: embedding` publishes `model_info` with
+`mode: embedding`, `output_vector_size`, `supports_embedding_image_input` and the
+custom `vonk_embedding` key (`matryoshka_min_dimensions`, `encoding_formats`).
+`supported_openai_params` is `encoding_format`, plus `dimensions` when the recipe
+declares a Matryoshka minimum. The Controller admits an embedding run with the
+`hosted_vllm` upstream provider (the `openai` provider drops `dimensions`), and
+`POST /v1/embeddings` gets the same large-body bound as the other inference POSTs.
 
 ## Development versus production
 

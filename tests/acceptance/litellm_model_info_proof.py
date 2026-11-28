@@ -22,6 +22,16 @@ gateway does:
   design relies on, pinned so a bump that changes it fails visibly), the same
   key reads the audio facts from ``/v1/model/info``, a model outside its scope
   is refused, and a key without ``openai_routes`` is refused on both paths;
+* the embedding route works for an ordinary client key through the official
+  OpenAI SDK: ``embeddings.create`` with ``dimensions=256`` and the SDK's default
+  ``base64`` format reaches the upstream once as ``POST /v1/embeddings`` with
+  exactly ``model``, ``input``, ``dimensions`` and ``encoding_format`` (the
+  ``hosted_vllm`` provider keeps ``dimensions``; ``openai/`` drops it), the stub's
+  base64 vectors come back as 256 floats per input, the same key reads the
+  embedding facts, a model outside its scope and a key without ``openai_routes``
+  are refused before the upstream, and a request with ``messages`` and no
+  ``input`` is a 400 at the gateway (the LiteLLM v1.106.7 behaviour the image
+  path waits on, pinned so a bump that changes it fails visibly);
 * a request with tools, a response format and sampling reaches the upstream
   identically through a route with facts and a route without them;
 * the two external entries ``render_external_entry`` renders (an ``openai/``
@@ -34,6 +44,7 @@ gateway does:
 from __future__ import annotations
 
 import argparse
+import base64
 import email.parser
 import email.policy
 import json
@@ -107,6 +118,8 @@ class Upstream(BaseHTTPRequestHandler):
     received: ClassVar[list[dict[str, object]]] = []
     # What the audio routes sent: (path, content type, fields or JSON body).
     audio: ClassVar[list[tuple[str, str, dict[str, object]]]] = []
+    # What the embedding route sent: (path, JSON body).
+    embeddings: ClassVar[list[tuple[str, dict[str, object]]]] = []
 
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
@@ -121,6 +134,10 @@ class Upstream(BaseHTTPRequestHandler):
         if self.path == "/v1/audio/speech":
             Upstream.audio.append((self.path, content_type, body))
             self.reply(200, "audio/wav", STUB_WAV)
+            return
+        if self.path.endswith("/embeddings"):
+            Upstream.embeddings.append((self.path, body))
+            self.reply(200, "application/json", embedding_answer(body))
             return
         Upstream.received.append(body)
         answer = json.dumps(
@@ -154,6 +171,36 @@ class Upstream(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         return
+
+
+STUB_VECTOR_SIZE = 1024
+
+
+def embedding_answer(body: dict[str, object]) -> bytes:
+    """A vLLM-shaped embeddings answer: base64 float32 when asked, else floats."""
+    size = body.get("dimensions", STUB_VECTOR_SIZE)
+    assert isinstance(size, int)
+    vector = [0.5] * size
+    inputs = body["input"]
+    count = len(inputs) if isinstance(inputs, list) else 1
+    packed = base64.b64encode(struct.pack(f"<{size}f", *vector)).decode()
+    return json.dumps(
+        {
+            "object": "list",
+            "model": body.get("model", ""),
+            "data": [
+                {
+                    "object": "embedding",
+                    "index": index,
+                    "embedding": packed
+                    if body.get("encoding_format") == "base64"
+                    else vector,
+                }
+                for index in range(count)
+            ],
+            "usage": {"prompt_tokens": count, "total_tokens": count},
+        }
+    ).encode()
 
 
 def vectors() -> list[dict[str, object]]:
@@ -212,11 +259,12 @@ def render(upstream_host: str, upstream_port: int) -> bytes:
     models: dict[str, RouteAcceptedModelPolicy] = {}
     for vector in vectors():
         name = str(vector["name"])
+        info = LiteLlmModelInfo.model_validate_json(json.dumps(vector["model_info"]))
         models[alias_of(name)] = RouteAcceptedModelPolicy(
             upstream_model=name,
-            model_info=LiteLlmModelInfo.model_validate_json(
-                json.dumps(vector["model_info"])
-            ),
+            # The provider admission picks for an embedding run (it keeps `dimensions`).
+            upstream_provider="hosted_vllm" if info.mode == "embedding" else "openai",
+            model_info=info,
         )
     models[alias_of("plain")] = RouteAcceptedModelPolicy(upstream_model="plain")
     base = f"http://{upstream_host}:{upstream_port}/v1"
@@ -272,7 +320,13 @@ def listed(entries: dict[str, dict[str, Any]], alias: str) -> dict[str, Any]:
 
 CLIENT_SCOPE = [
     alias_of(name)
-    for name in ("plain", "options-base", "transcription", "speech-instructions")
+    for name in (
+        "plain",
+        "options-base",
+        "transcription",
+        "speech-instructions",
+        "embedding",
+    )
 ]
 
 
@@ -292,12 +346,12 @@ def generate_key(work: Path, key_alias: str) -> str:
         time.sleep(2)
 
 
-def narrow_key() -> str:
+def narrow_key(key_alias: str) -> str:
     """A key the Controller never issues; proves audio sits under openai_routes."""
     status, created = call(
         "/key/generate",
         {
-            "key_alias": "proof-no-openai-routes",
+            "key_alias": key_alias,
             "models": CLIENT_SCOPE,
             "allowed_routes": [GatewayInferenceRoute.MODEL_INFO.value],
             "metadata": {"managed_by": "vonk-forge"},
@@ -444,7 +498,7 @@ def prove_audio(key: str) -> None:
     check(outside in (401, 403), f"an out-of-scope speech got {outside}")
 
     # A key without openai_routes reads facts but cannot call either path.
-    narrow = sdk(narrow_key())
+    narrow = sdk(narrow_key("proof-no-openai-routes-audio"))
     for denied in (
         lambda: narrow.audio.transcriptions.create(
             model=transcription, file=("clip.wav", UPLOAD_WAV, "audio/wav")
@@ -453,6 +507,81 @@ def prove_audio(key: str) -> None:
     ):
         check(refused(denied) == 403, "a key without openai_routes reached audio")
     check(not Upstream.audio, "a refused audio call reached the upstream")
+
+
+def prove_embeddings(key: str) -> None:
+    """The embedding route through the real gateway, with an ordinary client key."""
+    client = sdk(key)
+    route = alias_of("embedding")
+
+    status, info = call("/v1/model/info", key=key)
+    check(status == 200, f"/v1/model/info answered {status} for the client key")
+    served = next(
+        entry["model_info"]
+        for entry in info["data"]  # type: ignore[index]
+        if entry["model_name"] == route
+    )
+    expected = next(v for v in vectors() if v["name"] == "embedding")["model_info"]
+    for fact, value in expected.items():  # type: ignore[union-attr]
+        check(served.get(fact) == value, f"embedding: the client key sees {fact}")
+    check(
+        served["mode"] == "embedding"
+        and served["output_vector_size"] == 1024
+        and served["supported_openai_params"] == ["dimensions", "encoding_format"],
+        "the embedding route does not show its mode and parameters",
+    )
+
+    # The SDK's default format is base64: the upstream gets exactly these fields,
+    # `dimensions` included, and the client decodes 256 floats per input.
+    Upstream.embeddings.clear()
+    raw = client.embeddings.with_raw_response.create(
+        model=route, input=["a", "b"], dimensions=256
+    )
+    wire = json.loads(raw.http_response.text)
+    check(
+        all(isinstance(item["embedding"], str) for item in wire["data"]),
+        "the base64 answer did not reach the client as base64",
+    )
+    result = raw.parse()
+    check(
+        len(result.data) == 2
+        and all(len(item.embedding) == 256 for item in result.data),
+        "the client did not get 256 floats per input",
+    )
+    check(len(Upstream.embeddings) == 1, "the embedding call was not forwarded once")
+    path, body = Upstream.embeddings[0]
+    check(
+        path == "/v1/embeddings"
+        and body
+        == {
+            "model": "embedding",
+            "input": ["a", "b"],
+            "dimensions": 256,
+            "encoding_format": "base64",
+        },
+        f"the upstream saw {path} {body}",
+    )
+
+    # LiteLLM requires `input`: `messages` alone is a 400 at the gateway.
+    Upstream.embeddings.clear()
+    status, answer = call(
+        "/v1/embeddings",
+        {"model": route, "messages": [{"role": "user", "content": "x"}]},
+        key=key,
+    )
+    check(status == 400, f"messages without input answered {status}: {answer}")
+
+    # Scope: a model outside the key's list, and a key without openai_routes.
+    outside = refused(
+        lambda: client.embeddings.create(model=alias_of("embedding-fixed"), input="x")
+    )
+    check(outside in (401, 403), f"an out-of-scope embedding got {outside}")
+    narrow = sdk(narrow_key("proof-no-openai-routes-embeddings"))
+    check(
+        refused(lambda: narrow.embeddings.create(model=route, input="x")) == 403,
+        "a key without openai_routes reached embeddings",
+    )
+    check(not Upstream.embeddings, "a refused embedding call reached the upstream")
 
 
 def prove_external_entries(entries: dict[str, dict[str, Any]]) -> None:
@@ -544,6 +673,7 @@ def prove(work: Path) -> None:
         "tools" in forwarded[0] and "response_format" in forwarded[0], "params dropped"
     )
     prove_audio(client_key)
+    prove_embeddings(client_key)
 
 
 def main() -> None:

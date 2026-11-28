@@ -94,6 +94,10 @@ from vonk_control.runs.observed_memory import observed_role_peaks, recent_best_a
 from vonk_control.stored.states import CatalogRevisionState, ClusterMappingState
 from vonk_control.topology import Placement, TopologyError, validate_topology
 
+# The kinds LiteLLM reaches through its ``hosted_vllm`` provider: it forwards
+# the request fields (``dimensions``, ``encoding_format``) the ``openai``
+# provider drops for a model name it does not know.
+_HOSTED_VLLM_KINDS = frozenset({"decision", "embedding"})
 _PORT_CONFLICTS = {
     "service": (
         RunAdmissionCode.PORT_OCCUPIED,
@@ -1215,7 +1219,8 @@ class RunAdmissionService:
                     "execution_mode": "one-shot-jobs" if logical_job else None,
                     "upstream_provider": (
                         "hosted_vllm"
-                        if read_recipe(revision.document).settings.kind == "decision"
+                        if read_recipe(revision.document).settings.kind
+                        in _HOSTED_VLLM_KINDS
                         else "openai"
                     ),
                     "upstream_model": next(

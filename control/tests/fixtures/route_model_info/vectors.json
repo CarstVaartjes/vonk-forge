@@ -999,5 +999,86 @@
     "name": "speech-instructions",
     "parameters": {},
     "recipe": "recipe-speech.json"
+  },
+  {
+    "api": "recipe-api-embedding.json",
+    "model_info": {
+      "max_input_tokens": 8192,
+      "mode": "embedding",
+      "output_vector_size": 1024,
+      "supported_endpoints": [
+        "/v1/embeddings"
+      ],
+      "supported_openai_params": [
+        "dimensions",
+        "encoding_format"
+      ],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_embedding_image_input": false,
+      "supports_function_calling": false,
+      "supports_native_streaming": false,
+      "supports_parallel_function_calling": false,
+      "supports_pdf_input": false,
+      "supports_reasoning": false,
+      "supports_response_schema": false,
+      "supports_system_messages": false,
+      "supports_tool_choice": false,
+      "supports_video_input": false,
+      "supports_vision": false,
+      "thinking_always_on": false,
+      "vonk_embedding": {
+        "encoding_formats": [
+          "float",
+          "base64"
+        ],
+        "matryoshka_min_dimensions": 32
+      }
+    },
+    "name": "embedding",
+    "parameters": {},
+    "recipe": "recipe-embedding.json"
+  },
+  {
+    "api": "recipe-api-embedding.json",
+    "api_patch": {
+      "encoding_formats": [
+        "float"
+      ],
+      "matryoshka_min_dimensions": null
+    },
+    "model_info": {
+      "max_input_tokens": 8192,
+      "mode": "embedding",
+      "output_vector_size": 1024,
+      "supported_endpoints": [
+        "/v1/embeddings"
+      ],
+      "supported_openai_params": [
+        "encoding_format"
+      ],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_embedding_image_input": false,
+      "supports_function_calling": false,
+      "supports_native_streaming": false,
+      "supports_parallel_function_calling": false,
+      "supports_pdf_input": false,
+      "supports_reasoning": false,
+      "supports_response_schema": false,
+      "supports_system_messages": false,
+      "supports_tool_choice": false,
+      "supports_video_input": false,
+      "supports_vision": false,
+      "thinking_always_on": false,
+      "vonk_embedding": {
+        "encoding_formats": [
+          "float"
+        ]
+      }
+    },
+    "name": "embedding-fixed",
+    "parameters": {},
+    "recipe": "recipe-embedding.json"
   }
 ]
