@@ -1011,8 +1011,21 @@ fn the_recorded_inkling_dspark_load_is_never_killed() {
 fn r5_kills_on_low_memfree_when_swap_is_not_absorbing_the_load() {
     let start = Instant::now();
     let bound = ticks(DRIVER_FAILURE_SUSTAIN);
-    // Same readings, swap-out about zero: pinned memory that cannot reclaim.
-    let mut host = inkling_dspark_kill_readings(0);
+    let low = DRIVER_FAILURE_FREE_BYTES - 1;
+    // MemFree 755 MiB (the 2026-11-28 kill) is above the bound: never killed.
+    let mut host = Host {
+        free: 755 * 1024 * 1024,
+        ..inkling_dspark_kill_readings(0)
+    };
+    assert_eq!(
+        run_with_line(&mut host, &mut Decision::default(), start, 0..bound + 2),
+        None
+    );
+    // Below 512 MiB, swap-out about zero: pinned memory that cannot reclaim.
+    let mut host = Host {
+        free: low,
+        ..inkling_dspark_kill_readings(0)
+    };
     assert_eq!(
         run_with_line(&mut host, &mut Decision::default(), start, 0..bound + 2).map(|k| k.1),
         Some(Trigger::DriverAllocationFailure)
@@ -1022,6 +1035,7 @@ fn r5_kills_on_low_memfree_when_swap_is_not_absorbing_the_load() {
         swap_total: 0,
         swap_free: 0,
         swap_out_per_s: 148_195,
+        free: low,
         ..inkling_dspark_kill_readings(0)
     };
     assert_eq!(
@@ -1054,10 +1068,11 @@ fn r5_ignores_low_memfree_while_mem_available_is_plentiful() {
         run_with_line(&mut host, &mut Decision::default(), Instant::now(), 0..400),
         None
     );
-    // Real pinned growth: the same MemFree with MemAvailable under the floor.
+    // Real pinned growth: MemFree under the bound with MemAvailable under the floor.
     let bound = ticks(DRIVER_FAILURE_SUSTAIN);
     let mut host = Host {
         available: PRESSURE_AVAILABLE_BYTES - 1,
+        free: DRIVER_FAILURE_FREE_BYTES - 1,
         ..dsv41_mia_dual_readings()
     };
     assert_eq!(
