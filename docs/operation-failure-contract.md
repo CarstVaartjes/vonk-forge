@@ -21,6 +21,17 @@ name it through `evidence_download.href` only while that attempt is a failure
 attempt. A multi-rank artifact job's parent Job ends only after every rank has, so the
 download answers as soon as the artifact job itself has failed, with its reason.
 
+When several ranks of one run fail, one rule picks the rank that decided the
+failure (`decisive_first` in `vonk_agent_protocol.failure_evidence`): an exit
+killed from outside (a token in `KILLED_FROM_OUTSIDE_EXIT_CAUSES`: the host
+memory guard's `host_memory_exhausted` and the runtime's `oom_killed`, not
+`crashed_by_signal`) outranks every other rank's exit, because a peer that
+exits after losing the killed rank reports a consequence (for example
+`RuntimeError: cancelled`). Without one, the order is unchanged. The parent
+Job's reason (a run's start) and the download's diagnostics, including a profile
+application's, are that rank's. A multi-rank artifact job is not covered. A new such cause is added to
+that one set.
+
 The cache writes `AvailabilityOperationFailure` directly into durable failure
 state. Exception codes and recovery choices are translated once, at creation.
 Reads validate this document without repairing missing fields or invalid types.

@@ -32,6 +32,7 @@ from vonk_agent_protocol.failure_evidence import (
     FailureDiagnostics,
     FailureLogTail,
     add_known_dropped_bytes,
+    decisive_first,
 )
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -774,7 +775,7 @@ class FailureEvidenceService:
     def _child_failure(
         session: Session, job_ids: list[str]
     ) -> tuple[OperationResultFacts | None, str | None]:
-        """Spark-side facts, preferring the newest child with captured diagnostics.
+        """Spark-side facts of the failed child that decided the failure.
 
         A Controller-owned parent fails because a child operation failed on a
         Spark, and that child's receipt holds the container's exit facts and
@@ -782,8 +783,13 @@ class FailureEvidenceService:
         that exited left empty stdout/stderr and category ``unknown``.  The
         returned facts carry sanitized diagnostics and the receipt's exit code,
         with the Spark the receipt came from when its diagnostics are readable.
+
+        The rows come newest-first with captured diagnostics before none; one
+        receipt is kept per Spark, and the stable ``decisive_first`` sort then
+        moves a killed-from-outside exit (the host memory guard) ahead of the
+        rest: its peers exit after losing it, so their exits are consequences.
         """
-        row = session.execute(
+        rows = session.execute(
             select(AgentOperationAttempt.result, AgentOperation.node_id)
             .join(
                 AgentOperation,
@@ -801,15 +807,17 @@ class FailureEvidenceService:
                 AgentOperation.updated_at.desc(),
                 AgentOperationAttempt.attempt.desc(),
             )
-            # Prefer captured diagnostics; otherwise retain the latest typed
-            # cause. Never cap the search behind unrelated empty receipts.
-            # One persisted receipt has the producer's bounded evidence size.
-            .limit(1)
-        ).one_or_none()
-        if row is None:
+        ).all()
+        seen: set[str] = set()
+        children: list[tuple[OperationResultFacts, str]] = []
+        for result, node_id in rows:
+            if node_id not in seen:
+                seen.add(node_id)
+                children.append((OperationResultFacts.model_validate(result), node_id))
+        ordered = decisive_first(children, lambda child: child[0].diagnostics)
+        if not ordered:
             return OperationResultFacts.model_validate(None), None
-        result, node_id = row
-        facts = OperationResultFacts.model_validate(result)
+        facts, node_id = ordered[0]
         diagnostics = facts.diagnostics
         if diagnostics is None:
             return facts, None
@@ -824,22 +832,20 @@ class FailureEvidenceService:
     def _application_child_diagnostics(
         cls, session: Session, application_id: str
     ) -> FailureDiagnostics | None:
-        """Diagnostics of the newest failed run-switch child of an application."""
-        result = session.execute(
-            select(AgentOperationAttempt.result)
+        """Diagnostics of the decisive failed rank of the newest failed run-switch child."""
+        job = session.execute(
+            select(Job.id, Job.result)
             .join(
                 AgentOperation,
-                AgentOperationAttempt.operation_id == AgentOperation.id,
-            )
-            # The Spark work of a run-switch phase hangs below the phase's own
-            # child Job, which the run-switch result names.
-            .join(
-                Job,
                 or_(
                     AgentOperation.parent_job_id == Job.id,
                     AgentOperation.parent_job_id
                     == Job.result["child_operation_id"].as_string(),
                 ),
+            )
+            .join(
+                AgentOperationAttempt,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
             )
             .where(
                 Job.kind == ProfileChildJobKind.RUN_SWITCH.value,
@@ -848,22 +854,20 @@ class FailureEvidenceService:
                 failed_attempt_condition(AgentOperation, AgentOperationAttempt),
                 AgentOperationAttempt.result["diagnostics"].as_string().is_not(None),
             )
-            .order_by(
-                Job.updated_at.desc(),
-                AgentOperation.updated_at.desc(),
-                AgentOperationAttempt.attempt.desc(),
-            )
+            .order_by(Job.updated_at.desc())
             .limit(1)
-        ).scalar_one_or_none()
-        facts = OperationResultFacts.model_validate(result)
-        diagnostics = facts.diagnostics
-        if diagnostics is None:
+        ).first()
+        if job is None:
             return None
-        try:
-            return sanitize_diagnostics(diagnostics)
-        except TypeError, ValueError:
-            # A damaged latest receipt is unknown, not a failure of this read.
-            return None
+        # The Spark work of a run-switch phase hangs below the phase's own
+        # child Job, which the run-switch result names.
+        job_id, job_result = job
+        parents = [job_id]
+        child_job_id = _stored_child(job_result)
+        if child_job_id is not None:
+            parents.append(child_job_id)
+        facts, _node_id = cls._child_failure(session, parents)
+        return None if facts is None else facts.diagnostics
 
     @staticmethod
     def _item(

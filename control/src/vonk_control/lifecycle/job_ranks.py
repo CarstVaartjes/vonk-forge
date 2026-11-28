@@ -15,12 +15,13 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.lifecycle.agent_operation import is_artifact_owned
 from vonk_control.models.execution import ArtifactJob
 from vonk_control.models.jobs import Job
-from vonk_control.models.operations import AgentOperation
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.stored.rows import read_row_column
 
 
@@ -78,6 +79,16 @@ def order_is_owner(order: AgentOperation) -> bool | None:
 
 def owner_order(orders: Sequence[AgentOperation]) -> AgentOperation | None:
     return resolve_owner(orders).owner
+
+
+def attempt_diagnostics(
+    attempt: AgentOperationAttempt | None,
+) -> FailureDiagnostics | None:
+    """The failure diagnostics an attempt's receipt carries, if it has typed ones."""
+
+    result = None if attempt is None else read_row_column(attempt, "result")
+    diagnostics = getattr(result, "diagnostics", None)
+    return diagnostics if isinstance(diagnostics, FailureDiagnostics) else None
 
 
 def job_run_verdict(
