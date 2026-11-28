@@ -183,7 +183,7 @@ pub(super) fn validate_docker_run_with_archive(
                 let value = arguments
                     .get(index)
                     .and_then(|value| value.parse::<u64>().ok())
-                    .filter(|value| (64 * 1024 * 1024..=128_000_000_000).contains(value))
+                    .filter(|value| *value >= 64 * 1024 * 1024)
                     .ok_or(OperationError::InvalidOperation)?;
                 memory = Some(value);
             }
