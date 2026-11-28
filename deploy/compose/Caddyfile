@@ -36,14 +36,16 @@
 	# admits both, and LiteLLM sets no body limit of its own. LiteLLM reads
 	# the whole body before its key check, so litellm_large_body_gate checks
 	# the key first for any body that may exceed 1 MB. /v1/audio/speech is
-	# JSON text and stays at 1 MiB, with /v1/models. Nothing else exceeds 1 MiB.
+	# JSON text and stays at 1 MiB, with /v1/models. /v1/embeddings carries
+	# document batches now and image data URIs later, so it is an inference
+	# POST like the chat paths. Nothing else exceeds 1 MiB.
 	@artifact_input_upload {
 		method PUT
 		path /api/artifact-jobs/*/inputs/*
 	}
 	@inference_request {
 		method POST
-		path /v1/chat/completions /v1/completions /v1/responses /v1/messages /v1/systemone /v1/audio/transcriptions
+		path /v1/chat/completions /v1/completions /v1/responses /v1/messages /v1/systemone /v1/audio/transcriptions /v1/embeddings
 	}
 	@ordinary_browser_request {
 		not {
@@ -52,7 +54,7 @@
 		}
 		not {
 			method POST
-			path /v1/chat/completions /v1/completions /v1/responses /v1/messages /v1/systemone /v1/audio/transcriptions
+			path /v1/chat/completions /v1/completions /v1/responses /v1/messages /v1/systemone /v1/audio/transcriptions /v1/embeddings
 		}
 	}
 	request_body @ordinary_browser_request {
@@ -86,7 +88,7 @@
 (litellm_large_body_gate) {
 	@unverified_large_inference {
 		method POST
-		path /v1/chat/completions /v1/completions /v1/responses /v1/messages /v1/systemone /v1/audio/transcriptions
+		path /v1/chat/completions /v1/completions /v1/responses /v1/messages /v1/systemone /v1/audio/transcriptions /v1/embeddings
 		not header_regexp Content-Length ^[0-9]{1,6}$
 	}
 	forward_auth @unverified_large_inference {args[0]} {

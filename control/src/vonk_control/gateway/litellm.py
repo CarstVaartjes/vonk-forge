@@ -13,6 +13,7 @@ from pydantic import Discriminator, Field, Tag, model_validator
 from vonk_forge_contracts import EndpointAlias
 from vonk_forge_contracts.api import (
     AudioInputFormat,
+    EmbeddingEncodingFormat,
     Iso639_1,
     ReasoningDefault,
     RequestPlacement,
@@ -191,6 +192,8 @@ class LiteLlmUpstreamParams(_ConfigModel):
 class OpenAiRequestParameter(StrEnum):
     """The one owner of OpenAI request parameter names the gateway publishes."""
 
+    DIMENSIONS = "dimensions"
+    ENCODING_FORMAT = "encoding_format"
     INSTRUCTIONS = "instructions"
     LANGUAGE = "language"
     MAX_COMPLETION_TOKENS = "max_completion_tokens"
@@ -272,6 +275,17 @@ class VonkAudioSpeech(_ConfigModel):
     max_input_chars: int = Field(ge=1)
 
 
+class VonkEmbedding(_ConfigModel):
+    """What an embedding route takes, as its recipe states it (no LiteLLM field).
+
+    ``matryoshka_min_dimensions`` None: the route ignores ``dimensions``. The
+    published entry omits every null, so an absent value reads as None.
+    """
+
+    matryoshka_min_dimensions: int | None = Field(default=None, ge=1)
+    encoding_formats: list[EmbeddingEncodingFormat] = Field(min_length=1)
+
+
 class LiteLlmModelInfo(_ConfigModel):
     """The ``model_info`` of one route: LiteLLM v1.106.7 field names verbatim.
 
@@ -280,7 +294,9 @@ class LiteLlmModelInfo(_ConfigModel):
     ``vonk_`` keys carry what LiteLLM has no field for.
     """
 
-    mode: Literal["chat", "decision", "audio_transcription", "audio_speech"]
+    mode: Literal[
+        "chat", "decision", "audio_transcription", "audio_speech", "embedding"
+    ]
     max_tokens: int | None = Field(default=None, ge=1)
     max_input_tokens: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
@@ -304,6 +320,9 @@ class LiteLlmModelInfo(_ConfigModel):
     supported_modalities: list[Literal["text", "audio"]] | None = None
     supported_output_modalities: list[Literal["text", "audio"]] | None = None
     health_check_voice: str | None = None
+    output_vector_size: int | None = Field(default=None, ge=1)
+    supports_embedding_image_input: bool | None = None
+    vonk_embedding: VonkEmbedding | None = None
     vonk_audio_transcription: VonkAudioTranscription | None = None
     vonk_audio_speech: VonkAudioSpeech | None = None
     vonk_thinking: VonkThinking | None = None
@@ -318,22 +337,33 @@ class LiteLlmModelInfo(_ConfigModel):
 
     @model_validator(mode="after")
     def _the_mode_decides_which_fields_apply(self) -> LiteLlmModelInfo:
-        """Token limits belong to text modes; each ``vonk_audio_*`` key to its mode."""
+        """Token limits belong to text modes; each ``vonk_*`` key to its own mode."""
 
         audio = self.mode in ("audio_transcription", "audio_speech")
         if audio == (self.max_input_tokens is not None):
             raise ValueError(
-                "an audio mode has no token limits and a text mode requires "
+                "an audio mode has no token limits and every other mode requires "
                 "max_input_tokens"
             )
-        if audio and (
+        if (audio or self.mode == "embedding") and (
             self.max_tokens is not None or self.max_output_tokens is not None
         ):
-            raise ValueError("an audio mode has no token limits")
+            raise ValueError("an audio or embedding mode has no output token limit")
         if (self.vonk_audio_transcription is not None) != (
             self.mode == "audio_transcription"
         ) or (self.vonk_audio_speech is not None) != (self.mode == "audio_speech"):
             raise ValueError("a vonk_audio_* key belongs to exactly its own mode")
+        embedding_fields = (
+            self.output_vector_size,
+            self.supports_embedding_image_input,
+            self.vonk_embedding,
+        )
+        if any(item is not None for item in embedding_fields) != (
+            self.mode == "embedding"
+        ) or (self.mode == "embedding" and None in embedding_fields):
+            raise ValueError(
+                "the embedding fields belong to exactly the embedding mode"
+            )
         speech = self.vonk_audio_speech
         if (speech.voices[0] if speech else None) != self.health_check_voice:
             raise ValueError("health_check_voice is the first voice of a speech route")

@@ -1000,8 +1000,8 @@ object, one extra Recipe with an unknown serving kind).
 `tests/acceptance/future_vector_read.py` runs inside `control-api` and gets
 `control/tests/fixtures/future-canary-index.json` (`--future-vector`) on stdin. Every Model and
 every Recipe but that one must be kept, every capability word kept, and no block
-lost except an API block whose reasoning placement or remaining-context word is
-unknown (neither has a cautious neutral); that block is marked withheld, so the
+lost except an API block whose mode, reasoning placement or remaining-context word is
+unknown (none has a cautious neutral); that block is marked withheld, so the
 sync keeps the recorded API facts. It stops at the snapshot and loads no
 package: the vector rebinds the kept entries' digests, not their archives. The
 lane passes the committed fixture, never a vector downloaded at acceptance time.

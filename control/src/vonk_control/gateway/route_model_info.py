@@ -20,6 +20,7 @@ from vonk_forge_contracts import (
     AudioTranscriptionApi,
     ChatApi,
     DecisionApi,
+    EmbeddingApi,
     RecipeApi,
     RecipeDefinition,
     UnrecognisedWord,
@@ -52,6 +53,7 @@ from vonk_control.gateway.litellm import (
     OpenAiRequestParameter,
     VonkAudioSpeech,
     VonkAudioTranscription,
+    VonkEmbedding,
     VonkReasoningEffortLevels,
     VonkReasoningEffortText,
     VonkThinking,
@@ -80,6 +82,7 @@ _DECISION_ENDPOINT = "/v1/systemone"
 # One endpoint per audio mode, as in LiteLLM's own audio entries.
 _TRANSCRIPTION_ENDPOINT = "/v1/audio/transcriptions"
 _SPEECH_ENDPOINT = "/v1/audio/speech"
+_EMBEDDING_ENDPOINT = "/v1/embeddings"
 
 
 class ModelInfoError(ValueError):
@@ -191,12 +194,14 @@ def build_model_info(
     """Apply the mapping's option choices and setting values to the facts."""
 
     block = api.for_choices(recipe, choices)
-    # Audio blocks carry no token limits, so they read no context setting and
-    # branch before anything below reads ``input_modalities``.
+    # Audio and embedding blocks carry no context setting, so they branch before
+    # anything below reads it or ``input_modalities``.
     if isinstance(block, AudioTranscriptionApi):
         return _transcription_model_info(block)
     if isinstance(block, AudioSpeechApi):
         return _speech_model_info(block)
+    if isinstance(block, EmbeddingApi):
+        return _embedding_model_info(block)
     recipe_settings = recipe.settings
     if not isinstance(
         recipe_settings, RecipeGenerationSettings | RecipeDecisionSettings
@@ -340,8 +345,8 @@ def _vonk_reasoning_effort(
     )
 
 
-def _audio_model_info(**fields: object) -> LiteLlmModelInfo:
-    """The fields every audio mode states the same way: not applicable is false."""
+def _non_chat_model_info(**fields: object) -> LiteLlmModelInfo:
+    """The fields every non-chat mode states the same way: not applicable is false."""
 
     return LiteLlmModelInfo.model_validate(
         {
@@ -373,7 +378,7 @@ def _transcription_model_info(block: AudioTranscriptionApi) -> LiteLlmModelInfo:
             else []
         ),
     }
-    return _audio_model_info(
+    return _non_chat_model_info(
         mode="audio_transcription",
         supports_audio_input=True,
         supports_audio_output=False,
@@ -392,7 +397,7 @@ def _speech_model_info(block: AudioSpeechApi) -> LiteLlmModelInfo:
         *([OpenAiRequestParameter.SPEED] if block.speed else []),
         *([OpenAiRequestParameter.INSTRUCTIONS] if block.instructions else []),
     }
-    return _audio_model_info(
+    return _non_chat_model_info(
         mode="audio_speech",
         supports_audio_input=False,
         supports_audio_output=True,
@@ -402,6 +407,34 @@ def _speech_model_info(block: AudioSpeechApi) -> LiteLlmModelInfo:
         supported_output_modalities=["audio"],
         health_check_voice=block.voices[0],
         vonk_audio_speech=VonkAudioSpeech(**block.model_dump(exclude={"mode"})),
+    )
+
+
+def _embedding_model_info(block: EmbeddingApi) -> LiteLlmModelInfo:
+    matryoshka = block.matryoshka_min_dimensions
+    parameters = {
+        OpenAiRequestParameter.ENCODING_FORMAT,
+        *([OpenAiRequestParameter.DIMENSIONS] if matryoshka is not None else []),
+    }
+    return _non_chat_model_info(
+        mode="embedding",
+        max_input_tokens=block.max_input_tokens,
+        supports_vision=block.input_modalities.image,
+        supports_audio_input=False,
+        supports_audio_output=False,
+        supported_endpoints=[_EMBEDDING_ENDPOINT],
+        supported_openai_params=sorted(parameters),
+        output_vector_size=block.output_dimensions,
+        supports_embedding_image_input=block.input_modalities.image,
+        vonk_embedding=VonkEmbedding(
+            matryoshka_min_dimensions=matryoshka,
+            encoding_formats=[
+                # Stored facts carry only known words; an unrecognised one is never acted on.
+                item
+                for item in block.encoding_formats
+                if not isinstance(item, UnrecognisedWord)
+            ],
+        ),
     )
 
 

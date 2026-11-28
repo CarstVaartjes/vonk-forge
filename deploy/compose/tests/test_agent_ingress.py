@@ -719,6 +719,7 @@ _INFERENCE_POSTS = (
     "/v1/messages",
     "/v1" + GatewayInferenceRoute.SYSTEMONE.value.removeprefix("/vllm"),
     "/v1/audio/transcriptions",
+    "/v1/embeddings",
 )
 #: Each request the Controller bounds, on the edge site that carries it, with the
 #: Controller's own maximum. The large-body paths are proven against the
@@ -816,9 +817,8 @@ def test_every_edge_admits_each_body_the_controller_accepts_and_no_more() -> Non
                 == MAX_AUDIO_FILE_BYTES
             )
             for method, path in (
-                ("POST", "/v1/embeddings"),
                 # Speech takes JSON text and the model list takes none: both
-                # keep the document bound; only transcription uploads are large.
+                # keep the document bound.
                 ("POST", "/v1/audio/speech"),
                 ("GET", "/v1/models"),
                 ("GET", "/v1/audio/transcriptions"),
