@@ -280,3 +280,28 @@ fn runtime_cache_rejects_other_installations_and_symlinked_ancestors() {
         );
     }
 }
+
+/// The Controller sets `--memory` to a role's declared peak after admission,
+/// which can exceed a Spark's physical memory (a 129-131 GB peak was refused
+/// for an hour). The helper strips the limit at launch, so it must accept
+/// every value the plan contract allows: up to 16 TiB, with the projected
+/// `--shm-size` clamped to 16 GiB.
+#[test]
+fn memory_values_the_controller_admits_are_accepted() {
+    let (_temp, roots) = runtime_fixture();
+    let model = artifact_path(&roots, 'a');
+    fs::create_dir_all(&model).unwrap();
+    for memory in [130_663_231_488_u64, 131_000_000_000, 16 * 1024_u64.pow(4)] {
+        let shm = (memory / 8).clamp(64 << 20, 16 << 30).to_string();
+        let mut arguments = runtime_arguments(&roots, &[(model.clone(), "/models/model", true)]);
+        for (flag, value) in [
+            ("--memory", memory.to_string()),
+            ("--memory-swap", memory.to_string()),
+            ("--shm-size", shm),
+        ] {
+            let at = arguments.iter().position(|a| a == flag).unwrap();
+            arguments[at + 1] = value;
+        }
+        validate_docker_run(&arguments, &roots, None).unwrap();
+    }
+}
