@@ -3,8 +3,13 @@ set -eu
 
 chain=VONK-FORGE
 host_chain=VONK-FORGE-HOST
+out_chain=VONK-FORGE-OUT
 marker=vonk-forge-managed-v1
+# The numeric uid every workload container runs as (ADAPTER_IMAGE_USER in the
+# Controller); a test keeps the two equal. Its replies are what OUTPUT filters.
+workload_uid=10001
 iptables_bin=${VONK_FIREWALL_IPTABLES:-/usr/sbin/iptables}
+ip6tables_bin=${VONK_FIREWALL_IP6TABLES:-/usr/sbin/ip6tables}
 ip_bin=${VONK_FIREWALL_IP:-/usr/sbin/ip}
 
 fail() {
@@ -169,6 +174,19 @@ fi
 [ "$canonical_host_ports" = "$host_endpoint_ports" ] \
     || fail "host endpoint ports are not canonical"
 
+# Every port a host-network workload serves to the NAS, once each.
+reply_ports=$endpoint_ports
+if [ -n "$host_endpoint_ports" ]; then
+    old_ifs=$IFS
+    IFS=,
+    # shellcheck disable=SC2086 # Deliberate field split under comma-only IFS.
+    set -- $host_endpoint_ports
+    IFS=$old_ifs
+    for port in "$@"; do
+        case ",$reply_ports," in *,$port,*) ;; *) reply_ports=$reply_ports,$port ;; esac
+    done
+fi
+
 if [ "$action" = check-fabric-run ]; then
     [ "$requested_local" = "$node_fabric_ip" ] \
         || fail "runtime fabric address $requested_local is not authorized (node fabric address: $node_fabric_ip)"
@@ -207,6 +225,7 @@ fi
 
 [ "$(id -u)" -eq 0 ] || fail "must run as root"
 [ -x "$iptables_bin" ] || fail "iptables is unavailable"
+[ -x "$ip6tables_bin" ] || fail "ip6tables is unavailable"
 [ -x "$ip_bin" ] || fail "iproute2 is unavailable"
 
 local_interface() {
@@ -349,6 +368,71 @@ verify_host_rules() {
         || fail "managed host firewall chain contains unexpected rules"
 }
 
+# The OUTPUT chain, for IPv4 ($1 = iptables) and IPv6 ($1 = ip6tables). Replies
+# of a workload socket may leave the management interface only as endpoint
+# replies to the NAS (IPv4; the NAS has no IPv6 address), so a listener bound to
+# any address answers nobody else on the LAN. Connections the workload opens
+# itself (downloads) are not replies and pass. The NAS RETURN rules are written
+# before the DROP, so applying over a running workload never drops a NAS reply.
+out_rules() {
+    # $1: iptables binary, $2: operation (-A or -C). One rule per call to $2.
+    binary=$1
+    operation=$2
+    "$binary" -w "$operation" "$out_chain" -m conntrack --ctdir ORIGINAL -j RETURN \
+        || return 1
+    if [ "$binary" = "$iptables_bin" ]; then
+        old_ifs=$IFS
+        IFS=,
+        # shellcheck disable=SC2086 # Deliberate field split under comma-only IFS.
+        set -- $reply_ports
+        IFS=$old_ifs
+        for port in "$@"; do
+            "$binary" -w "$operation" "$out_chain" -o "$management_interface" \
+                -m owner --uid-owner "$workload_uid" -p tcp -d "$nas_management_ip" \
+                --sport "$port" -j RETURN || return 1
+        done
+    fi
+    "$binary" -w "$operation" "$out_chain" -o "$management_interface" \
+        -m owner --uid-owner "$workload_uid" -j DROP || return 1
+    "$binary" -w "$operation" "$out_chain" -m comment --comment "$marker" -j RETURN \
+        || return 1
+}
+
+verify_out_rules() {
+    binary=$1
+    "$binary" -w -n -L OUTPUT >/dev/null 2>&1 || fail "host OUTPUT chain is unavailable"
+    "$binary" -w -n -L "$out_chain" >/dev/null 2>&1 \
+        || fail "managed output firewall chain is unavailable"
+    first_jump=$("$binary" -w -S OUTPUT | sed -n '/^-A OUTPUT /{p;q;}')
+    [ "$first_jump" = "-A OUTPUT -j $out_chain" ] \
+        || fail "managed output firewall jump is not first"
+    out_rules "$binary" -C >/dev/null 2>&1 || fail "managed output firewall rule is missing"
+    reply_count=0
+    old_ifs=$IFS
+    IFS=,
+    # shellcheck disable=SC2086 # Deliberate field split under comma-only IFS.
+    set -- $reply_ports
+    IFS=$old_ifs
+    if [ "$binary" = "$iptables_bin" ]; then reply_count=$#; fi
+    expected=$((3 + reply_count))
+    actual=$("$binary" -w -S "$out_chain" | awk -v chain="$out_chain" \
+        '$1 == "-A" && $2 == chain { count++ } END { print count+0 }')
+    [ "$actual" -eq "$expected" ] \
+        || fail "managed output firewall chain contains unexpected rules"
+}
+
+apply_out_rules() {
+    binary=$1
+    "$binary" -w -n -L OUTPUT >/dev/null 2>&1 || fail "host OUTPUT chain is unavailable"
+    # The name is ours: an apply cut short leaves a chain without its marker,
+    # and the next apply must rebuild it, never refuse it.
+    "$binary" -w -n -L "$out_chain" >/dev/null 2>&1 || "$binary" -w -N "$out_chain"
+    "$binary" -w -F "$out_chain"
+    while "$binary" -w -D OUTPUT -j "$out_chain" >/dev/null 2>&1; do :; done
+    "$binary" -w -I OUTPUT 1 -j "$out_chain"
+    out_rules "$binary" -A || fail "managed output firewall rule could not be added"
+}
+
 require_host_rule() {
     ipt -C "$host_chain" "$@" >/dev/null 2>&1 \
         || fail "managed host firewall rule is missing"
@@ -358,6 +442,8 @@ if [ "$action" = check ] || [ "$action" = check-host-port ] \
     || [ "$action" = check-endpoint-port ] || [ "$action" = check-fabric-run ]; then
     verify_rules
     verify_host_rules
+    verify_out_rules "$iptables_bin"
+    verify_out_rules "$ip6tables_bin"
     if [ "$action" = check-fabric-run ]; then
         printf '%s\n' "$fabric_interface"
     fi
@@ -365,12 +451,7 @@ if [ "$action" = check ] || [ "$action" = check-host-port ] \
 fi
 
 ipt -n -L DOCKER-USER >/dev/null 2>&1 || fail "Docker DOCKER-USER chain is unavailable"
-if ipt -n -L "$chain" >/dev/null 2>&1; then
-    ipt -C "$chain" -m comment --comment "$marker" -j RETURN >/dev/null 2>&1 \
-        || fail "refusing foreign $chain chain"
-else
-    ipt -N "$chain"
-fi
+ipt -n -L "$chain" >/dev/null 2>&1 || ipt -N "$chain"
 ipt -F "$chain"
 while ipt -D DOCKER-USER -j "$chain" >/dev/null 2>&1; do :; done
 ipt -I DOCKER-USER 1 -j "$chain"
@@ -397,12 +478,7 @@ ipt -A "$chain" -p tcp -m conntrack --ctorigdst "$node_fabric_ip" -j DROP
 ipt -A "$chain" -m comment --comment "$marker" -j RETURN
 
 ipt -n -L INPUT >/dev/null 2>&1 || fail "host INPUT chain is unavailable"
-if ipt -n -L "$host_chain" >/dev/null 2>&1; then
-    ipt -C "$host_chain" -m comment --comment "$marker" -j RETURN >/dev/null 2>&1 \
-        || fail "refusing foreign $host_chain chain"
-else
-    ipt -N "$host_chain"
-fi
+ipt -n -L "$host_chain" >/dev/null 2>&1 || ipt -N "$host_chain"
 ipt -F "$host_chain"
 while ipt -D INPUT -j "$host_chain" >/dev/null 2>&1; do :; done
 ipt -I INPUT 1 -j "$host_chain"
@@ -433,3 +509,7 @@ ipt -A "$host_chain" -d "$node_fabric_ip" -p udp -j DROP
 ipt -A "$host_chain" -m comment --comment "$marker" -j RETURN
 verify_rules
 verify_host_rules
+apply_out_rules "$iptables_bin"
+apply_out_rules "$ip6tables_bin"
+verify_out_rules "$iptables_bin"
+verify_out_rules "$ip6tables_bin"

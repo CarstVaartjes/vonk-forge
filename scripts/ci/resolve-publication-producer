@@ -106,6 +106,8 @@ PRODUCERS = {
             "agent_protocol/tests/fixtures/runtime_scan_cutoffs.json",
             "uv.lock",
             "control/pyproject.toml",
+            "control/src/vonk_control/harnesses/canonical.py",
+            "control/src/vonk_control/runtime/adapters.py",
             "nas_setup/pyproject.toml",
             "control/src/vonk_control/resources/site-ports.json",
             "control/src/vonk_control/settings.py",

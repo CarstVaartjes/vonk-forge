@@ -515,3 +515,34 @@ fn a_failing_boot_recovery_enable_fails_the_configure_after_the_agent_is_enabled
     assert!(configure(None, &mut fake).is_err());
     assert!(fake.ran("enable vonk-forge-agent.service"));
 }
+
+#[test]
+fn configure_reapplies_the_firewall_before_the_finisher() {
+    let mut fake = Fake::machine();
+    fake.put(
+        "/etc/vonk-forge-agent/docker-firewall.conf",
+        "",
+        node(Kind::File, 0, 0, 0o600),
+    );
+    configure(Some("1.0"), &mut fake).unwrap();
+    let reapply = fake.position("try-reload-or-restart vonk-forge-docker-firewall.service");
+    assert!(fake.position("daemon-reload") < reapply);
+    assert!(reapply < fake.position("systemd-run"));
+}
+
+#[test]
+fn a_failing_firewall_reapply_never_fails_the_configure_and_no_config_means_no_reapply() {
+    let mut fake = Fake::machine();
+    fake.put(
+        "/etc/vonk-forge-agent/docker-firewall.conf",
+        "",
+        node(Kind::File, 0, 0, 0o600),
+    );
+    fake.failing.push("try-reload-or-restart");
+    configure(Some("1.0"), &mut fake).unwrap();
+    assert!(fake.ran("systemd-run"));
+
+    let mut fake = Fake::machine();
+    configure(Some("1.0"), &mut fake).unwrap();
+    assert!(!fake.ran("try-reload-or-restart"));
+}

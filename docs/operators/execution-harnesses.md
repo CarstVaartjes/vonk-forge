@@ -53,6 +53,11 @@ including this rank's own. The first is `VONK_MASTER_ADDR` and the one at this
 rank's index is `VONK_LOCAL_ADDR`. Other engines never receive it, and a run
 started before it existed has none.
 
+Cluster listeners may bind any address: the Spark firewall lets a workload's
+replies leave the management interface only toward the NAS endpoint ports, on
+IPv4 and IPv6, so the management LAN cannot reach them. An engine must still
+advertise `VONK_LOCAL_ADDR` to its peers, never its default-route address.
+
 ## Interface publication
 
 An `openai` interface follows the serving path
