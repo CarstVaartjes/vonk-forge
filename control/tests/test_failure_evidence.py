@@ -46,7 +46,11 @@ from vonk_control.failures.evidence import (
 from vonk_control.failures.evidence_api import install_failure_evidence_routes
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import ArtifactJob
-from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.fleet import (
+    AgentCertificate,
+    AgentNode,
+    FleetProfileApplication,
+)
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operation_api.contracts import (
@@ -66,6 +70,7 @@ from .runtime_identity_support import (
     inventory_items_fixture,
 )
 from .test_api import Jobs
+from .test_operation_api import _profile_operation_plan
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -1382,6 +1387,122 @@ def test_a_failed_run_switch_carries_the_stderr_of_its_phase_childs_spark_work(
         diagnostics = service._application_child_diagnostics(session, application_id)
     assert diagnostics is not None
     assert "libllama-server-impl.so" in diagnostics.stderr.text
+
+
+def test_a_run_switch_download_names_the_rank_the_host_killed_not_its_newer_peer(
+    service,
+):
+    """Catches the peer's consequent exit (the newest rank) being the diagnostics."""
+
+    job_id = str(uuid4())
+    start_job_id = str(uuid4())
+    application_id = str(uuid4())
+    result = RunSwitchOperationResult(
+        phase_index=3,
+        phase="start",
+        failed_phase="start",
+        child_operation_id=start_job_id,
+        profile_application_id=application_id,
+    ).model_dump(mode="json")
+    with service.sessions.begin() as session:
+        for row_id, kind, stored in (
+            (job_id, "recipe.run-switch.v2", result),
+            (start_job_id, "recipe.start", None),
+        ):
+            session.add(
+                Job(
+                    id=row_id,
+                    request_id=str(uuid4()),
+                    kind=kind,
+                    state="failed",
+                    actor="test",
+                    authority_revision="a" * 64,
+                    targets=[NODE_A, NODE_B],
+                    payload_digest="b" * 64,
+                    payload={},
+                    result=stored,
+                    status_reason="failed",
+                    current_attempt=0,
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+        for index, (node_id, cause, stderr) in enumerate(
+            (
+                (NODE_B, "host_memory_exhausted", "killed by the guard"),
+                (NODE_A, "python_exception", "RuntimeError: cancelled"),
+            )
+        ):
+            operation_id = str(uuid4())
+            document = _child_diagnostics_document(stderr)
+            document["preflight"] = [{"name": "exit_cause", "value": cause}]
+            session.add(
+                AgentOperation(
+                    id=operation_id,
+                    parent_job_id=start_job_id,
+                    node_id=node_id,
+                    kind=ProtocolAgentOperation.RECIPE_START.value,
+                    payload_digest="b" * 64,
+                    payload={},
+                    authority_revision=COMMIT,
+                    state="failed",
+                    status_reason="failed",
+                    current_attempt=1,
+                    created_at=NOW,
+                    # The peer exits after losing the killed rank: newest.
+                    updated_at=NOW + timedelta(seconds=60 * index),
+                )
+            )
+            session.add(
+                AgentOperationAttempt(
+                    id=str(uuid4()),
+                    operation_id=operation_id,
+                    attempt=1,
+                    fence=str(uuid4()),
+                    lease_deadline=NOW,
+                    agent_certificate_serial="test-serial",
+                    state="failed",
+                    progress=None,
+                    result={
+                        "error_code": "recipe_start_failed",
+                        "diagnostics": document,
+                    },
+                )
+            )
+
+    profile_id = str(uuid4())
+    with service.sessions.begin() as session:
+        session.add(
+            FleetProfileApplication(
+                id=application_id,
+                request_key=str(uuid4()),
+                profile_id=profile_id,
+                profile_digest="9" * 64,
+                plan_digest="7" * 64,
+                state="failed",
+                plan=_profile_operation_plan(
+                    profile_id=profile_id,
+                    profile_digest="9" * 64,
+                    plan_digest="7" * 64,
+                    node_ids=[NODE_A, NODE_B],
+                    now=NOW,
+                ),
+                current_step=0,
+                current_operation_id=None,
+                progress={
+                    "operation_kind": "fleet-profile.apply",
+                    "completed_steps": 0,
+                    "total_steps": 1,
+                },
+                result={"changed": False, "completed_steps": 0},
+                status_reason="Spark could not start",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    bundle = service.read(application_id, 1)
+    assert bundle.diagnostics.stderr.text == "killed by the guard"
 
 
 def test_oversized_failure_evidence_keeps_the_container_diagnostics():

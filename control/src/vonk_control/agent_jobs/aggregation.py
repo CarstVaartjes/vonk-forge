@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import FailureStage
+from vonk_agent_protocol.failure_evidence import decisive_first
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -37,7 +38,7 @@ from vonk_control.lifecycle.agent_operation import (
     set_parent_state,
 )
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
-from vonk_control.lifecycle.job_ranks import job_run_verdict
+from vonk_control.lifecycle.job_ranks import attempt_diagnostics, job_run_verdict
 from vonk_control.logging import redact_text
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
@@ -163,16 +164,25 @@ def _aggregate_parent_state(
                 _abandon_operation(operation, job.id, job.updated_at)
     if ended or owned_reason is not None:
         return
-    for operation in operations:
-        # The parent's stored state: the verdict, or the end it already recorded.
-        if operation.state != job.state:
-            continue
-        attempt = session.scalar(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == operation.current_attempt,
-            )
+    # The parent's stored state: the verdict, or the end it already recorded.
+    ended_with_parent = [
+        (
+            operation,
+            session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
+                )
+            ),
         )
+        for operation in operations
+        if operation.state == job.state
+    ]
+    # A rank the platform killed decides the reason; its peers' exits after
+    # losing it are consequences (one rule: ``decisive_first``).
+    for operation, attempt in decisive_first(
+        ended_with_parent, lambda order: attempt_diagnostics(order[1])
+    ):
         if attempt is not None and column_value(attempt, "result") is not None:
             reason = column_field(attempt, "result", "reason")
             if not isinstance(reason, str):
