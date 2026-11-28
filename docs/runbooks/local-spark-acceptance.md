@@ -62,7 +62,7 @@ avg10 > 60% and MemAvailable + free swap < 8 GiB for 10 s; R4 MemAvailable < 8 G
 and full avg10 > 60% for 30 s while serving, or MemAvailable < 8 GiB and full
 avg60 > 80% and not falling for 60 s while a load runs (the agent's page-cache drop cadence marks a loading Spark). An NVIDIA
 `NVRM: Out of memory [NV_ERR_NO_MEMORY]` line (R5, non-fatal alone on GB10)
-stops only together with R1's or R3's condition or MemFree < 1 GiB while swap-out
+stops only together with R1's or R3's condition or MemFree < 512 MiB while swap-out
 is about zero (always, on a host without swap), held for 2 s like R1 (never one
 sample); a load whose host pages are swapping out is absorbed, not killed. There is no per-sample MemAvailable bar.
 Every stop's evidence carries, within the eight failure properties the agent
