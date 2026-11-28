@@ -14,7 +14,13 @@ Restart=on-failure
 RestartSec=30s
 Type=oneshot
 RemainAfterExit=yes
+# The output rules match the workload uid with xt_owner. The sandbox below
+# cannot load modules, so the "+" runs the load outside it; "-" ignores a module
+# already built in. A missing module fails the apply and distributed launches
+# stay refused.
+ExecStartPre=+-/usr/sbin/modprobe xt_owner
 ExecStart=/usr/lib/vonk-forge/vonk-forge-docker-firewall --config /etc/vonk-forge-agent/docker-firewall.conf apply
+ExecReload=+-/usr/sbin/modprobe xt_owner
 ExecReload=/usr/lib/vonk-forge/vonk-forge-docker-firewall --config /etc/vonk-forge-agent/docker-firewall.conf apply
 User=root
 Group=root

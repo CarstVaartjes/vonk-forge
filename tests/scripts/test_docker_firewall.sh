@@ -137,6 +137,46 @@ $iptables -C VONK-FORGE -p tcp -m conntrack \
 $iptables -C VONK-FORGE -p tcp -m conntrack \
     --ctorigdst 192.168.100.10 -j DROP
 
+# Replies of the workload uid leave the management interface only toward the
+# NAS endpoint ports: one rule set per family, IPv6 without a NAS rule.
+ip6tables=/usr/sbin/ip6tables
+test "$($iptables -S OUTPUT | sed -n '/^-A OUTPUT /{p;q;}')" = '-A OUTPUT -j VONK-FORGE-OUT'
+test "$($ip6tables -S OUTPUT | sed -n '/^-A OUTPUT /{p;q;}')" = '-A OUTPUT -j VONK-FORGE-OUT'
+test "$($iptables -S VONK-FORGE-OUT | awk '$1 == "-A" { count++ } END { print count+0 }')" = 6
+test "$($ip6tables -S VONK-FORGE-OUT | awk '$1 == "-A" { count++ } END { print count+0 }')" = 3
+for family in "$iptables" "$ip6tables"; do
+    $family -C VONK-FORGE-OUT -m conntrack --ctdir ORIGINAL -j RETURN
+    $family -C VONK-FORGE-OUT -o vonk-mgmt -m owner --uid-owner 10001 -j DROP
+done
+for port in 8000 8101 8888; do
+    $iptables -C VONK-FORGE-OUT -o vonk-mgmt -m owner --uid-owner 10001 -p tcp \
+        -d 192.0.2.231 --sport "$port" -j RETURN
+done
+if $ip6tables -S VONK-FORGE-OUT | grep -q -e '--sport'; then
+    echo "the IPv6 output chain names a NAS port" >&2
+    exit 1
+fi
+# A node upgraded from a release without the output chain is refused until the
+# firewall is applied again, and one apply converges it.
+for family in "$iptables" "$ip6tables"; do
+    $family -D OUTPUT -j VONK-FORGE-OUT
+    $family -F VONK-FORGE-OUT
+    $family -X VONK-FORGE-OUT
+done
+if $helper --config "$config" check >/dev/null 2>&1; then
+    echo "a node without the output chain was accepted" >&2
+    exit 1
+fi
+$helper --config "$config" apply
+$helper --config "$config" check
+$ip6tables -I VONK-FORGE-OUT 1 -j RETURN
+if $helper --config "$config" check >/dev/null 2>&1; then
+    echo "a drifted IPv6 output chain was accepted" >&2
+    exit 1
+fi
+$helper --config "$config" apply
+$helper --config "$config" check
+
 $iptables -I VONK-FORGE 1 -j RETURN
 if $helper --config "$config" check >/dev/null 2>&1; then
     echo "drifted managed chain was accepted" >&2
@@ -156,4 +196,87 @@ if $helper --config "$config" apply >/dev/null 2>&1; then
 fi
 EOF
 
+
+# Behaviour on a real kernel: a client on the "LAN" across a veth cannot talk to
+# a workload-uid listener on any address, the NAS address still can, host
+# services and the workload's own connections are untouched.
+for tool in nsenter setpriv python3; do
+    command -v "$tool" >/dev/null || { echo "$tool is unavailable" >&2; exit 77; }
+done
+cat > "$temporary/probe.py" <<'PY'
+import socket
+import sys
+
+mode, family, address, port = sys.argv[1:5]
+kind = socket.AF_INET6 if family == "6" else socket.AF_INET
+sock = socket.socket(kind, socket.SOCK_STREAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+if mode == "listen":
+    sock.bind((address, int(port)))
+    sock.listen(8)
+    print("ready", flush=True)
+    while True:
+        peer, _ = sock.accept()
+        peer.sendall(b"ok")
+        peer.close()
+else:
+    sock.settimeout(2)
+    if len(sys.argv) > 5:
+        sock.bind((sys.argv[5], 0))
+    sock.connect((address, int(port)))
+    assert sock.recv(2) == b"ok"
+PY
+chmod 0755 "$temporary" "$temporary/probe.py"
+unshare --net -- /bin/sh -seu -- "$helper" "$config" "$temporary/probe.py" <<'EOF'
+helper=$1
+config=$2
+probe=$3
+ip=/usr/sbin/ip
+$ip link set lo up
+unshare --net sleep 600 &
+lan=$!
+trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
+until [ "$(readlink "/proc/$lan/ns/net")" != "$(readlink /proc/self/ns/net)" ]; do sleep 0.1; done
+$ip link add vonk-mgmt type veth peer name lan0 netns "$lan"
+$ip link add vonk-fabric type dummy
+$ip address add 192.0.2.211/24 dev vonk-mgmt
+$ip address add fd00:2::211/64 dev vonk-mgmt nodad
+$ip address add 192.168.100.10/24 dev vonk-fabric
+$ip link set vonk-mgmt up
+$ip link set vonk-fabric up
+inlan() { nsenter -t "$lan" -n "$@"; }
+inlan $ip link set lo up
+inlan $ip address add 192.0.2.50/24 dev lan0
+inlan $ip address add 192.0.2.231/24 dev lan0
+inlan $ip address add fd00:2::50/64 dev lan0 nodad
+inlan $ip link set lan0 up
+/usr/sbin/iptables -N DOCKER-USER
+$helper --config "$config" apply
+$helper --config "$config" check
+
+workload() { setpriv --reuid=10001 --regid=10001 --clear-groups python3 -I "$probe" "$@"; }
+for name in 4 6 host lan; do : > "$probe.$name"; done
+workload listen 4 0.0.0.0 8000 > "$probe.4" &
+workload listen 6 :: 8001 > "$probe.6" &
+python3 -I "$probe" listen 4 0.0.0.0 9000 > "$probe.host" &
+inlan python3 -I "$probe" listen 4 192.0.2.50 7000 > "$probe.lan" &
+until grep -q ready "$probe.4" && grep -q ready "$probe.6" \
+    && grep -q ready "$probe.host" && grep -q ready "$probe.lan"; do sleep 0.1; done
+
+# A LAN client gets no answer from the workload on IPv4 or IPv6.
+if inlan python3 -I "$probe" connect 4 192.0.2.211 8000 2>/dev/null; then
+    echo "a LAN client reached the workload over IPv4" >&2
+    exit 1
+fi
+if inlan python3 -I "$probe" connect 6 fd00:2::211 8001 2>/dev/null; then
+    echo "a LAN client reached the workload over IPv6" >&2
+    exit 1
+fi
+# The NAS reaches its endpoint port.
+inlan python3 -I "$probe" connect 4 192.0.2.211 8000 192.0.2.231
+# A host service of another uid is untouched.
+inlan python3 -I "$probe" connect 4 192.0.2.211 9000
+# The workload's own connection to the LAN is not a reply.
+workload connect 4 192.0.2.50 7000
+EOF
 echo "Docker firewall namespace acceptance: passed"
