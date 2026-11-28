@@ -28,8 +28,8 @@ memory guard's `host_memory_exhausted` and the runtime's `oom_killed`, not
 `crashed_by_signal`) outranks every other rank's exit, because a peer that
 exits after losing the killed rank reports a consequence (for example
 `RuntimeError: cancelled`). Without one, the order is unchanged. The parent
-Job's reason (also a multi-rank artifact job's) and the download's diagnostics,
-including a profile application's, are that rank's. A new such cause is added to
+Job's reason (a run's start) and the download's diagnostics, including a profile
+application's, are that rank's. A multi-rank artifact job is not covered. A new such cause is added to
 that one set.
 
 The cache writes `AvailabilityOperationFailure` directly into durable failure

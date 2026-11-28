@@ -833,12 +833,26 @@ class FailureEvidenceService:
         cls, session: Session, application_id: str
     ) -> FailureDiagnostics | None:
         """Diagnostics of the decisive failed rank of the newest failed run-switch child."""
-        job = session.scalars(
-            select(Job)
+        job = session.execute(
+            select(Job.id, Job.result)
+            .join(
+                AgentOperation,
+                or_(
+                    AgentOperation.parent_job_id == Job.id,
+                    AgentOperation.parent_job_id
+                    == Job.result["child_operation_id"].as_string(),
+                ),
+            )
+            .join(
+                AgentOperationAttempt,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
+            )
             .where(
                 Job.kind == ProfileChildJobKind.RUN_SWITCH.value,
                 Job.state.in_(FAILED_ATTEMPT_STATES),
                 Job.result["profile_application_id"].as_string() == application_id,
+                failed_attempt_condition(AgentOperation, AgentOperationAttempt),
+                AgentOperationAttempt.result["diagnostics"].as_string().is_not(None),
             )
             .order_by(Job.updated_at.desc())
             .limit(1)
@@ -847,8 +861,9 @@ class FailureEvidenceService:
             return None
         # The Spark work of a run-switch phase hangs below the phase's own
         # child Job, which the run-switch result names.
-        parents = [job.id]
-        child_job_id = _stored_child(job.result)
+        job_id, job_result = job
+        parents = [job_id]
+        child_job_id = _stored_child(job_result)
         if child_job_id is not None:
             parents.append(child_job_id)
         facts, _node_id = cls._child_failure(session, parents)

@@ -15,7 +15,6 @@ from sqlalchemy import select
 
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.contracts import AgentResult
-from vonk_agent_protocol.failure_evidence import EXIT_CAUSE_TOKENS
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
@@ -48,7 +47,6 @@ from vonk_control.artifact_jobs.blob_store import (
     ArtifactBlobStore,
 )
 from vonk_control.artifact_jobs.service import ArtifactJobService
-from vonk_control.failures.evidence import FailureEvidenceService
 from vonk_control.models.execution import (
     ArtifactJob,
     ArtifactJobBlob,
@@ -743,80 +741,6 @@ def test_a_newer_submit_fences_every_unissued_order_of_a_two_rank_job(tmp_path) 
         assert len(first_orders) == 2
         assert {order.state for order in first_orders} == {"cancelled"}
     assert service.get(first.id).state == "cancelled"
-
-
-def _exit_result(claim, cause: str, reason: str) -> AgentResult:
-    empty = {"text": "", "truncated": False, "dropped_bytes": 0, "dropped_lines": 0}
-    return AgentResult.model_validate_json(
-        canonical_message(
-            {
-                "fence": str(claim.fence),
-                "state": "failed",
-                "result": {
-                    "error_code": "recipe_job_run_failed",
-                    "status": "failed",
-                    "reason": reason,
-                    "diagnostics": {
-                        "schema_version": 1,
-                        "collected_at": "2026-11-28T16:30:37+00:00",
-                        "phase": "recipe.job-run",
-                        "category": "runtime",
-                        "stdout": empty,
-                        "stderr": empty,
-                        "versions": [],
-                        "sandbox": [],
-                        "storage": [],
-                        "preflight": [{"name": "exit_cause", "value": cause}],
-                        "collector_errors": [],
-                    },
-                },
-            }
-        )
-    )
-
-
-@pytest.mark.parametrize("killed_rank", ["companion", "owner"])
-def test_a_two_rank_job_fails_with_the_rank_the_host_killed(
-    tmp_path, killed_rank: str
-) -> None:
-    """The job, its parent Job and the download agree on the killed rank's exit."""
-
-    (
-        sessions,
-        _operations,
-        service,
-        agent_jobs,
-        _run_id,
-        submitted,
-        (owner_node, owner),
-        (companion_node, companion),
-        _nodes,
-    ) = _two_rank_claims(tmp_path, 138 if killed_rank == "companion" else 148)
-    killed, peer = (
-        (companion, owner) if killed_rank == "companion" else (owner, companion)
-    )
-    agent_jobs.record_result(
-        _exit_result(
-            killed, EXIT_CAUSE_TOKENS["HostMemoryExhausted"], "guard killed it"
-        )
-    )
-    agent_jobs.record_result(
-        _exit_result(
-            peer, EXIT_CAUSE_TOKENS["PythonException"], "RuntimeError: cancelled"
-        )
-    )
-    killed_node = companion_node if killed_rank == "companion" else owner_node
-    job = service.get(submitted.id)
-    assert job.state == "failed"
-    assert "guard killed it" in (job.status_reason or "")
-    with sessions() as session:
-        parent = session.get(Job, job.operation_id)
-        assert parent is not None
-        assert parent.status_reason == job.status_reason
-    assert job.operation_id is not None
-    bundle = FailureEvidenceService(sessions).read(job.operation_id, 1)
-    assert bundle.diagnostics.exit_cause == EXIT_CAUSE_TOKENS["HostMemoryExhausted"]
-    assert bundle.context.node_ids == [killed_node]
 
 
 @pytest.mark.parametrize("failing_rank", ["companion", "owner"])

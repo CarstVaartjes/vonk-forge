@@ -249,7 +249,10 @@ def _exited(claim, cause: str, reason: str) -> AgentResult:
     )
 
 
-def test_a_platform_kill_outranks_the_peers_consequent_exit(tmp_path) -> None:
+@pytest.mark.parametrize("killed_index", [0, 1])
+def test_a_platform_kill_outranks_the_peers_consequent_exit(
+    tmp_path, killed_index
+) -> None:
     """Catches rank 0's consequent exit becoming the run's failure.
 
     Incident 2026-11-28: the host memory guard killed rank 1; rank 0 then
@@ -277,16 +280,17 @@ def test_a_platform_kill_outranks_the_peers_consequent_exit(tmp_path) -> None:
     entrypoint = claim_agent(jobs, nodes[0], "serial-0")
     assert worker is not None
     assert entrypoint is not None
+    killed, peer = (entrypoint, worker) if killed_index == 0 else (worker, entrypoint)
     jobs.record_result(
-        _exited(worker, EXIT_CAUSE_TOKENS["HostMemoryExhausted"], _GUARD_REASON)
+        _exited(killed, EXIT_CAUSE_TOKENS["HostMemoryExhausted"], _GUARD_REASON)
     )
     clock.advance(5)
     jobs.record_result(
-        _exited(entrypoint, EXIT_CAUSE_TOKENS["PythonException"], _AGENT_REASON)
+        _exited(peer, EXIT_CAUSE_TOKENS["PythonException"], _AGENT_REASON)
     )
 
     assert service.get(started.id).state == LifecycleState.FAILED
     assert _GUARD_REASON in _outcome(sessions, started.id)
     bundle = FailureEvidenceService(sessions).read(started.id, 1)
     assert bundle.diagnostics.exit_cause == EXIT_CAUSE_TOKENS["HostMemoryExhausted"]
-    assert bundle.context.node_ids == [nodes[1]]
+    assert bundle.context.node_ids == [nodes[killed_index]]

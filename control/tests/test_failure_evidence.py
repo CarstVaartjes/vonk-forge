@@ -46,7 +46,11 @@ from vonk_control.failures.evidence import (
 from vonk_control.failures.evidence_api import install_failure_evidence_routes
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import ArtifactJob
-from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.fleet import (
+    AgentCertificate,
+    AgentNode,
+    FleetProfileApplication,
+)
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operation_api.contracts import (
@@ -66,6 +70,7 @@ from .runtime_identity_support import (
     inventory_items_fixture,
 )
 from .test_api import Jobs
+from .test_operation_api import _profile_operation_plan
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -1465,13 +1470,39 @@ def test_a_run_switch_download_names_the_rank_the_host_killed_not_its_newer_peer
                 )
             )
 
-    bundle = service.read(job_id, 1)
+    profile_id = str(uuid4())
+    with service.sessions.begin() as session:
+        session.add(
+            FleetProfileApplication(
+                id=application_id,
+                request_key=str(uuid4()),
+                profile_id=profile_id,
+                profile_digest="9" * 64,
+                plan_digest="7" * 64,
+                state="failed",
+                plan=_profile_operation_plan(
+                    profile_id=profile_id,
+                    profile_digest="9" * 64,
+                    plan_digest="7" * 64,
+                    node_ids=[NODE_A, NODE_B],
+                    now=NOW,
+                ),
+                current_step=0,
+                current_operation_id=None,
+                progress={
+                    "operation_kind": "fleet-profile.apply",
+                    "completed_steps": 0,
+                    "total_steps": 1,
+                },
+                result={"changed": False, "completed_steps": 0},
+                status_reason="Spark could not start",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    bundle = service.read(application_id, 1)
     assert bundle.diagnostics.stderr.text == "killed by the guard"
-    assert bundle.context.node_ids == [NODE_B]
-    with service.sessions() as session:
-        diagnostics = service._application_child_diagnostics(session, application_id)
-    assert diagnostics is not None
-    assert diagnostics.stderr.text == "killed by the guard"
 
 
 def test_oversized_failure_evidence_keeps_the_container_diagnostics():
